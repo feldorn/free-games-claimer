@@ -54,27 +54,10 @@ try {
     if (email && password) {
       await page.fill('[name=email]', email);
       await page.click('input[type="submit"]');
-      console.log('Submitted email, waiting for password page... URL:', page.url());
       await page.waitForTimeout(3000);
-      console.log('After wait URL:', page.url());
-      await page.screenshot({ path: screenshot('debug-after-email-submit.png') });
-      console.log('Page title:', await page.title());
-      const passwordVisible = await page.locator('input[type="password"]:visible').count();
-      console.log('Visible password fields:', passwordVisible);
-      const allPasswords = await page.locator('input[type="password"]').count();
-      console.log('Total password fields:', allPasswords);
-      const pageContent = await page.locator('body').innerText();
-      console.log('Page text (first 500 chars):', pageContent.substring(0, 500));
-      try {
-        await page.locator('input[type="password"]:visible').first().waitFor({ state: 'visible', timeout: cfg.login_timeout });
-        await page.locator('input[type="password"]:visible').first().fill(password);
-      } catch (e) {
-        console.error('Could not find visible password field, trying alternative selectors...');
-        const pwField = page.locator('#ap_password, input[name=password][id!="ap-credential-autofill-hint"]').first();
-        await pwField.waitFor({ state: 'attached', timeout: 10000 });
-        await pwField.evaluate(el => el.classList.remove('hide'));
-        await pwField.fill(password);
-      }
+      const pwField = page.locator('#ap_password, input[type="password"]:not(#ap-credential-autofill-hint)').first();
+      await pwField.waitFor({ state: 'visible', timeout: cfg.login_timeout });
+      await pwField.fill(password);
       await page.click('input[type="submit"]');
       page.waitForURL('**/ap/signin**').then(async () => { // check for wrong credentials
         const error = await page.locator('.a-alert-content').first().innerText();
@@ -92,6 +75,19 @@ try {
         await page.locator('input[name=otpCode]').pressSequentially(otp.toString());
         await page.click('input[type="submit"]');
       }).catch(_ => { });
+      // handle Customer Verification Flow (CVF) - Amazon sends a code via email/SMS for new devices
+      page.waitForURL('**/ap/cvf/**').then(async () => {
+        console.log('Amazon Customer Verification - a verification code has been sent to your email or phone.');
+        await page.screenshot({ path: screenshot('cvf-verification.png') });
+        const pageText = await page.locator('body').innerText();
+        console.log('Verification page info:', pageText.substring(0, 300));
+        const otp = await prompt({ type: 'text', message: 'Enter Amazon verification code' });
+        if (otp) {
+          const otpInput = page.locator('input[name="code"], input[type="text"]').first();
+          await otpInput.fill(otp.toString());
+          await page.click('input[type="submit"], button[type="submit"]');
+        }
+      }).catch(_ => { });
     } else {
       console.log('Waiting for you to login in the browser.');
       await notify('prime-gaming: no longer signed in and not enough options set for automatic login.');
@@ -101,7 +97,7 @@ try {
         process.exit(1);
       }
     }
-    await page.waitForURL('https://gaming.amazon.com/home?signedIn=true');
+    await page.waitForURL(u => u.href.startsWith('https://gaming.amazon.com/'), { timeout: cfg.login_timeout });
     if (!cfg.debug) context.setDefaultTimeout(cfg.timeout);
   }
   user = await page.locator('[data-a-target="user-dropdown-first-name-text"]').first().innerText();

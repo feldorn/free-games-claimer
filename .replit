@@ -33,6 +33,6 @@ args = "bash -c \"node prime-gaming.js; node gog.js; echo sleeping; sleep 1d\""
 [userenv.shared]
 EMAIL = "2ChrisOrr@gmail.com"
 EG_EMAIL = "2ChrisOrr@gmail.com"
-PG_EMAIL = "chrisorr@email.com"
+PG_EMAIL = "2ChrisOrr@gmail.com"
 GOG_EMAIL = "2ChrisOrr@gmail.com"
 NOTIFY_TITLE = "Free Games Claimer"
