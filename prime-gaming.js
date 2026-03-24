@@ -61,7 +61,7 @@ try {
       await page.click('input[type="submit"]');
       page.waitForURL('**/ap/signin**').then(async () => { // check for wrong credentials
         const error = await page.locator('.a-alert-content').first().innerText();
-        if (!error.trim.length) return;
+        if (!error.trim().length) return;
         console.error('Login error:', error);
         await notify(`prime-gaming: login: ${error}`);
         await context.close(); // finishes potential recording
@@ -97,7 +97,7 @@ try {
         process.exit(1);
       }
     }
-    await page.waitForURL(u => u.href.startsWith('https://luna.amazon.com/') || u.href.startsWith('https://gaming.amazon.com/'), { timeout: cfg.login_timeout });
+    await page.waitForURL(u => u.href.startsWith('https://luna.amazon.com/'), { timeout: cfg.login_timeout });
     if (!cfg.debug) context.setDefaultTimeout(cfg.timeout);
   }
   user = await page.locator('[data-a-target="user-dropdown-first-name-text"]').first().innerText();
@@ -258,6 +258,7 @@ try {
         if (cfg.pg_redeem) { // try to redeem keys on external stores
           console.log(`  Trying to redeem ${code} on ${store} (need to be logged in)!`);
           const page2 = await context.newPage();
+          try {
           await page2.goto(redeem[store], { waitUntil: 'domcontentloaded' });
           if (store == 'gog.com') {
             // await page.goto(`https://redeem.gog.com/v1/bonusCodes/${code}`); // {"reason":"Invalid or no captcha"}
@@ -364,7 +365,12 @@ try {
             console.error(`  Redeem on ${store} not yet implemented!`);
           }
           if (cfg.debug) await page2.pause();
-          await page2.close();
+          } catch (redeemError) {
+            console.error(`  Auto-redeem failed for ${store}: ${redeemError.message?.split('\n')[0]}`);
+            redeem_action = 'redeem (error)';
+          } finally {
+            await page2.close();
+          }
         }
         notify_game.status = `<a href="${redeem_url}">${redeem_action}</a> ${code} on ${store}`;
       } else {
@@ -434,8 +440,8 @@ try {
           console.debug('  LinkAccountButton label:', unlinked_store);
           const match = unlinked_store.match(/Link (.*) account/);
           if (match && match.length == 2) unlinked_store = match[1];
-        } else if (await page.locator('text=Link game account').count()) { // epic-games only?
-          console.error('  Missing account linking (epic-games specific button?):', await page.locator('button[data-a-target="gms-cta"]').innerText()); // TODO needed?
+        } else if (await page.locator('[data-a-target="LinkAccountModal"]').count()) {
+          console.error('  Missing account linking (epic-games specific button?):', await page.locator('button[data-a-target="gms-cta"]').innerText().catch(_ => 'unknown'));
           unlinked_store = 'epic-games';
         }
         if (unlinked_store) {
@@ -463,11 +469,11 @@ try {
   process.exitCode ||= 1;
   console.error('--- Exception:');
   console.error(error); // .toString()?
-  if (error.message && process.exitCode != 130) notify(`prime-gaming failed: ${error.message.split('\n')[0]}`);
+  if (error.message && process.exitCode != 130) await notify(`prime-gaming failed: ${error.message.split('\n')[0]}`);
 } finally {
   await db.write(); // write out json db
   if (notify_games.length) { // list should only include claimed games
-    notify(`prime-gaming (${user}):<br>${html_game_list(notify_games)}`);
+    await notify(`prime-gaming (${user}):<br>${html_game_list(notify_games)}`);
   }
 }
 if (page.video()) console.log('Recorded video:', await page.video().path());

@@ -25,6 +25,7 @@ export const cfg = {
   get dir() { // avoids ReferenceError: Cannot access 'dataDir' before initialization
     return {
       browser: process.env.BROWSER_DIR || dataDir('browser'), // for multiple accounts or testing
+      browser_eg: process.env.EG_BROWSER_DIR || dataDir('browser-eg'),
       screenshots: process.env.SCREENSHOTS_DIR || dataDir('screenshots'), // set to 0 to disable screenshots
     };
   },

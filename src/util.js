@@ -142,6 +142,13 @@ export const notify = async html => {
   const chunks = [];
   let current = '';
   for (const line of lines) {
+    if (line.length > MAX_MSG_LEN) {
+      if (current) { chunks.push(current); current = ''; }
+      for (let j = 0; j < line.length; j += MAX_MSG_LEN) {
+        chunks.push(line.slice(j, j + MAX_MSG_LEN));
+      }
+      continue;
+    }
     const candidate = current ? current + '<br>' + line : line;
     if (candidate.length > MAX_MSG_LEN && current) {
       chunks.push(current);

@@ -17,7 +17,8 @@ const db = await jsonDb('epic-games.json', {});
 
 if (cfg.time) console.time('startup');
 
-const browserPrefs = path.join(cfg.dir.browser, 'prefs.js');
+const egBrowserDir = cfg.dir.browser_eg || cfg.dir.browser;
+const browserPrefs = path.join(egBrowserDir, 'prefs.js');
 if (existsSync(browserPrefs)) {
   console.log('Adding webgl.disabled to', browserPrefs);
   appendFileSync(browserPrefs, 'user_pref("webgl.disabled", true);'); // apparently Firefox removes duplicates (and sorts), so no problem appending every time
@@ -26,10 +27,10 @@ if (existsSync(browserPrefs)) {
 }
 
 // https://playwright.dev/docs/auth#multi-factor-authentication
-const context = await firefox.launchPersistentContext(cfg.dir.browser, {
+const context = await firefox.launchPersistentContext(cfg.dir.browser_eg || cfg.dir.browser, {
   headless: cfg.headless,
   viewport: { width: cfg.width, height: cfg.height },
-  userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:127.0) Gecko/20100101 Firefox/127.0', // see replace of Headless in util.newStealthContext. TODO Windows UA enough to avoid 'device not supported'? update if browser is updated?
+  userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) Gecko/20100101 Firefox/133.0',
   // userAgent firefox (macOS): Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:106.0) Gecko/20100101 Firefox/106.0
   // userAgent firefox (docker): Mozilla/5.0 (X11; Linux aarch64; rv:109.0) Gecko/20100101 Firefox/115.0
   locale: 'en-US', // ignore OS locale to be sure to have english text for locators
@@ -67,9 +68,14 @@ let user;
 
 try {
   await context.addCookies([
-    { name: 'OptanonAlertBoxClosed', value: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(), domain: '.epicgames.com', path: '/' }, // Accept cookies to get rid of banner to save space on screen. Set accept time to 5 days ago.
-    { name: 'HasAcceptedAgeGates', value: 'USK:9007199254740991,general:18,EPIC SUGGESTED RATING:18', domain: 'store.epicgames.com', path: '/' }, // gets rid of 'To continue, please provide your date of birth', https://github.com/vogler/free-games-claimer/issues/275, USK number doesn't seem to matter, cookie from 'Fallout 3: Game of the Year Edition'
+    { name: 'OptanonAlertBoxClosed', value: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(), domain: '.epicgames.com', path: '/' },
+    { name: 'HasAcceptedAgeGates', value: 'USK:9007199254740991,general:18,EPIC SUGGESTED RATING:18', domain: 'store.epicgames.com', path: '/' },
   ]);
+  if (process.env.HCAPTCHA_ACCESSIBILITY) {
+    await context.addCookies([
+      { name: 'hc_accessibility', value: process.env.HCAPTCHA_ACCESSIBILITY, domain: '.hcaptcha.com', path: '/' },
+    ]);
+  }
 
   await page.goto(URL_CLAIM, { waitUntil: 'domcontentloaded' }); // 'domcontentloaded' faster than default 'load' https://playwright.dev/docs/api/class-page#page-goto
 
@@ -107,12 +113,38 @@ try {
         console.error('Incorrect response for captcha!');
       }).catch(_ => { });
       await page.fill('#email', email);
-      // await page.click('button[type="submit"]'); login was split in two steps for some time, now email and password are on the same form again
       const password = email && (cfg.eg_password || await prompt({ type: 'password', message: 'Enter password' }));
       if (!password) await notifyBrowserLogin();
       else {
-        await page.fill('#password', password);
-        await page.click('button[type="submit"]');
+        if (await page.locator('#password').count() > 0) {
+          await page.fill('#password', password);
+          await page.click('button[type="submit"]');
+        } else {
+          await page.click('button[type="submit"]');
+          await page.waitForTimeout(3000);
+          const pwField = page.locator('#password, input[type="password"]').first();
+          await pwField.waitFor({ state: 'visible', timeout: 15000 });
+          await pwField.fill(password);
+          await page.waitForTimeout(1000);
+          console.log('  Submitting password...');
+          await pwField.press('Enter');
+          await page.waitForTimeout(2000);
+          const signInBtn = page.locator('button:has-text("Sign in")').first();
+          if (await signInBtn.isVisible()) {
+            await signInBtn.click({ delay: 100 });
+          }
+          await page.waitForTimeout(5000);
+          const stillOnLogin = page.url().includes('/id/login');
+          if (stillOnLogin) {
+            console.error('  Login form did not submit - likely blocked by invisible hCaptcha.');
+            console.error('  Epic Games requires solving an invisible captcha on first login from new devices.');
+            await notify('epic-games: login blocked by invisible captcha. First login requires a regular browser session.');
+            await page.screenshot({ path: screenshot(`login-blocked-${filenamify(datetime())}.png`), fullPage: true });
+          }
+        }
+        await page.waitForTimeout(3000);
+        console.log('  Post-login URL:', page.url());
+        await page.screenshot({ path: screenshot(`login-attempt-${filenamify(datetime())}.png`), fullPage: true });
       }
       const error = page.locator('#form-error-message');
       error.waitFor().then(async () => {
@@ -128,7 +160,15 @@ try {
         await page.click('button[type="submit"]');
       }).catch(_ => { });
     }
-    await page.waitForURL(URL_CLAIM);
+    try {
+      await page.waitForURL(URL_CLAIM, { timeout: cfg.login_timeout });
+    } catch (_) {
+      console.error('  Could not reach free games page after login attempt. Skipping Epic Games.');
+      await notify('epic-games: login failed, skipping. Session may need to be established manually.');
+      await db.write();
+      await context.close();
+      process.exit(0);
+    }
     if (!cfg.debug) context.setDefaultTimeout(cfg.timeout);
   }
   user = await page.locator('egs-navigation').getAttribute('displayname'); // 'null' if !isloggedin
@@ -312,13 +352,13 @@ try {
   process.exitCode ||= 1;
   console.error('--- Exception:');
   console.error(error); // .toString()?
-  if (error.message && process.exitCode != 130) notify(`epic-games failed: ${error.message.split('\n')[0]}`);
+  if (error.message && process.exitCode != 130) await notify(`epic-games failed: ${error.message.split('\n')[0]}`);
 } finally {
   await db.write(); // write out json db
   if (notify_games.filter(g => g.status == 'claimed' || g.status == 'failed').length) { // don't notify if all have status 'existed', 'manual', 'requires base game', 'unavailable-in-region', 'skipped'
-    notify(`epic-games (${user}):<br>${html_game_list(notify_games)}`);
+    await notify(`epic-games (${user}):<br>${html_game_list(notify_games)}`);
   }
 }
-if (cfg.debug) writeFileSync(path.resolve(cfg.dir.browser, 'cookies.json'), JSON.stringify(await context.cookies()));
+if (cfg.debug) writeFileSync(path.resolve(egBrowserDir, 'cookies.json'), JSON.stringify(await context.cookies()));
 if (page.video()) console.log('Recorded video:', await page.video().path());
 await context.close();
