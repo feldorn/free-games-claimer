@@ -16,6 +16,35 @@ if (cfg.width < 1280) { // otherwise 'Sign in' and #menuUsername are hidden (but
   process.exit(1);
 }
 
+const usernameSelector = '#menuUsername';
+const usernameOrAccountSelector = '#menuUsername, .menu-username-text, [data-testid="account-button"]';
+const waitForUsername = async () => {
+  try {
+    await page.locator(usernameSelector).waitFor({ timeout: 10000 });
+  } catch (_) {
+    await page.waitForSelector('.menu-header__account, [href*="/account"]', { timeout: cfg.login_timeout });
+  }
+};
+const getUserName = async () => {
+  const menuUser = page.locator(usernameSelector);
+  if (await menuUser.count() > 0) {
+    return (await menuUser.first().textContent()).trim();
+  }
+  const accountText = await page.evaluate(() => {
+    const el = document.querySelector('.menu-header__account, [href*="/account"]');
+    if (!el) return null;
+    const clone = el.cloneNode(true);
+    const subs = clone.querySelectorAll('ul, .menu-header__account-dropdown, [class*="dropdown"]');
+    subs.forEach(s => s.remove());
+    return clone.textContent?.trim();
+  });
+  if (accountText) {
+    const cleaned = accountText.replace(/Your account/i, '').replace(/Sign out/gi, '').trim().split('\n')[0].trim();
+    return cleaned || 'unknown';
+  }
+  return 'unknown';
+};
+
 // https://playwright.dev/docs/auth#multi-factor-authentication
 const context = await firefox.launchPersistentContext(cfg.dir.browser, {
   headless: cfg.headless,
@@ -43,8 +72,10 @@ try {
   await page.goto(URL_CLAIM, { waitUntil: 'domcontentloaded' }); // default 'load' takes forever
 
   // page.click('#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll').catch(_ => { }); // does not work reliably, solved by setting CookieConsent above
+  await page.waitForLoadState('domcontentloaded');
+  await page.waitForTimeout(3000);
   const signIn = page.locator('a:has-text("Sign in")').first();
-  await Promise.any([signIn.waitFor(), page.waitForSelector('#menuUsername')]);
+  await Promise.any([signIn.waitFor({ timeout: cfg.timeout }), page.locator(usernameSelector).first().waitFor({ timeout: cfg.timeout }), page.waitForSelector('.menu-header__account, [href*="/account"]', { timeout: cfg.timeout })]);
   while (await signIn.isVisible()) {
     console.error('Not signed in anymore.');
     await signIn.click();
@@ -78,7 +109,7 @@ try {
         notify('gog: got captcha during login. Please check.');
         // TODO solve reCAPTCHA?
       }).catch(_ => { });
-      await page.waitForSelector('#menuUsername');
+      await waitForUsername();
     } else {
       console.log('Waiting for you to login in the browser.');
       await notify('gog: no longer signed in and not enough options set for automatic login.');
@@ -88,10 +119,10 @@ try {
         process.exit(1);
       }
     }
-    await page.waitForSelector('#menuUsername');
+    await waitForUsername();
     if (!cfg.debug) context.setDefaultTimeout(cfg.timeout);
   }
-  user = await page.locator('#menuUsername').first().textContent(); // innerText is uppercase due to styling!
+  user = await getUserName();
   console.log(`Signed in as ${user}`);
   db.data[user] ||= {};
 

@@ -54,8 +54,27 @@ try {
     if (email && password) {
       await page.fill('[name=email]', email);
       await page.click('input[type="submit"]');
-      await page.fill('[name=password]', password);
-      // await page.check('[name=rememberMe]'); // no longer exists
+      console.log('Submitted email, waiting for password page... URL:', page.url());
+      await page.waitForTimeout(3000);
+      console.log('After wait URL:', page.url());
+      await page.screenshot({ path: screenshot('debug-after-email-submit.png') });
+      console.log('Page title:', await page.title());
+      const passwordVisible = await page.locator('input[type="password"]:visible').count();
+      console.log('Visible password fields:', passwordVisible);
+      const allPasswords = await page.locator('input[type="password"]').count();
+      console.log('Total password fields:', allPasswords);
+      const pageContent = await page.locator('body').innerText();
+      console.log('Page text (first 500 chars):', pageContent.substring(0, 500));
+      try {
+        await page.locator('input[type="password"]:visible').first().waitFor({ state: 'visible', timeout: cfg.login_timeout });
+        await page.locator('input[type="password"]:visible').first().fill(password);
+      } catch (e) {
+        console.error('Could not find visible password field, trying alternative selectors...');
+        const pwField = page.locator('#ap_password, input[name=password][id!="ap-credential-autofill-hint"]').first();
+        await pwField.waitFor({ state: 'attached', timeout: 10000 });
+        await pwField.evaluate(el => el.classList.remove('hide'));
+        await pwField.fill(password);
+      }
       await page.click('input[type="submit"]');
       page.waitForURL('**/ap/signin**').then(async () => { // check for wrong credentials
         const error = await page.locator('.a-alert-content').first().innerText();
