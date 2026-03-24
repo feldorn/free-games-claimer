@@ -16,13 +16,12 @@ if (cfg.width < 1280) { // otherwise 'Sign in' and #menuUsername are hidden (but
   process.exit(1);
 }
 
-const usernameSelector = '#menuUsername';
-const usernameOrAccountSelector = '#menuUsername, .menu-username-text, [data-testid="account-button"]';
+const usernameSelector = '#menuUsername, [hook-test="menuUsername"], .menu-username';
 const waitForUsername = async () => {
   try {
-    await page.locator(usernameSelector).waitFor({ timeout: 10000 });
+    await page.locator(usernameSelector).first().waitFor({ state: 'attached', timeout: 15000 });
   } catch (_) {
-    await page.waitForSelector('.menu-header__account, [href*="/account"]', { timeout: cfg.login_timeout });
+    await page.waitForSelector('[href*="/account"]', { state: 'attached', timeout: cfg.login_timeout });
   }
 };
 const getUserName = async () => {
@@ -31,18 +30,13 @@ const getUserName = async () => {
     return (await menuUser.first().textContent()).trim();
   }
   const accountText = await page.evaluate(() => {
-    const el = document.querySelector('.menu-header__account, [href*="/account"]');
-    if (!el) return null;
-    const clone = el.cloneNode(true);
-    const subs = clone.querySelectorAll('ul, .menu-header__account-dropdown, [class*="dropdown"]');
-    subs.forEach(s => s.remove());
-    return clone.textContent?.trim();
+    const el = document.querySelector('[hook-test="menuUsername"]') || document.querySelector('.menu-username');
+    if (el) return el.textContent?.trim();
+    const accountLink = document.querySelector('.menu-header-button__label, [hook-test="menuAccountButton"]');
+    if (accountLink) return accountLink.textContent?.trim();
+    return null;
   });
-  if (accountText) {
-    const cleaned = accountText.replace(/Your account/i, '').replace(/Sign out/gi, '').trim().split('\n')[0].trim();
-    return cleaned || 'unknown';
-  }
-  return 'unknown';
+  return accountText || 'unknown';
 };
 
 // https://playwright.dev/docs/auth#multi-factor-authentication
@@ -75,8 +69,14 @@ try {
   await page.waitForLoadState('domcontentloaded');
   await page.waitForTimeout(3000);
   const signIn = page.locator('a:has-text("Sign in")').first();
-  await Promise.any([signIn.waitFor({ timeout: cfg.timeout }), page.locator(usernameSelector).first().waitFor({ timeout: cfg.timeout }), page.waitForSelector('.menu-header__account, [href*="/account"]', { timeout: cfg.timeout })]);
-  while (await signIn.isVisible()) {
+  await Promise.any([
+    signIn.waitFor({ state: 'attached', timeout: cfg.timeout }),
+    page.locator(usernameSelector).first().waitFor({ state: 'attached', timeout: cfg.timeout }),
+    page.locator('[hook-test="menuUsername"], .menu-username').first().waitFor({ state: 'attached', timeout: cfg.timeout }),
+    page.waitForSelector('[href*="/account"]', { state: 'attached', timeout: cfg.timeout }),
+  ]);
+  const checkSignedIn = async () => await page.locator('[hook-test="menuUsername"], .menu-username, [href="/en/account"]').count() > 0;
+  while (!(await checkSignedIn()) && await signIn.isVisible()) {
     console.error('Not signed in anymore.');
     await signIn.click();
     // it then creates an iframe for the login
