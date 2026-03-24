@@ -204,12 +204,28 @@ try {
     if (cfg.pg_timeLeft && await skipBasedOnTime(url)) continue;
     if (cfg.dryrun) continue;
     if (cfg.interactive && !await confirm()) continue;
-    await Promise.any([page.click('[data-a-target="buy-box"] .tw-button:has-text("Get game")'), page.click('[data-a-target="buy-box"] .tw-button:has-text("Claim")'), page.click('.tw-button:has-text("Complete Claim")'), page.waitForSelector('div:has-text("Link game account")'), page.waitForSelector('.thank-you-title:has-text("Success")')]); // waits for navigation
+    await page.waitForTimeout(2000);
+    const claimBtns = [
+      page.click('[data-a-target="buy-box"] .tw-button:has-text("Get game")'),
+      page.click('[data-a-target="buy-box"] .tw-button:has-text("Claim")'),
+      page.click('.tw-button:has-text("Complete Claim")'),
+      page.click('button:has-text("Get game")'),
+      page.click('button:has-text("Claim")'),
+    ];
+    await Promise.any(claimBtns).catch(_ => { console.log('  No claim button found, checking page state...'); });
+    await page.waitForTimeout(3000);
     db.data[user][title] ||= { title, time: datetime(), url, store };
     const notify_game = { title, url };
     notify_games.push(notify_game); // status is updated below
-    if (await page.locator('div:has-text("Link game account")').count() // TODO still needed? epic games store just has 'Link account' as the button text now.
-       || await page.locator('div:has-text("Link account")').count()) {
+    const successIndicators = page.locator('.thank-you-title:has-text("Success"), [data-a-target="success-toast"], text="Successfully claimed"');
+    const alreadyClaimed = page.locator('text="Already claimed", text="Collected"');
+    if (await successIndicators.count() > 0) {
+      console.log('  Successfully claimed!');
+    } else if (await alreadyClaimed.count() > 0) {
+      console.log('  Already claimed previously.');
+    }
+    const linkModal = page.locator('[data-a-target="LinkAccountModal"], [data-a-target="LinkAccountButton"]');
+    if (await linkModal.count() > 0) {
       console.error('  Account linking is required to claim this offer!');
       notify_game.status = `failed: need account linking for ${store}`;
       db.data[user][title].status = 'failed: need account linking';
