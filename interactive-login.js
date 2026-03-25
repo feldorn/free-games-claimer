@@ -1,8 +1,7 @@
 import http from 'node:http';
-import { firefox } from 'playwright-firefox';
+import { chromium } from 'patchright';
 import { datetime } from './src/util.js';
 import { cfg } from './src/config.js';
-import { stealth } from './src/browser.js';
 
 const PANEL_PORT = Number(process.env.PANEL_PORT) || 7080;
 const NOVNC_PORT = process.env.NOVNC_PORT || 6080;
@@ -64,7 +63,6 @@ const SITES = {
     name: 'Prime Gaming',
     loginUrl: 'https://luna.amazon.com/claims',
     browserDir: cfg.dir.browser,
-    applyStealth: true,
     async checkLogin(page) {
       try {
         await page.goto('https://luna.amazon.com/claims', { waitUntil: 'domcontentloaded', timeout: 20000 });
@@ -85,9 +83,7 @@ const SITES = {
   'epic-games': {
     name: 'Epic Games',
     loginUrl: 'https://www.epicgames.com/id/login?lang=en-US&noHostRedirect=true&redirectUrl=https://store.epicgames.com/en-US/free-games',
-    browserDir: cfg.dir.browser_eg || cfg.dir.browser,
-    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) Gecko/20100101 Firefox/133.0',
-    applyStealth: true,
+    browserDir: cfg.dir.browser,
     async checkLogin(page) {
       try {
         await page.goto('https://store.epicgames.com/en-US/free-games', { waitUntil: 'domcontentloaded', timeout: 20000 });
@@ -108,7 +104,6 @@ const SITES = {
     name: 'GOG',
     loginUrl: 'https://www.gog.com/en',
     browserDir: cfg.dir.browser,
-    applyStealth: false,
     async checkLogin(page) {
       try {
         await page.goto('https://www.gog.com/en', { waitUntil: 'domcontentloaded', timeout: 20000 });
@@ -145,15 +140,14 @@ async function launchSite(siteId) {
 
   console.log(`[${datetime()}] Launching browser for ${site.name}...`);
 
-  const context = await firefox.launchPersistentContext(site.browserDir, {
+  const context = await chromium.launchPersistentContext(site.browserDir, {
     headless: false,
     viewport: { width: cfg.width, height: cfg.height },
     locale: 'en-US',
-    ...(site.userAgent && { userAgent: site.userAgent }),
     handleSIGINT: false,
+    args: ['--hide-crash-restore-bubble'],
   });
 
-  if (site.applyStealth) await stealth(context);
   context.setDefaultTimeout(0);
 
   const page = context.pages().length ? context.pages()[0] : await context.newPage();
@@ -210,15 +204,13 @@ async function checkSiteStatus(siteId) {
 
   console.log(`[${datetime()}] Checking session status for ${site.name} (headless)...`);
 
-  const context = await firefox.launchPersistentContext(site.browserDir, {
+  const context = await chromium.launchPersistentContext(site.browserDir, {
     headless: true,
     viewport: { width: 1280, height: 720 },
     locale: 'en-US',
-    ...(site.userAgent && { userAgent: site.userAgent }),
     handleSIGINT: false,
+    args: ['--hide-crash-restore-bubble'],
   });
-
-  if (site.applyStealth) await stealth(context);
 
   const page = context.pages()[0] || await context.newPage();
   try {

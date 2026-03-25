@@ -27,7 +27,7 @@ outputType = "console"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "bash run.sh epic-games.js"
+args = "bash -c 'bash run.sh prime-gaming.js; bash run.sh epic-games.js; bash run.sh gog.js; echo sleeping; sleep 1d'"
 
 [userenv]
 
@@ -42,3 +42,7 @@ PG_REDEEM = "1"
 [[ports]]
 localPort = 7080
 externalPort = 80
+
+[postMerge]
+path = "scripts/post-merge.sh"
+timeoutMs = 120000
