@@ -51,16 +51,16 @@ echo "  noVNC: http://localhost:${NOVNC_PORT}/?autoconnect=true"
 
 if [ "$LOGIN_MODE" = "1" ]; then
   echo "LOGIN_MODE=1: Starting interactive login panel on port ${PANEL_PORT:-7080}..."
-  exec tini -g -- node interactive-login.js
+  exec tini -s -g -- node interactive-login.js
 fi
 
 if [ -n "$LOOP" ]; then
   echo "  Loop:    every ${LOOP}s"
   while true; do
-    tini -g -- "$@" || true
+    tini -s -g -- "$@" || true
     echo "Sleeping for ${LOOP} seconds..."
     sleep "$LOOP"
   done
 else
-  exec tini -g -- "$@" # https://github.com/krallin/tini/issues/8 node/playwright respond to signals like ctrl-c, but unsure about zombie processes
+  exec tini -s -g -- "$@" # https://github.com/krallin/tini/issues/8 node/playwright respond to signals like ctrl-c, but unsure about zombie processes
 fi
