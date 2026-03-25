@@ -1,0 +1,377 @@
+Skip to content
+vogler
+free-games-claimer
+Repository navigation
+Code
+Issues
+114
+ (114)
+Pull requests
+23
+ (23)
+Discussions
+Actions
+Projects
+Wiki
+Security
+Insights
+epic-games: docker: captcha due to OpenGL/WebGL/WebGPU not working? #483
+Open
+Open
+epic-games: docker: captcha due to OpenGL/WebGL/WebGPU not working?
+#483
+@vogler
+Description
+vogler
+opened on May 27, 2025 · edited by vogler
+Owner
+The current reason why epic-games is showing a captcha inside docker (#183) is due to OpenGL not working.
+It's likely also the reason why the captcha can't be solved and always fails with 'Incorrect response'.
+Likely also the reason why Docker was getting captchas before Playwright was detected.
+
+You can compare chrome://gpu when running with and without Docker:
+Image
+Image
+The results for without Docker are the same as on my native Chrome.
+I thought websites can only use WebGL and not OpenGL directly, but maybe 'Software only' vs. 'Hardware accelerated' can be detected due to timing.
+
+Now I don't know if it's an issue with Xvfb/X11 or Chrome arguments.
+The added GLX extension for Xvfb (9988f39) and it also not working with TurboVNC (replaces both Xvfb and X11) would suggest it's a Chrome issue.
+
+You can see all available arguments here: https://peter.sh/experiments/chromium-command-line-switches/
+You can check the command line and all used arguments here: chrome://version
+Image
+Patchright already adds many arguments (the screenshot also includes some I tried), my macOS Chrome just has this as Command Line:
+
+/Applications/Google Chrome.app/Contents/MacOS/Google Chrome --flag-switches-begin --enable-experimental-web-platform-features --flag-switches-end
+Now the question is which arguments are needed.
+For example, Chrome whitelists GPUs (see here), but adding --ignore-gpu-blocklist did not help.
+
+Here's what I tried in somewhat different variations (e.g the different --use-gl):
+
+  args: [
+    // '--hide-crash-restore-bubble',
+    '--no-first-run',
+    '--ignore-gpu-blocklist',
+    '--use-gl=desktop',
+    // '--use-gl=egl',
+    // '--use-gl=angle',
+    // '--use-angle=gl-egl',
+    // '--display=:1',
+    // '--use-gl=omesa',
+    '--enable-webgl',
+    '--disable-gpu-sandbox',
+    // '--no-sandbox',
+    // '--disable-software-rasterizer'
+  ],
+Perplexity gives nice overviews, but in the end it's just pulling random stuff together:
+
+https://www.perplexity.ai/search/i-m-always-getting-incorrect-r-bGeLI0GjTm2Zxvo_oEF3fQ#0
+https://www.perplexity.ai/search/how-can-i-fix-opengl-being-dis-WXL1vfBdQmiVNluc3V64nQ#0 tried these args, didn't change anything
+Now it may be that you actually need to do GPU hardware passthrough, but I don't think so.
+Xvfb should do it in software (CPU, not GPU) which should be fast enough on my M1 MBA.
+Need to check if other programs can use OpenGL in the container:
+
+https://unix.stackexchange.com/questions/137567/glx-extension-not-working-properly-with-xvfb
+Maybe OpenGL is not working in the browser due to some other unsupported feature. Could try Xdummy (Xdummy in Docker), but I think TurboVNC is a better replacement for Xvfb+X11. I tried it and it's much faster.
+Activity
+
+vogler
+added 
+docker
+ 
+store: epic-games
+ on May 27, 2025
+
+vogler
+mentioned this in 2 issues on May 27, 2025
+dev: testing: epic-games, prime-gaming, gog #484
+epic-games: docker: captcha before it claims the game #183
+vogler
+vogler commented on May 28, 2025
+vogler
+on May 28, 2025 · edited by vogler
+Owner
+Author
+Following how can i check that opengl is working in ubuntu (TurboVNC instead of Xvfb+X11):
+
+$ glxinfo | grep 'direct rendering:'
+direct rendering: Yes
+$ glxinfo | grep -i "opengl"
+OpenGL vendor string: Mesa
+OpenGL renderer string: llvmpipe (LLVM 15.0.7, 128 bits)
+OpenGL core profile version string: 4.5 (Core Profile) Mesa 23.2.1-1ubuntu3.1~22.04.3
+OpenGL core profile shading language version string: 4.50
+OpenGL core profile context flags: (none)
+OpenGL core profile profile mask: core profile
+OpenGL core profile extensions:
+OpenGL version string: 4.5 (Compatibility Profile) Mesa 23.2.1-1ubuntu3.1~22.04.3
+OpenGL shading language version string: 4.50
+OpenGL context flags: (none)
+OpenGL profile mask: compatibility profile
+OpenGL extensions:
+OpenGL ES profile version string: OpenGL ES 3.2 Mesa 23.2.1-1ubuntu3.1~22.04.3
+OpenGL ES profile shading language version string: OpenGL ES GLSL ES 3.20
+OpenGL ES profile extensions:
+$ glxgears
+7964 frames in 5.0 seconds = 1592.665 FPS
+6283 frames in 5.0 seconds = 1256.551 FPS
+7077 frames in 5.0 seconds = 1415.294 FPS
+9190 frames in 5.0 seconds = 1837.817 FPS
+7940 frames in 5.0 seconds = 1587.947 FPS
+^C
+Image
+Same with Xvfb+X11 instead of TurboVNC:
+
+$ glxgears
+8791 frames in 5.0 seconds = 1758.063 FPS
+9822 frames in 5.0 seconds = 1964.283 FPS
+6942 frames in 5.0 seconds = 1387.946 FPS
+6744 frames in 5.0 seconds = 1348.791 FPS
+8509 frames in 5.0 seconds = 1701.629 FPS
+^C
+So, as suspected a Chrome issue.
+Running the browser directly from bash instead of via patchright also doesn't change anything:
+
+$ ~/.cache/ms-playwright/chromium-1169/chrome-linux/chrome
+[1497:1497:0528/233423.980905:ERROR:content/browser/zygote_host/zygote_host_impl_linux.cc:105] Running as root without --no-sandbox is not supported. See https://crbug.com/638180.
+$ root@9b11f229dace:/fgc# ~/.cache/ms-playwright/chromium-1169/chrome-linux/chrome --no-sandbox
+Image
+But maybe the root thing is the issue...
+
+Without root, it also doesn't start without --no-sandbox:
+
+[37:37:0529/001158.862163:FATAL:content/browser/zygote_host/zygote_host_impl_linux.cc:132] No usable sandbox! If you are running on Ubuntu 23.10+ or another Linux distro that has disabled unprivileged user namespaces with AppArmor, see https://chromium.googlesource.com/chromium/src/+/main/docs/security/apparmor-userns-restrictions.md. Otherwise see https://chromium.googlesource.com/chromium/src/+/main/docs/linux/suid_sandbox_development.md for more information on developing with the (older) SUID sandbox. If you want to live dangerously and need an immediate workaround, you can try using --no-sandbox.
+
+
+vogler
+added 2 commits that reference this issue on May 29, 2025
+test #483: WebGL hardware accelerated with --ignore-gpu-blocklist
+
+0f72aec
+eg: #483: also can't solve captcha with OpenGL working
+
+d7956ee
+
+vogler
+changed the title [-]epic-games: docker: captcha due to OpenGL not working[/-] [+]epic-games: docker: captcha due to OpenGL not working? -> not enough[/+] on May 29, 2025
+
+vogler
+changed the title [-]epic-games: docker: captcha due to OpenGL not working? -> not enough[/-] [+]epic-games: docker: captcha due to OpenGL/WebGL/WebGPU not working?[/+] on May 29, 2025
+meilon
+meilon commented on May 30, 2025
+meilon
+on May 30, 2025
+I just tried it with full X11 and the dummy driver. Still getting an error trying to solve captcha on epic login. But OpenGL is fully supported.
+
+Image
+Maybe thats a better way than relying on the old xvfb? I'm not that good with X11, and maybe there are some chrome flags to get more features working.
+
+Here's the diff
+The resolution obviously isn't pulled from ENV and fixed to 1920x1080. I got the dummy xorg.conf and how to run it from here: https://github.com/Xpra-org/xpra/blob/master/docs/Usage/Xdummy.md
+
+Maybe this is a starting point for someone who knows (more) of what they are doing. Fact is: xvfb wouldn't know what to do with a physical gpu, with xorg you could really fully use it. But you would need drivers and a whole lot more within the image.
+
+vogler
+vogler commented on Jun 5, 2025
+vogler
+on Jun 5, 2025 · edited by vogler
+Owner
+Author
+Thanks for trying Xdummy!
+
+I just compared X11+Xvfb, X11+Xdummy, and TurboVNC.
+For all of them OpenGL works with Chromium arg --ignore-gpu-blocklist, see 0f72aec for test.
+
+$ docker run --rm -it -p 6080:6080 -v fgc:/fgc/data ghcr.io/vogler/free-games-claimer node test/webgl.js
+...
+Unmasked Renderer:	ANGLE (Mesa, llvmpipe (LLVM 15.0.7 128 bits), OpenGL 4.5)
+The noticeable difference to running outside of Docker is WebGPU being Disabled.
+
+However, same results for X11+Xvfb / X11+Xdummy / TurboVNC:
+Image
+Image
+
+Image
+After adding --enable-unsafe-webgpu:
+Image
+
+-> Got login captcha, but could be solved instead of just getting 'Incorrect response'.
+
+
+vogler
+added a commit that references this issue on Jun 5, 2025
+--enable-unsafe-webgpu, #483
+
+c5f0c20
+meilon
+meilon commented on Jun 11, 2025
+meilon
+on Jun 11, 2025
+Can also confirm: The current dev tagged docker image works for me as well. Had to solve captcha on login and every claim, though. For now I won't run it daily just to see if an older cookie/session helps with the next free games
+
+truresma
+truresma commented on Jun 13, 2025
+truresma
+on Jun 13, 2025 · edited by truresma
+On my Synology NAS DS 220+ it is not working
+
+Tried it with the Container Manager and Portainer
+
+So when i pull the image voglerr/free-games-claimer:dev and add a container, I always get the error message at startup:
+
+mkdir: cannot create directory '/root/.vnc/': File exists
+
+i have already deleted it completely (also the normal build) and tried to delete everything via ssh, select another volume/directory for the config etc. but nothing works
+
+the normal build starts without problems, but epic games does not work
+
+otomay
+otomay commented on Jun 13, 2025
+otomay
+on Jun 13, 2025
+:dev tag is giving me this error in novnc:
+
+Image
+
+No error in console tho
+
+Version: https://github.com/vogler/free-games-claimer/tree/7ff4f8837a5b756fe0561e6afb92cc5a03d4dd61
+
+Branch: dev
+
+Build: Thu, 12 Jun 2025 20:19:50 +0000
+
+TurboVNC is running on port 5900 (no password!) with resolution 1920x1080
+
+noVNC (VNC via browser) is running on http://localhost:6080/?autoconnect=true
+
+
+
+2025-06-13 15:22:06.560 started checking epic-games
+
+Not signed in anymore. Please login in the browser or here in the terminal.
+
+Open http://localhost:6080 to login inside the docker container.
+
+Login timeout is 180 seconds!
+
+Using email and password from environment.
+
+Got a captcha during login (likely due to too many attempts)! You may solve it in the browser, get a new IP or try again in a few hours.
+meilon
+meilon commented on Jun 16, 2025
+meilon
+on Jun 16, 2025
+Can't replicate, still works with current dev image. Still have to solve captcha every claim, though. But at least I was still logged in!
+
+otomay
+otomay commented on Jun 16, 2025
+otomay
+on Jun 16, 2025
+oh, and I'm running in arm64. Maybe it's a decisive factor. I always forget to mention that, sorry.
+
+p3gasus-dev
+p3gasus-dev commented on Jun 25, 2025
+p3gasus-dev
+on Jun 25, 2025
+I am getting the same thing as @otomay .
+
+my system:
+
+ubuntu LTS 24.04
+docker 27.5.1
+compose 2.11.2
+current compose:
+
+  game-claimer:
+    container_name: game-claimer
+    image: ghcr.io/vogler/free-games-claimer:latest
+    build: .
+    volumes:
+      - /docker/fgc:/fgc/data
+    environment:
+      - EMAIL=${FGC_EMAIL}
+      - PASSWORD=${FGC_PWD}
+      - PG_PASSWORD=${PG_PASSWORD}
+      - EG_OTPKEY=${EG_AUTH}
+    ports:
+      - 6080:6080
+    restart: unless-stopped
+steps leading up to this:
+
+added EG_OTPKEY.
+manual noVNC login stuck on captcha.
+switch to :dev.
+prune docker sys & remove /docker/fgc, switch to :latest
+KnightDoom
+KnightDoom commented on Jul 14, 2025
+KnightDoom
+on Jul 14, 2025 · edited by KnightDoom
+login issue is fixed with UserAgent string update:
+
+Mozilla/5.0 (Macintosh; Intel Mac OS X 10_14_6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36
+
+the user agent below gets you locked into invalid response (used by Dev Build as of July 14,2025)
+Mozilla/5.0 (X11; Linux 86_x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36
+
+Lipown
+Lipown commented on Aug 3, 2025
+Lipown
+on Aug 3, 2025
+... how to solve it pls?
+
+xamindar
+xamindar commented on Aug 30, 2025
+xamindar
+on Aug 30, 2025
+Just to add, this dev one works better than the latest. I can actually solve the captcha now, but the captcha still popping up is a problem. Oh well.
+
+
+leo-cheung-itlger
+mentioned this on Jan 2
+Epic Games login fails with "Incorrect response" in Docker on Feiniu NAS (China) #566
+feldorn
+Add a comment
+new Comment
+Markdown input: edit mode selected.
+Write
+Preview
+Use Markdown to format your comment
+Remember, contributions to this repository should follow its contributing guidelines.
+Metadata
+Assignees
+No one assigned
+Labels
+docker
+store: epic-games
+Projects
+No projects
+Milestone
+No milestone
+Relationships
+None yet
+Development
+No branches or pull requests
+NotificationsCustomize
+You're not receiving notifications from this thread.
+
+Participants
+@vogler
+@meilon
+@xamindar
+@KnightDoom
+@p3gasus-dev
+Issue actions
+Footer
+© 2026 GitHub, Inc.
+Footer navigation
+Terms
+Privacy
+Security
+Status
+Community
+Docs
+Contact
+Manage cookies
+Do not share my personal information

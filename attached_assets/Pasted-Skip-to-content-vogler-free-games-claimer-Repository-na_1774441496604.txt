@@ -1,0 +1,311 @@
+Skip to content
+vogler
+free-games-claimer
+Repository navigation
+Code
+Issues
+114
+ (114)
+Pull requests
+23
+ (23)
+Discussions
+Actions
+Projects
+Wiki
+Security
+Insights
+epic-games: docker: captcha before it claims the game #183
+Open
+#479
+Open
+epic-games: docker: captcha before it claims the game
+#183
+#479
+@Darkkingwill
+Description
+Darkkingwill
+opened on Aug 17, 2023 · edited by Darkkingwill
+Hello. im getting a captcha right before it claims the game. Its says one more step. Im using an unraid docker if that helps
+
+Activity
+guipace
+guipace commented on Aug 18, 2023
+guipace
+on Aug 18, 2023
++1 on this issue
+
+
+vogler
+added 
+store: epic-games
+ 
+can't reproduce
+ on Aug 18, 2023
+vogler
+vogler commented on Aug 18, 2023
+vogler
+on Aug 18, 2023
+Owner
+I don't get any. What's your setup? Shared IP via CGNAT? Do you get captcha challenges in your local browser as well?
+
+maxp1110
+maxp1110 commented on Aug 18, 2023
+maxp1110
+on Aug 18, 2023
+Since I solve the captcha-problem during login, I also get a hcaptcha-challenge everytime it tries to claim the game. Have to log into noVNC to solve. No problems when doing it on my desktop maschine.
+Vodafone Cable as ISP.
+
+DevXen
+DevXen commented on Aug 18, 2023
+DevXen
+on Aug 18, 2023
+Yeah I get this issue too with the unraid docker. But this has one happened for the past week or two.
+
+Darkkingwill
+Darkkingwill commented on Aug 18, 2023
+Darkkingwill
+on Aug 18, 2023
+Author
+i was looking through the logs and it told me untrusted ip too many login attempts. i had to get another ip address. I ended up running the container through a vpn and i will test it next time theres free games
+
+Cexitime
+Cexitime commented on Aug 18, 2023
+Cexitime
+on Aug 18, 2023
+Hi, been having this issue as well, I can click the captures in the vnc window to solve them temporarily, This is the logs when the issue occurs, not sure why its complaining about too many login attempts, its literally this container that logs in and it does so successfully every time. Not behind CGNAT on IPv4 only, no IPv6 Available for me yet.
+
+I'll refresh my IP later and check again next time a game is released. Forgot to mention im running this in a docker container on Unraid
+
+19/08/2023 11:49:24 am
+Current free game: Black Book
+19/08/2023 11:49:24 am
+Not in library yet! Click GET.
+19/08/2023 11:49:38 am
+Got hcaptcha challenge! Lost trust due to too many login attempts? You can solve the captcha in the browser or get a new IP address.
+19/08/2023 11:49:55 am
+Claimed successfully!
+19/08/2023 11:50:03 am
+Current free game: Dodo Peak
+19/08/2023 11:50:03 am
+Not in library yet! Click GET.
+19/08/2023 11:50:15 am
+Got hcaptcha challenge! Lost trust due to too many login attempts? You can solve the captcha in the browser or get a new IP address.
+19/08/2023 11:50:30 am
+Claimed successfully!
+
+vogler
+vogler commented on Aug 19, 2023
+vogler
+on Aug 19, 2023
+Owner
+Ok, just to confirm: everyone that has the issue is using Unraid?
+Please try if you have the issue using the docker run ... command on a different machine in your local network.
+
+vogler
+vogler commented on Aug 19, 2023
+vogler
+on Aug 19, 2023
+Owner
+Are you using this template: https://github.com/Nackophilz/unraid_templates/blob/main/free-games-claimer/free-games-claimer.xml?
+There seems nothing wrong with it, so it must be something about Unraid.
+It's weird, but there have been other issues dependent on the host OS: #149 (HAOS), #173 (Arch).
+
+Cexitime
+Cexitime commented on Aug 19, 2023
+Cexitime
+on Aug 19, 2023
+Are you using this template: https://github.com/Nackophilz/unraid_templates/blob/main/free-games-claimer/free-games-claimer.xml? There seems nothing wrong with it, so it must be something about Unraid. It's weird, but there have been other issues dependent on the host OS: #149 (HAOS), #173 (Arch).
+
+I am using that template, it is the one available on the community apps plugin for Unraid.
+
+maxp1110
+maxp1110 commented on Aug 19, 2023
+maxp1110
+on Aug 19, 2023
+No, I am not using unraid. Proxmox Server with a docker lxc image from tteck (proxmox helper scripts). Inside the lxc, I run your docker run command.
+Best
+
+yoshimo
+yoshimo commented on Aug 19, 2023
+yoshimo
+on Aug 19, 2023 · edited by yoshimo
+I use a Pi4 with UmbrelOS and run the docker container linked on this repos main page directly
+I get the captcha even when i renewed my ip adresses right before starting the docker container.
+
+DevXen
+DevXen commented on Aug 19, 2023
+DevXen
+on Aug 19, 2023
+Screenshot_20230819_102818_Spark
+Here's an email I'm getting every day. But cause of the capcha after you click get the games.
+
+I haven't claimed them yet. And can this weekend to try anything you may want. I can vpn to my server the rest of the week but I can't move the window to click on or do anything with the webgui.
+
+yoshimo
+yoshimo commented on Aug 19, 2023
+yoshimo
+on Aug 19, 2023
+I tried a few times to solve the captchas and it still occurs on the next try
+
+246 remaining items
+vogler
+vogler commented on May 26, 2025
+vogler
+on May 26, 2025 · edited by vogler
+Owner
+Unfortunately, this problem occurs not only in Docker but also in the npm version on Raspberry Pi OS.
+
+Yes, I didn't want to change the title.
+History: Initially this was only a problem in Docker (which was introduced because running headless locally was a problem (and which I don't use myself, at least not for this)). With node it was working for me, gave up trying to fix it in Docker, stopped following this. At some point captchas were also a problem with node (due to playwright leaking). This leaking of information that can be detected as automation is patched by patchright and rebrowser-patches. Only tried patchright some weeks ago, but basic stuff didn't work - maybe I tried it at the wrong time, it seems better now, but still has some issues.
+
+Now with patchright, I don't get captchas for epic-games anymore.
+(When running headless, it still gets the cloudflare checkbox on login, so I made epic-games ignore SHOW=0 - in Docker everything is running non-headless anyway.)
+
+vogler
+vogler commented on May 26, 2025
+vogler
+on May 26, 2025 · edited by vogler
+Owner
+I merged #479 into the dev branch, so, you can test the dev tag with Docker now.
+However, I just got a captcha on login in Docker - maybe due to too much testing, yesterday it worked.
+Solving these captchas in Docker still fails with 'incorrect response'. Maybe have to try a different base image or some extra browser flags.
+Running without Docker, I could solve the captcha manually to login.
+
+Note that your $BROWSER_DIR (default data/browser) has all the files created by Firefox in it. For me it was no problem to let Chromium also use it, but it's not a good idea (also just wastes space) and may lead to issues. You can just move/delete it.
+I'll make the scripts check for e.g. prefs.js (Firefox-only) and make them move it to ${BROWSER_DIR}-firefox-backup (probably not needed since you'll have to login again anyway, but don't just want to delete it in case people want to save some cookies etc.).
+
+vogler
+vogler commented on May 26, 2025
+vogler
+on May 26, 2025
+Owner
+Tested:
+
+epic-games - works without captcha now
+prime-gaming - seems to work, didn't test claiming on all the external stores, some patchright-related issues may come up
+gog - works for me, but had the most issues with patchright, may fail on slow machines where I inserted 2s waitForTimeout as a quick fix
+aliexpress - claiming coins should work, login is broken (unrelated)
+unrealengine - login failed, didn't test rest, needs to be updated/merged anyway (unrelated)
+Only tested epic-games in docker, rest without, but should behave the same.
+
+#479 (comment)
+
+vogler
+vogler commented on May 26, 2025
+vogler
+on May 26, 2025 · edited by vogler
+Owner
+Ok, needed to add a flag for OpenGL, now I can solve the captcha in Docker.
+That flag missing may have been a problem in general all along 🙈
+Edit: ok, that wasn't it (wrong line), now I had 'incorrect response' again.
+
+
+vogler
+added a commit that references this issue on May 26, 2025
+docker: xvfb needs flag for OpenGL which is needed to solve eg captch…
+
+9988f39
+timothe
+timothe commented on May 27, 2025
+timothe
+on May 27, 2025
+@vogler yep, trying this release, I have the same issue as you. There was some success with the Chromium version prior to that on my end
+
+SnakeEater96
+SnakeEater96 commented on May 27, 2025
+SnakeEater96
+on May 27, 2025
+When logging into Epic Games, I get an unsolvable capture error. Logging in via Steam works. I haven't been able to test claiming games yet.
+
+hvmzx
+hvmzx commented on May 27, 2025
+hvmzx
+on May 27, 2025
+Works well for epic-games on dev, but aw pg and gog don't work anymore
+
+SnakeEater96
+SnakeEater96 commented on May 27, 2025
+SnakeEater96
+on May 27, 2025 · edited by SnakeEater96
+Image
+
+Samen by epic games @vogler
+
+
+vogler
+mentioned this in 2 issues on May 27, 2025
+dev: testing: epic-games, prime-gaming, gog #484
+epic-games: docker: captcha due to OpenGL/WebGL/WebGPU not working? #483
+vogler
+vogler commented on May 27, 2025
+vogler
+on May 27, 2025 · edited by vogler
+Owner
+Since there may be many people getting notified here who want to wait until it lands in main, I created #484 for testing dev.
+
+Works well for epic-games on dev, but aw pg and gog don't work anymore
+
+@hvmzx Please add details about what's not working in #484. Everything (% maintained) worked for me without Docker.
+
+@SnakeEater96 Also didn't test claiming in Docker yet, but I guess if you get a login captcha, claiming also won't work edit: no, just got captcha on login, but claimed without.
+Let's track the OpenGL in Docker issue here: #483
+The --no-sandbox message (I assume that's what you mean) is due to Chrome now complaining about being run as root (default for Docker). See #468. I already have a PR for it, but it will require everyone to change permissions of the files in their Docker volume (fgc in the command from the readme) if they want to keep using them. If you don't care about starting new data/*.json files (history of what was claimed, including (un)redeemed keys for prime-gaming), you can just use a new volume (e.g. fgc2) and merge the files later if you want.
+
+Not sure what people care about and how to best communicate breaking changes like the above changing permissions for existing Docker volumes.
+I think it's best for all to watch new releases on GitHub and I'll mention it there if you need to do something (also in the logs, but not sure how many people check them - another option would be notifications (for people who have NOTIFY set up)):
+Image
+I'll let CI add docker tags for GitHub releases (git tags), but just to make it easy to compare stuff. I think having a 'rolling release' with most people on main and some people willing to test on dev is good enough (def. better than me just committing to main YOLO-style).
+After cleanup, I'll also have a look at https://github.com/vogler/free-games-claimer/discussions since I noticed that you can do polls etc. and probably also easier to follow reddit-like threads (at least one level) for general discussions instead of doing this in issues which should be rather limited in scope.
+
+
+Targunitoth
+mentioned this on Oct 24, 2025
+Doesnt work #548
+
+leo-cheung-itlger
+mentioned this on Jan 2
+Epic Games login fails with "Incorrect response" in Docker on Feiniu NAS (China) #566
+feldorn
+Add a comment
+new Comment
+Markdown input: edit mode selected.
+Write
+Preview
+Use Markdown to format your comment
+Remember, contributions to this repository should follow its contributing guidelines.
+Metadata
+Assignees
+No one assigned
+Labels
+docker
+store: epic-games
+Projects
+No projects
+Milestone
+No milestone
+Relationships
+None yet
+Development
+NotificationsCustomize
+You're not receiving notifications from this thread.
+
+Participants
+@yoshimo
+@lostb1t
+@stayupthetree
+@Simpuhl
+@nodiaque
+Issue actions
+Footer
+© 2026 GitHub, Inc.
+Footer navigation
+Terms
+Privacy
+Security
+Status
+Community
+Docs
+Contact
+Manage cookies
+Do not share my personal information

@@ -38,3 +38,7 @@ PG_EMAIL = "2ChrisOrr@gmail.com"
 GOG_EMAIL = "2ChrisOrr@gmail.com"
 NOTIFY_TITLE = "Free Games Claimer"
 PG_REDEEM = "1"
+
+[[ports]]
+localPort = 7080
+externalPort = 80

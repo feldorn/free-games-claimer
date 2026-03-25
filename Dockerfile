@@ -87,8 +87,10 @@ LABEL org.opencontainers.image.title="free-games-claimer" \
 # Configure VNC via environment variables:
 ENV VNC_PORT 5900
 ENV NOVNC_PORT 6080
+ENV PANEL_PORT 7080
 EXPOSE 5900
 EXPOSE 6080
+EXPOSE 7080
 
 # Configure Xvfb via environment variables:
 ENV WIDTH 1920
