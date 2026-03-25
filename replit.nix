@@ -1,5 +1,13 @@
 {pkgs}: {
   deps = [
+    pkgs.systemdLibs
+    pkgs.expat
+    pkgs.xorg.libXtst
+    pkgs.libxkbcommon
+    pkgs.cups
+    pkgs.at-spi2-atk
+    pkgs.nspr
+    pkgs.chromium
     pkgs.xorg.libXrender
     pkgs.fontconfig
     pkgs.freetype
@@ -25,6 +33,5 @@
     pkgs.gtk3
     pkgs.dbus
     pkgs.xvfb-run
-    pkgs.firefox
   ];
 }

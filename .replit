@@ -27,7 +27,7 @@ outputType = "console"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "bash -c \"node prime-gaming.js; node epic-games.js; node gog.js; echo sleeping; sleep 1d\""
+args = "bash run.sh epic-games.js"
 
 [userenv]
 
