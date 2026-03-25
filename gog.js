@@ -48,10 +48,13 @@ try {
 
   // page.click('#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll').catch(_ => { }); // does not work reliably, solved by setting CookieConsent above
   const signIn = page.locator('a:has-text("Sign in")').first();
-  // TODO for the below signIn.waitFor(), patchright failed most of the time with: locator.waitFor: JSHandles can be evaluated only in the context they were created!
-  // await Promise.any([signIn.waitFor(), page.waitForSelector('#menuUsername')]);
-  const username = page.locator('#menuUsername').first();
-  while (await signIn.isVisible() && !await username.isVisible()) {
+  const username = page.locator('#menuUsername, .menu-username, [ng-click*="account"]').first();
+  await page.waitForTimeout(3000);
+  while (!await username.isVisible()) {
+    if (!await signIn.isVisible()) {
+      const accountLink = page.locator('a[href*="/account"], a[href*="/u/"]').first();
+      if (await accountLink.isVisible()) break;
+    }
     console.error('Not signed!');
     if (cfg.nowait) process.exit(1);
     await signIn.click();
@@ -102,7 +105,17 @@ try {
     await page.waitForSelector('#menuUsername');
     if (!cfg.debug) context.setDefaultTimeout(cfg.timeout);
   }
-  user = await page.locator('#menuUsername').first().textContent(); // innerText is uppercase due to styling!
+  const userEl = page.locator('#menuUsername, .menu-username, [ng-click*="account"]').first();
+  try {
+    user = (await userEl.textContent({ timeout: 10000 })).trim();
+  } catch (_) {
+    const accountLink = page.locator('a[href*="/account"], a[href*="/u/"]').first();
+    if (await accountLink.count() > 0) {
+      user = 'unknown';
+    } else {
+      throw new Error('Could not detect GOG username. The site layout may have changed.');
+    }
+  }
   console.log(`Signed in as ${user}`);
   db.data[user] ||= {};
 
