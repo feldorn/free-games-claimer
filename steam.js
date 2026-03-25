@@ -145,8 +145,15 @@ async function getGameDetails(p, url) {
     if (await discountEndEl.count() > 0) {
       details.isTemporaryPromo = true;
     }
-    if (details.originalPrice && details.originalPrice > 0 && !details.isFreeToPlay) {
-      details.isTemporaryPromo = true;
+    const discountBlock = p.locator('.game_purchase_discount, .discount_block');
+    if (await discountBlock.count() > 0) {
+      const pctEl = discountBlock.locator('.discount_pct').first();
+      if (await pctEl.count() > 0) {
+        const pct = (await pctEl.innerText()).trim();
+        if (pct === '-100%' && details.originalPrice && details.originalPrice > 0) {
+          details.isTemporaryPromo = true;
+        }
+      }
     }
   } catch (_) {}
 
@@ -351,7 +358,13 @@ try {
       continue;
     }
 
-    if (game.rating !== null && game.rating < cfg.steam_min_rating) {
+    if (game.rating === null) {
+      console.log('  Skipped: no reviews (unrated games are always skipped)');
+      skipped++;
+      continue;
+    }
+
+    if (game.rating < cfg.steam_min_rating) {
       console.log(`  Skipped: rating ${game.ratingText} (${game.rating}/9) below minimum ${cfg.steam_min_rating}/9`);
       skipped++;
       continue;
@@ -359,12 +372,6 @@ try {
 
     if (game.originalPrice !== null && game.originalPrice < cfg.steam_min_price) {
       console.log(`  Skipped: original price $${game.originalPrice} below minimum $${cfg.steam_min_price}`);
-      skipped++;
-      continue;
-    }
-
-    if (game.rating === null && game.originalPrice === null) {
-      console.log('  Skipped: no rating or price data available, cannot verify quality');
       skipped++;
       continue;
     }
@@ -405,7 +412,13 @@ try {
       continue;
     }
 
-    if (details.rating !== null && details.rating < cfg.steam_min_rating) {
+    if (details.rating === null) {
+      console.log('  Skipped: no reviews on store page (unrated games are always skipped)');
+      skipped++;
+      continue;
+    }
+
+    if (details.rating < cfg.steam_min_rating) {
       console.log(`  Skipped: store page rating ${details.ratingText} (${details.rating}/9) below minimum ${cfg.steam_min_rating}/9`);
       skipped++;
       continue;
