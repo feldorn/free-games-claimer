@@ -1,0 +1,85 @@
+[chris@motu:~/free-games-claimer][0]$ docker compose -f docker-compose.test.yml up --build
+[+] Building 0.4s (15/15) FINISHED
+ => [internal] load local bake definitions                                                                                                                                                               0.0s
+ => => reading from stdin 582B                                                                                                                                                                           0.0s
+ => [internal] load build definition from Dockerfile                                                                                                                                                     0.0s
+ => => transferring dockerfile: 4.86kB                                                                                                                                                                   0.0s
+ => [internal] load metadata for docker.io/library/ubuntu:noble                                                                                                                                          0.2s
+ => [internal] load .dockerignore                                                                                                                                                                        0.0s
+ => => transferring context: 608B                                                                                                                                                                        0.0s
+ => [internal] load build context                                                                                                                                                                        0.0s
+ => => transferring context: 61.65kB                                                                                                                                                                     0.0s
+ => [1/8] FROM docker.io/library/ubuntu:noble@sha256:186072bba1b2f436cbb91ef2567abca677337cfc786c86e107d25b7072feef0c                                                                                    0.0s
+ => CACHED [2/8] RUN apt-get update     && apt-get install -y --no-install-recommends curl ca-certificates gnupg     && mkdir -p /etc/apt/keyrings     && curl -fsSL https://deb.nodesource.com/gpgkey/  0.0s
+ => CACHED [3/8] WORKDIR /fgc                                                                                                                                                                            0.0s
+ => CACHED [4/8] COPY package*.json ./                                                                                                                                                                   0.0s
+ => CACHED [5/8] RUN npm install --ignore-scripts && npx patchright install chromium --no-shell && du -h -d1 ~/.cache/ms-playwright                                                                      0.0s
+ => [6/8] COPY . .                                                                                                                                                                                       0.0s
+ => [7/8] RUN dos2unix ./*.sh && chmod +x ./*.sh                                                                                                                                                         0.1s
+ => [8/8] COPY docker-entrypoint.sh /usr/local/bin/                                                                                                                                                      0.0s
+ => exporting to image                                                                                                                                                                                   0.0s
+ => => exporting layers                                                                                                                                                                                  0.0s
+ => => writing image sha256:c0550a499a4590e4a9a607fd92517fe624469a1eccb8438c0cd67964241ddec0                                                                                                             0.0s
+ => => naming to docker.io/library/free-games-claimer-free-games-claimer                                                                                                                                 0.0s
+ => resolving provenance for metadata file                                                                                                                                                               0.0s
+[+] up 2/2
+ ✔ Image free-games-claimer-free-games-claimer Built                                                                                                                                                     0.5s
+ ✔ Container fgc-test                          Recreated                                                                                                                                                 0.0s
+Attaching to fgc-test
+fgc-test  | Version: https://github.com/vogler/free-games-claimer/tree/
+fgc-test  | Build:
+fgc-test  | TurboVNC is running on port 5900 (no password!) with resolution 1920x1080
+fgc-test  | noVNC (VNC via browser) is running on http://localhost:6080/?autoconnect=true
+fgc-test  |
+fgc-test  | 2026-03-25 08:50:24.504 started checking prime-gaming
+fgc-test  | Signed in as Christopher
+fgc-test  | waitUntilStable 2761
+fgc-test  | waitUntilStable 2813
+fgc-test  | waitUntilStable 2813
+fgc-test  | Number of already claimed games (total): 19
+fgc-test  |
+fgc-test  | Number of free unclaimed games (Prime Gaming): 0
+fgc-test  |
+fgc-test  | Number of free unclaimed games (external stores): 0
+fgc-test  | 2026-03-25 08:50:41.296 started checking epic-games
+fgc-test  | Signed in as Feldorn11906
+fgc-test  | Including mobile games...
+fgc-test  | Free games: [
+fgc-test  |   'https://store.epicgames.com/en-US/p/electrician-simulator-164e9f',
+fgc-test  |   'https://store.epicgames.com/en-US/p/world-of-warships-world-of-warships-—-tachibana-lima-pack-5930e4',
+fgc-test  |   'https://store.epicgames.com/en-US/p/potion-permit-android-e270c3',
+fgc-test  |   'https://store.epicgames.com/en-US/p/potion-permit-ios-e4b5aa'
+fgc-test  | ]
+fgc-test  | Current free game: Electrician Simulator
+fgc-test  |   Already in library! Nothing to claim.
+fgc-test  | Current free game: World of Warships — Epic Anniversary Tachibana Pack
+fgc-test  |   Already in library! Nothing to claim.
+fgc-test  | Already claimed, skipping: https://store.epicgames.com/en-US/p/potion-permit-android-e270c3
+fgc-test  | Already claimed, skipping: https://store.epicgames.com/en-US/p/potion-permit-ios-e4b5aa
+fgc-test  | 2026-03-25 08:50:50.465 started checking gog
+fgc-test  | Not signed!
+fgc-test  | --- Exception:
+fgc-test  | locator.click: Timeout 60000ms exceeded.
+fgc-test  | Call log:
+fgc-test  |   - waiting for locator('a:has-text("Sign in")').first()
+fgc-test  |     - locator resolved to <a hook-test="menuAnonymousButton" ng-click="anonymous.openLogin()" class="menu-link menu-link--anonymous menu-uppercase hide-on-touch-device">…</a>
+fgc-test  |   - attempting click action
+fgc-test  |     2 × waiting for element to be visible, enabled and stable
+fgc-test  |       - element is not visible
+fgc-test  |     - retrying click action
+fgc-test  |     - waiting 20ms
+fgc-test  |     2 × waiting for element to be visible, enabled and stable
+fgc-test  |       - element is not visible
+fgc-test  |     - retrying click action
+fgc-test  |       - waiting 100ms
+fgc-test  |     112 × waiting for element to be visible, enabled and stable
+fgc-test  |         - element is not visible
+fgc-test  |       - retrying click action
+fgc-test  |         - waiting 500ms
+fgc-test  |
+fgc-test  |     at /fgc/gog.js:60:18 {
+fgc-test  |   name: 'TimeoutError'
+fgc-test  | }
+fgc-test  | sleeping
+
+

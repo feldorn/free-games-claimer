@@ -47,17 +47,21 @@ try {
   await page.goto(URL_CLAIM, { waitUntil: 'domcontentloaded' }); // default 'load' takes forever
 
   // page.click('#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll').catch(_ => { }); // does not work reliably, solved by setting CookieConsent above
-  const signIn = page.locator('a:has-text("Sign in")').first();
-  const username = page.locator('#menuUsername, .menu-username, [ng-click*="account"]').first();
+  const signIn = page.locator('a:has-text("Sign in"), [hook-test="menuAnonymousButton"]').first();
+  const username = page.locator('#menuUsername, [hook-test="menuUsername"], .menu-username').first();
   await page.waitForTimeout(3000);
-  while (!await username.isVisible()) {
-    if (!await signIn.isVisible()) {
-      const accountLink = page.locator('a[href*="/account"], a[href*="/u/"]').first();
-      if (await accountLink.isVisible()) break;
-    }
-    console.error('Not signed!');
+  const isLoggedIn = async () => {
+    if (await username.count() > 0) return true;
+    const accountEl = page.locator('a[href*="/account"], .menu-username-text');
+    return await accountEl.count() > 0;
+  };
+  while (!await isLoggedIn()) {
+    console.error('Not signed in!');
     if (cfg.nowait) process.exit(1);
-    await signIn.click();
+    if (await signIn.count() === 0) {
+      throw new Error('Could not find sign-in button. GOG page layout may have changed.');
+    }
+    await signIn.click({ force: true });
     // it then creates an iframe for the login
     await page.waitForSelector('#GalaxyAccountsFrameContainer iframe'); // TODO needed?
     const iframe = page.frameLocator('#GalaxyAccountsFrameContainer iframe');
@@ -92,7 +96,7 @@ try {
         notify('gog: got captcha during login. Please check.');
         // TODO solve reCAPTCHA?
       }).catch(_ => { });
-      await page.waitForSelector('#menuUsername');
+      await page.waitForSelector('#menuUsername, [hook-test="menuUsername"]');
     } else {
       console.log('Waiting for you to login in the browser.');
       await notify('gog: no longer signed in and not enough options set for automatic login.');
@@ -102,18 +106,17 @@ try {
         process.exit(1);
       }
     }
-    await page.waitForSelector('#menuUsername');
+    await page.waitForSelector('#menuUsername, [hook-test="menuUsername"]');
     if (!cfg.debug) context.setDefaultTimeout(cfg.timeout);
   }
-  const userEl = page.locator('#menuUsername, .menu-username, [ng-click*="account"]').first();
+  const userEl = page.locator('#menuUsername, [hook-test="menuUsername"], .menu-username').first();
   try {
     user = (await userEl.textContent({ timeout: 10000 })).trim();
   } catch (_) {
-    const accountLink = page.locator('a[href*="/account"], a[href*="/u/"]').first();
-    if (await accountLink.count() > 0) {
+    try {
+      user = await page.locator('#menuUsername, [hook-test="menuUsername"], .menu-username').first().getAttribute('title', { timeout: 5000 }) || 'unknown';
+    } catch (__) {
       user = 'unknown';
-    } else {
-      throw new Error('Could not detect GOG username. The site layout may have changed.');
     }
   }
   console.log(`Signed in as ${user}`);
