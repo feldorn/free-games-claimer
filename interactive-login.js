@@ -211,7 +211,7 @@ async function checkSiteStatus(siteId) {
   let context;
   try {
     context = await chromium.launchPersistentContext(site.browserDir, {
-      headless: true,
+      headless: 'new',
       viewport: { width: 1280, height: 720 },
       locale: 'en-US',
       handleSIGINT: false,
@@ -878,10 +878,15 @@ process.on('SIGTERM', async () => {
   process.exit(0);
 });
 
-server.listen(PANEL_PORT, () => {
+server.listen(PANEL_PORT, async () => {
   console.log(`[${datetime()}] Free Games Claimer - Interactive Login Panel`);
   console.log(`[${datetime()}] Control panel: http://localhost:${PANEL_PORT}`);
   console.log(`[${datetime()}] noVNC viewer:  http://localhost:${NOVNC_PORT}`);
   console.log(`[${datetime()}] Password protection: ${PANEL_PASSWORD ? 'ENABLED' : 'DISABLED (set PANEL_PASSWORD or VNC_PASSWORD to enable)'}`);
   console.log(`[${datetime()}] Open the control panel URL in your browser to start.`);
+  console.log(`[${datetime()}] Auto-checking all sessions...`);
+  for (const siteId of Object.keys(SITES)) {
+    await checkSiteStatus(siteId);
+  }
+  console.log(`[${datetime()}] Auto-check complete.`);
 });
