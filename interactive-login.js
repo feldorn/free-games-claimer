@@ -192,29 +192,33 @@ async function closeBrowser() {
   activeBrowser = null;
 }
 
+let checkInProgress = false;
+
 async function checkSiteStatus(siteId) {
   const site = SITES[siteId];
   if (!site) return { loggedIn: false, error: 'Unknown site' };
 
-  if (activeBrowser && activeBrowser.siteId === siteId) {
-    return { error: 'Browser is currently open for this site. Close it first.' };
-  }
   if (activeBrowser) {
-    return { error: 'Another browser session is active. Close it first.' };
+    return { error: 'A browser session is active. Close it first.' };
+  }
+  if (checkInProgress) {
+    return { error: 'Another check is already in progress. Please wait.' };
   }
 
+  checkInProgress = true;
   console.log(`[${datetime()}] Checking session status for ${site.name} (headless)...`);
 
-  const context = await chromium.launchPersistentContext(site.browserDir, {
-    headless: true,
-    viewport: { width: 1280, height: 720 },
-    locale: 'en-US',
-    handleSIGINT: false,
-    args: ['--hide-crash-restore-bubble'],
-  });
-
-  const page = context.pages()[0] || await context.newPage();
+  let context;
   try {
+    context = await chromium.launchPersistentContext(site.browserDir, {
+      headless: true,
+      viewport: { width: 1280, height: 720 },
+      locale: 'en-US',
+      handleSIGINT: false,
+      args: ['--hide-crash-restore-bubble', '--no-sandbox', '--disable-gpu'],
+    });
+
+    const page = context.pages()[0] || await context.newPage();
     const result = await site.checkLogin(page);
     siteStatus[siteId] = {
       status: result.loggedIn ? 'logged_in' : 'not_logged_in',
@@ -224,10 +228,14 @@ async function checkSiteStatus(siteId) {
     console.log(`[${datetime()}] ${site.name}: ${result.loggedIn ? `logged in as ${result.user}` : 'not logged in'}`);
     return { ...result, site: siteId };
   } catch (e) {
+    console.error(`[${datetime()}] Check failed for ${site.name}:`, e.message);
     siteStatus[siteId] = { status: 'error', user: null, checkedAt: datetime() };
     return { loggedIn: false, site: siteId, error: e.message };
   } finally {
-    await context.close();
+    if (context) {
+      try { await context.close(); } catch (_) {}
+    }
+    checkInProgress = false;
   }
 }
 

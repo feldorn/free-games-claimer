@@ -1,0 +1,46 @@
+fgc-test  | Version: https://github.com/vogler/free-games-claimer/tree/
+fgc-test  | Build:
+fgc-test  | TurboVNC is running on port 5900 (no password!) with resolution 1920x1080
+fgc-test  | noVNC (VNC via browser) is running on http://localhost:6080/?autoconnect=true
+fgc-test  |
+fgc-test  | 2026-03-25 08:42:05.242 started checking prime-gaming
+fgc-test  | Signed in as Christopher
+fgc-test  | waitUntilStable 2761
+fgc-test  | waitUntilStable 2813
+fgc-test  | waitUntilStable 2813
+fgc-test  | Number of already claimed games (total): 19
+fgc-test  |
+fgc-test  | Number of free unclaimed games (Prime Gaming): 0
+fgc-test  |
+fgc-test  | Number of free unclaimed games (external stores): 0
+fgc-test  | 2026-03-25 08:42:22.004 started checking epic-games
+fgc-test  | Signed in as Feldorn11906
+fgc-test  | Including mobile games...
+fgc-test  | Free games: [
+fgc-test  |   'https://store.epicgames.com/en-US/p/electrician-simulator-164e9f',
+fgc-test  |   'https://store.epicgames.com/en-US/p/world-of-warships-world-of-warships-—-tachibana-lima-pack-5930e4',
+fgc-test  |   'https://store.epicgames.com/en-US/p/potion-permit-android-e270c3',
+fgc-test  |   'https://store.epicgames.com/en-US/p/potion-permit-ios-e4b5aa'
+fgc-test  | ]
+fgc-test  | Current free game: Electrician Simulator
+fgc-test  |   Already in library! Nothing to claim.
+fgc-test  | Current free game: World of Warships — Epic Anniversary Tachibana Pack
+fgc-test  |   Already in library! Nothing to claim.
+fgc-test  | Current free game: Potion Permit
+fgc-test  |   Not in library yet! Click get
+fgc-test  |   Claimed successfully!
+fgc-test  | Current free game: Potion Permit
+fgc-test  |   Not in library yet! Click get
+fgc-test  |   Claimed successfully!
+fgc-test  | 2026-03-25 08:42:58.160 started checking gog
+fgc-test  | --- Exception:
+fgc-test  | locator.textContent: Timeout 60000ms exceeded.
+fgc-test  | Call log:
+fgc-test  |   2 × waiting for locator('#menuUsername').first()
+fgc-test  |
+fgc-test  |     at /fgc/gog.js:105:54 {
+fgc-test  |   name: 'TimeoutError'
+fgc-test  | }
+fgc-test  | sleeping
+
+
