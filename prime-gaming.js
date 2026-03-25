@@ -453,5 +453,5 @@ try {
     await notify(`prime-gaming (${user}):<br>${html_game_list(notify_games)}`);
   }
 }
-if (page.video()) console.log('Recorded video:', await page.video().path());
+if (page.video()) log.info(`Recorded video — ${await page.video().path()}`);
 await context.close();
