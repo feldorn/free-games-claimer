@@ -1,0 +1,46 @@
+fgc-test  | ══════════════════════════════════════════════════
+fgc-test  |   Free Games Claimer
+fgc-test  |   Version: unknown
+fgc-test  |   Source:  https://github.com/vogler/free-games-claimer
+fgc-test  |   Build:   2026-03-25 16:13:09 UTC (local)
+fgc-test  | ══════════════════════════════════════════════════
+fgc-test  |   VNC:   port 5900 (no password!), 1920x1080
+fgc-test  |   noVNC: http://localhost:6080/?autoconnect=true
+fgc-test  |   Loop:    every 86400s
+fgc-test  |
+fgc-test  | ─── Prime Gaming ─────────────────────────────────
+fgc-test  |   Time: 2026-03-25 11:13:11.209
+fgc-test  |   User: Christopher
+fgc-test  |   Already claimed (total): 19
+fgc-test  |   Unclaimed (Prime Gaming): 0
+fgc-test  |   Unclaimed (external stores): 0
+fgc-test  | ──────────────────────────────────────────────────
+fgc-test  |
+fgc-test  | ─── Epic Games ───────────────────────────────────
+fgc-test  |   Time: 2026-03-25 11:13:28.273
+fgc-test  |   User: Feldorn11906
+fgc-test  |   Mobile games: included
+fgc-test  |   Free games found: 3 (4 incl. platform variants)
+fgc-test  |     ✓ Electrician Simulator — already in library
+fgc-test  |     ✓ World of Warships — Epic Anniversary Tachibana Pack — already in library
+fgc-test  |     ✓ Potion Permit — already claimed (2 platforms)
+fgc-test  | ──────────────────────────────────────────────────
+fgc-test  |
+fgc-test  | ─── GOG ──────────────────────────────────────────
+fgc-test  |   Time: 2026-03-25 11:13:37.742
+fgc-test  |   User: unknown
+fgc-test  |   ✓ No free giveaway right now
+fgc-test  | ──────────────────────────────────────────────────
+fgc-test  |
+fgc-test  | ─── Steam ────────────────────────────────────────
+fgc-test  |   Time: 2026-03-25 11:13:59.121
+fgc-test  |   Min rating: 6/9 (mostly positive)
+fgc-test  |   Min price: $10
+fgc-test  |   User: feldorn
+fgc-test  |   Source: SteamDB (steamdb.info/upcoming/free)
+fgc-test  |   Promotions found: 2
+fgc-test  |     ✓ Counter-Strike 2 — already existed
+fgc-test  |     ✗ Narvas — rating 5/9 (Mixed) below min 6
+fgc-test  |   Summary: 0 claimed, 1 skipped, 0 already owned
+fgc-test  | ──────────────────────────────────────────────────
+fgc-test  | Sleeping for 86400 seconds...
