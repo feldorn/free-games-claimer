@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { spawn } from 'node:child_process';
 import { chromium } from 'patchright';
 import { datetime } from './src/util.js';
 import { cfg } from './src/config.js';
@@ -230,7 +231,73 @@ async function checkSiteStatus(siteId) {
   }
 }
 
+let runProcess = null;
+let runLog = [];
+let runStatus = 'idle';
+
+async function checkAllSites() {
+  const results = {};
+  for (const siteId of Object.keys(SITES)) {
+    if (activeBrowser) {
+      results[siteId] = { error: 'Browser session active, close it first.' };
+      continue;
+    }
+    results[siteId] = await checkSiteStatus(siteId);
+  }
+  return results;
+}
+
+function runAllScripts() {
+  if (runProcess) return { success: false, error: 'Scripts are already running.' };
+  if (activeBrowser) return { success: false, error: 'Close the active browser session first.' };
+
+  
+  runLog = [];
+  runStatus = 'running';
+  console.log(`[${datetime()}] Starting all claiming scripts...`);
+
+  const child = spawn('bash', ['-c', 'node prime-gaming.js; node epic-games.js; node gog.js'], {
+    cwd: process.cwd(),
+    env: process.env,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+
+  runProcess = child;
+
+  child.stdout.on('data', (data) => {
+    const lines = data.toString().split('\n').filter(l => l.length);
+    lines.forEach(l => {
+      runLog.push({ type: 'stdout', text: l, time: datetime() });
+      if (runLog.length > 500) runLog.shift();
+    });
+  });
+
+  child.stderr.on('data', (data) => {
+    const lines = data.toString().split('\n').filter(l => l.length);
+    lines.forEach(l => {
+      runLog.push({ type: 'stderr', text: l, time: datetime() });
+      if (runLog.length > 500) runLog.shift();
+    });
+  });
+
+  child.on('close', (code) => {
+    runStatus = code === 0 ? 'success' : 'finished';
+    runLog.push({ type: 'system', text: `Scripts finished with exit code ${code}`, time: datetime() });
+    runProcess = null;
+    console.log(`[${datetime()}] All scripts finished (exit code ${code}).`);
+  });
+
+  child.on('error', (err) => {
+    runStatus = 'error';
+    runLog.push({ type: 'system', text: `Error: ${err.message}`, time: datetime() });
+    runProcess = null;
+  });
+
+  return { success: true };
+}
+
 function getState() {
+  const allLoggedIn = Object.values(siteStatus).every(s => s.status === 'logged_in');
   return {
     sites: Object.entries(SITES).map(([id, site]) => ({
       id,
@@ -238,6 +305,9 @@ function getState() {
       ...siteStatus[id],
     })),
     activeBrowser: activeBrowser ? { site: activeBrowser.siteId, name: SITES[activeBrowser.siteId].name } : null,
+    allLoggedIn,
+    runStatus,
+    runLogLength: runLog.length,
   };
 }
 
@@ -266,10 +336,25 @@ const PANEL_HTML = `<!DOCTYPE html>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #1a1a2e; color: #e0e0e0; height: 100vh; display: flex; flex-direction: column; }
-  .toolbar { background: #16213e; padding: 12px 20px; display: flex; align-items: center; gap: 16px; border-bottom: 2px solid #0f3460; flex-shrink: 0; flex-wrap: wrap; }
-  .toolbar h1 { font-size: 18px; color: #e94560; white-space: nowrap; margin-right: 8px; }
-  .site-cards { display: flex; gap: 12px; flex-wrap: wrap; flex: 1; }
-  .site-card { background: #0f3460; border-radius: 8px; padding: 10px 16px; display: flex; align-items: center; gap: 12px; min-width: 200px; }
+
+  .header { background: #16213e; padding: 12px 20px; border-bottom: 2px solid #0f3460; flex-shrink: 0; }
+  .header-top { display: flex; align-items: center; gap: 16px; margin-bottom: 8px; }
+  .header h1 { font-size: 18px; color: #e94560; white-space: nowrap; }
+  .header-actions { display: flex; gap: 8px; margin-left: auto; }
+
+  .steps { display: flex; gap: 4px; align-items: center; font-size: 12px; color: #888; margin-bottom: 10px; }
+  .step { padding: 4px 10px; border-radius: 12px; background: #0f3460; }
+  .step.active { background: #e94560; color: white; }
+  .step.done { background: #4ecca3; color: #1a1a2e; }
+  .step-arrow { color: #555; }
+
+  .status-banner { padding: 10px 20px; font-size: 14px; font-weight: 500; flex-shrink: 0; }
+  .status-banner.all-good { background: #1a3a2e; border-bottom: 1px solid #4ecca3; color: #4ecca3; }
+  .status-banner.needs-login { background: #3a1a1e; border-bottom: 1px solid #e94560; color: #e94560; }
+  .status-banner.running { background: #2a2a1e; border-bottom: 1px solid #f0c040; color: #f0c040; }
+
+  .site-cards { display: flex; gap: 12px; flex-wrap: wrap; }
+  .site-card { background: #0f3460; border-radius: 8px; padding: 10px 16px; display: flex; align-items: center; gap: 12px; min-width: 200px; flex: 1; }
   .site-card .name { font-weight: 600; font-size: 14px; }
   .site-card .status { font-size: 12px; color: #888; margin-top: 2px; }
   .site-card .status.logged-in { color: #4ecca3; }
@@ -282,7 +367,7 @@ const PANEL_HTML = `<!DOCTYPE html>
   .dot.checking { background: #f0c040; animation: pulse 1s infinite; }
   .dot.error { background: #ff6b6b; }
   @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
-  .actions { display: flex; gap: 6px; margin-left: auto; }
+  .card-actions { display: flex; gap: 6px; margin-left: auto; }
   .btn { border: none; border-radius: 6px; padding: 6px 14px; font-size: 13px; cursor: pointer; font-weight: 500; transition: background 0.2s, transform 0.1s; }
   .btn:active { transform: scale(0.97); }
   .btn:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -290,16 +375,35 @@ const PANEL_HTML = `<!DOCTYPE html>
   .btn-login:hover:not(:disabled) { background: #d63851; }
   .btn-check { background: #3a3a5c; color: #ccc; }
   .btn-check:hover:not(:disabled) { background: #4a4a6c; }
-  .active-session { background: #1a3a2e; border: 1px solid #4ecca3; border-radius: 8px; padding: 10px 16px; display: flex; align-items: center; gap: 12px; flex-basis: 100%; }
-  .active-session .label { color: #4ecca3; font-weight: 600; font-size: 14px; }
-  .active-session .site-name { color: #fff; font-size: 14px; }
+  .btn-check-all { background: #3a3a5c; color: #ccc; }
+  .btn-check-all:hover:not(:disabled) { background: #4a4a6c; }
+  .btn-run { background: #4ecca3; color: #1a1a2e; font-weight: 600; }
+  .btn-run:hover:not(:disabled) { background: #3dbb92; }
+  .btn-stop { background: #e94560; color: white; }
+  .btn-stop:hover:not(:disabled) { background: #d63851; }
   .btn-verify { background: #4ecca3; color: #1a1a2e; font-weight: 600; }
   .btn-verify:hover:not(:disabled) { background: #3dbb92; }
   .btn-cancel { background: #555; color: #ccc; }
   .btn-cancel:hover:not(:disabled) { background: #666; }
+
+  .active-session { background: #1a3a2e; border: 1px solid #4ecca3; border-radius: 8px; padding: 10px 16px; display: flex; align-items: center; gap: 12px; margin-top: 10px; }
+  .active-session .label { color: #4ecca3; font-weight: 600; font-size: 14px; }
+  .active-session .site-name { color: #fff; font-size: 14px; }
+
+  .main-area { flex: 1; position: relative; display: flex; flex-direction: column; }
   .vnc-container { flex: 1; position: relative; }
   .vnc-container iframe { width: 100%; height: 100%; border: none; }
-  .vnc-placeholder { display: flex; align-items: center; justify-content: center; height: 100%; color: #555; font-size: 18px; text-align: center; padding: 40px; line-height: 1.6; }
+  .vnc-placeholder { display: flex; align-items: center; justify-content: center; height: 100%; color: #888; font-size: 15px; text-align: center; padding: 40px; line-height: 1.8; }
+  .vnc-placeholder b { color: #e94560; }
+  .vnc-placeholder .highlight { color: #4ecca3; }
+
+  .run-log { flex: 1; background: #0d0d1a; font-family: 'Menlo', 'Consolas', monospace; font-size: 13px; padding: 12px 16px; overflow-y: auto; white-space: pre-wrap; word-break: break-word; }
+  .run-log .line { padding: 1px 0; }
+  .run-log .line.stderr { color: #e94560; }
+  .run-log .line.stdout { color: #c0c0d0; }
+  .run-log .line.system { color: #f0c040; font-weight: 600; }
+  .run-log .time { color: #555; margin-right: 8px; }
+
   .toast { position: fixed; bottom: 20px; right: 20px; background: #16213e; border: 1px solid #0f3460; border-radius: 8px; padding: 12px 20px; font-size: 14px; z-index: 100; animation: slideIn 0.3s ease; max-width: 400px; }
   .toast.success { border-color: #4ecca3; }
   .toast.error { border-color: #e94560; }
@@ -308,21 +412,43 @@ const PANEL_HTML = `<!DOCTYPE html>
 </style>
 </head>
 <body>
-<div class="toolbar">
-  <h1>Free Games Claimer</h1>
+<div class="header">
+  <div class="header-top">
+    <h1>Free Games Claimer</h1>
+    <div class="steps" id="steps"></div>
+    <div class="header-actions">
+      <button class="btn btn-check-all" onclick="checkAll()" id="btnCheckAll">Check All Sessions</button>
+      <button class="btn btn-run" onclick="runAll()" id="btnRunAll">Test Run All Scripts</button>
+    </div>
+  </div>
   <div class="site-cards" id="siteCards"></div>
   <div id="activeSession" style="display:none"></div>
 </div>
-<div class="vnc-container" id="vncContainer">
-  <div class="vnc-placeholder" id="vncPlaceholder">
-    Click <b>Login</b> on a site above to launch the browser.<br>
-    You will see the browser here and can log in manually.
+<div id="statusBanner" class="status-banner" style="display:none"></div>
+<div class="main-area" id="mainArea">
+  <div class="vnc-container" id="vncContainer">
+    <div class="vnc-placeholder" id="vncPlaceholder">
+      <div>
+        <div style="font-size: 20px; margin-bottom: 16px; color: #e94560; font-weight: 600;">How to set up your login sessions</div>
+        <div style="text-align: left; max-width: 520px; margin: 0 auto;">
+          <b>Step 1:</b> Click <b>Check All Sessions</b> above to see which sites need login.<br><br>
+          <b>Step 2:</b> For each site showing <span style="color: #e94560;">red</span>, click its <b>Login</b> button.<br>
+          &nbsp;&nbsp;&nbsp;&nbsp;A browser will appear here. Log in manually (handle captchas, MFA, etc.).<br>
+          &nbsp;&nbsp;&nbsp;&nbsp;When done, click <span class="highlight">"I'm Logged In"</span> to verify and save the session.<br><br>
+          <b>Step 3:</b> Once all sites show <span class="highlight">green</span>, click <b>Test Run All Scripts</b> to verify claiming works.<br><br>
+          <b>Step 4:</b> Stop this container, remove <span style="color: #f0c040;">LOGIN_MODE=1</span>, and restart for automated claiming.
+        </div>
+      </div>
+    </div>
   </div>
 </div>
 <script>
 const NOVNC_PORT = ${NOVNC_PORT};
-let state = { sites: [], activeBrowser: null };
+let state = { sites: [], activeBrowser: null, allLoggedIn: false, runStatus: 'idle' };
 let busy = false;
+let showingLog = false;
+let logOffset = 0;
+let logPollTimer = null;
 
 async function api(method, path, body) {
   const opts = { method, headers: { 'Content-Type': 'application/json' } };
@@ -339,9 +465,72 @@ function showToast(message, type = 'info', duration = 4000) {
   setTimeout(() => t.remove(), duration);
 }
 
+function getStep() {
+  const anyChecked = state.sites.some(s => s.status !== 'unknown');
+  if (!anyChecked) return 1;
+  if (!state.allLoggedIn) return 2;
+  if (state.runStatus === 'idle') return 3;
+  return 4;
+}
+
 function render() {
   const cards = document.getElementById('siteCards');
   const session = document.getElementById('activeSession');
+  const banner = document.getElementById('statusBanner');
+  const steps = document.getElementById('steps');
+  const btnRunAll = document.getElementById('btnRunAll');
+  const btnCheckAll = document.getElementById('btnCheckAll');
+  const currentStep = getStep();
+
+  const stepLabels = ['Check sessions', 'Log in to sites', 'Test run', 'Done!'];
+  steps.innerHTML = stepLabels.map((label, i) => {
+    const num = i + 1;
+    let cls = 'step';
+    if (num < currentStep) cls += ' done';
+    else if (num === currentStep) cls += ' active';
+    return (i > 0 ? '<span class="step-arrow">&rarr;</span>' : '') + '<span class="' + cls + '">' + num + '. ' + label + '</span>';
+  }).join('');
+
+  const isRunning = state.runStatus === 'running';
+  const disabled = busy || !!state.activeBrowser || isRunning;
+  btnCheckAll.disabled = disabled;
+  btnRunAll.disabled = disabled && !isRunning;
+
+  if (isRunning) {
+    btnRunAll.textContent = 'Stop Scripts';
+    btnRunAll.className = 'btn btn-stop';
+    btnRunAll.disabled = false;
+    btnRunAll.onclick = stopRun;
+  } else {
+    btnRunAll.textContent = 'Test Run All Scripts';
+    btnRunAll.className = 'btn btn-run';
+    btnRunAll.onclick = runAll;
+  }
+
+  if (state.allLoggedIn && !state.activeBrowser && state.runStatus !== 'running') {
+    banner.style.display = 'block';
+    if (state.runStatus === 'success') {
+      banner.className = 'status-banner all-good';
+      banner.innerHTML = 'All sessions verified and scripts ran successfully! You can now stop this container, remove LOGIN_MODE=1, and restart for automated claiming.';
+    } else if (state.runStatus === 'finished') {
+      banner.className = 'status-banner needs-login';
+      banner.innerHTML = 'Scripts finished with errors. Check the log below for details. Some sessions may have expired.';
+    } else {
+      banner.className = 'status-banner all-good';
+      banner.innerHTML = 'All sessions verified! Click "Test Run All Scripts" to verify the claimers work, or stop this container, remove LOGIN_MODE=1, and restart for automated claiming.';
+    }
+  } else if (isRunning) {
+    banner.style.display = 'block';
+    banner.className = 'status-banner running';
+    banner.innerHTML = 'Scripts are running... Watch the output below.';
+  } else if (state.sites.some(s => s.status === 'not_logged_in')) {
+    banner.style.display = 'block';
+    banner.className = 'status-banner needs-login';
+    const missing = state.sites.filter(s => s.status === 'not_logged_in').map(s => s.name).join(', ');
+    banner.innerHTML = 'Login needed for: ' + missing + '. Click Login on each site, complete the login in the browser below, then click "I\\\'m Logged In".';
+  } else {
+    banner.style.display = 'none';
+  }
 
   cards.innerHTML = state.sites.map(s => {
     const dotClass = s.status === 'logged_in' ? 'logged-in' : s.status === 'not_logged_in' ? 'not-logged-in' : s.status === 'error' ? 'error' : 'unknown';
@@ -351,11 +540,10 @@ function render() {
     else if (s.status === 'not_logged_in') statusText = 'Not logged in';
     else if (s.status === 'error') statusText = 'Error checking';
     if (s.checkedAt) statusText += ' (' + s.checkedAt.split(' ')[1] + ')';
-    const disabled = busy || !!state.activeBrowser;
     return '<div class="site-card">' +
       '<div class="dot ' + dotClass + '"></div>' +
       '<div><div class="name">' + s.name + '</div><div class="status ' + statusClass + '">' + statusText + '</div></div>' +
-      '<div class="actions">' +
+      '<div class="card-actions">' +
         '<button class="btn btn-login" onclick="launchSite(\\'' + s.id + '\\')" ' + (disabled ? 'disabled' : '') + '>Login</button>' +
         '<button class="btn btn-check" onclick="checkSite(\\'' + s.id + '\\')" ' + (disabled ? 'disabled' : '') + '>Check</button>' +
       '</div>' +
@@ -366,8 +554,8 @@ function render() {
     session.style.display = 'flex';
     session.innerHTML =
       '<div class="label">Active:</div>' +
-      '<div class="site-name">' + state.activeBrowser.name + '</div>' +
-      '<div class="actions">' +
+      '<div class="site-name">' + state.activeBrowser.name + ' - Complete the login in the browser below, then click "I\\\'m Logged In"</div>' +
+      '<div class="card-actions">' +
         '<button class="btn btn-verify" onclick="verifyLogin()" ' + (busy ? 'disabled' : '') + '>I\\'m Logged In</button>' +
         '<button class="btn btn-cancel" onclick="cancelLogin()" ' + (busy ? 'disabled' : '') + '>Cancel</button>' +
       '</div>';
@@ -378,9 +566,10 @@ function render() {
 }
 
 function showVnc() {
+  hideRunLog();
   const container = document.getElementById('vncContainer');
   const placeholder = document.getElementById('vncPlaceholder');
-  if (placeholder) placeholder.remove();
+  if (placeholder) placeholder.style.display = 'none';
   if (!container.querySelector('iframe')) {
     const iframe = document.createElement('iframe');
     iframe.src = location.protocol + '//' + location.hostname + ':' + NOVNC_PORT + '/vnc.html?autoconnect=true&resize=scale';
@@ -392,13 +581,65 @@ function hideVnc() {
   const container = document.getElementById('vncContainer');
   const iframe = container.querySelector('iframe');
   if (iframe) iframe.remove();
-  if (!container.querySelector('.vnc-placeholder')) {
-    const p = document.createElement('div');
-    p.className = 'vnc-placeholder';
-    p.id = 'vncPlaceholder';
-    p.innerHTML = 'Click <b>Login</b> on a site above to launch the browser.<br>You will see the browser here and can log in manually.';
-    container.appendChild(p);
+  const placeholder = document.getElementById('vncPlaceholder');
+  if (placeholder) placeholder.style.display = 'flex';
+}
+
+function showRunLog() {
+  showingLog = true;
+  const container = document.getElementById('vncContainer');
+  const placeholder = document.getElementById('vncPlaceholder');
+  if (placeholder) placeholder.style.display = 'none';
+  const iframe = container.querySelector('iframe');
+  if (iframe) iframe.style.display = 'none';
+  let logEl = document.getElementById('runLog');
+  if (!logEl) {
+    logEl = document.createElement('div');
+    logEl.id = 'runLog';
+    logEl.className = 'run-log';
+    container.appendChild(logEl);
   }
+  logEl.style.display = 'block';
+  pollLog();
+}
+
+function hideRunLog() {
+  showingLog = false;
+  if (logPollTimer) { clearTimeout(logPollTimer); logPollTimer = null; }
+  const logEl = document.getElementById('runLog');
+  if (logEl) logEl.style.display = 'none';
+  const iframe = document.getElementById('vncContainer')?.querySelector('iframe');
+  if (iframe) iframe.style.display = 'block';
+}
+
+async function pollLog() {
+  if (!showingLog) return;
+  try {
+    const r = await api('GET', '/run-log?since=' + logOffset);
+    const logEl = document.getElementById('runLog');
+    if (logEl && r.lines.length) {
+      r.lines.forEach(l => {
+        const div = document.createElement('div');
+        div.className = 'line ' + l.type;
+        const timeSpan = '<span class="time">' + (l.time?.split(' ')[1] || '') + '</span>';
+        div.innerHTML = timeSpan + escapeHtml(l.text);
+        logEl.appendChild(div);
+      });
+      logEl.scrollTop = logEl.scrollHeight;
+      logOffset = r.total;
+    }
+    if (r.status === 'running') {
+      logPollTimer = setTimeout(pollLog, 1000);
+    } else {
+      await refreshState();
+    }
+  } catch (_) {
+    logPollTimer = setTimeout(pollLog, 2000);
+  }
+}
+
+function escapeHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
 async function refreshState() {
@@ -459,6 +700,40 @@ async function checkSite(siteId) {
     else showToast(siteName + ': not logged in', 'error');
   } catch (e) { showToast('Error: ' + e.message, 'error'); }
   busy = false;
+  await refreshState();
+}
+
+async function checkAll() {
+  busy = true; render();
+  showToast('Checking all sessions...', 'info', 3000);
+  try {
+    await api('POST', '/check-all');
+  } catch (e) { showToast('Error: ' + e.message, 'error'); }
+  busy = false;
+  await refreshState();
+}
+
+async function runAll() {
+  busy = true; render();
+  try {
+    const r = await api('POST', '/run-all');
+    if (r.success) {
+      logOffset = 0;
+      showRunLog();
+      showToast('Scripts started! Watch the output below.', 'success');
+    } else {
+      showToast(r.error || 'Failed to start scripts.', 'error');
+    }
+  } catch (e) { showToast('Error: ' + e.message, 'error'); }
+  busy = false;
+  await refreshState();
+}
+
+async function stopRun() {
+  try {
+    await api('POST', '/stop-run');
+    showToast('Scripts stopped.', 'info');
+  } catch (e) { showToast('Error: ' + e.message, 'error'); }
   await refreshState();
 }
 
@@ -538,6 +813,38 @@ const server = http.createServer(async (req, res) => {
       }
       const result = await checkSiteStatus(site);
       sendJson(res, result);
+      return;
+    }
+
+    if (req.method === 'POST' && req.url === '/api/check-all') {
+      const results = await checkAllSites();
+      sendJson(res, results);
+      return;
+    }
+
+    if (req.method === 'POST' && req.url === '/api/run-all') {
+      const result = runAllScripts();
+      sendJson(res, result);
+      return;
+    }
+
+    if (req.method === 'GET' && req.url.startsWith('/api/run-log')) {
+      const url = new URL(req.url, `http://${req.headers.host}`);
+      const since = parseInt(url.searchParams.get('since') || '0', 10);
+      sendJson(res, { lines: runLog.slice(since), total: runLog.length, status: runStatus });
+      return;
+    }
+
+    if (req.method === 'POST' && req.url === '/api/stop-run') {
+      if (runProcess) {
+        runProcess.kill('SIGTERM');
+        runLog.push({ type: 'system', text: 'Scripts stopped by user.', time: datetime() });
+        runStatus = 'stopped';
+        runProcess = null;
+        sendJson(res, { success: true });
+      } else {
+        sendJson(res, { success: false, error: 'No scripts are running.' });
+      }
       return;
     }
 

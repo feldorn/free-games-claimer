@@ -106,6 +106,20 @@ A web-based control panel for establishing browser sessions manually. Designed f
 | `run.sh` | **New file** — Nix/Replit Chromium launcher |
 | `scripts/post-merge.sh` | **New file** — post-merge setup |
 
+## Interactive Login Panel UX Improvements
+
+### Workflow guidance
+- Added a 4-step progress indicator at the top: Check sessions -> Log in to sites -> Test run -> Done!
+- Added clear instructions in the main area explaining exactly what to do
+- Added contextual status banners that change based on current state (needs login, all green, scripts running)
+
+### New features
+- **Check All Sessions** button — verifies login status for all 3 sites in one click
+- **Test Run All Scripts** button — runs all 3 claiming scripts from within the panel with live log output
+- **Stop Scripts** button — appears while scripts are running, allows canceling
+- **Live log viewer** — shows real-time stdout/stderr from the claiming scripts with color-coded output
+- **Contextual "what's next" messaging** — when all sites are green, tells the user to remove LOGIN_MODE=1 and restart
+
 ### Files deleted
 - `aliexpress.js`
 - `steam-games.js`
