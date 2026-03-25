@@ -49,6 +49,7 @@ export const confirm = o => prompt({ type: 'confirm', message: 'Continue?', ...o
 
 // notifications via apprise CLI
 import { execFile } from 'child_process';
+import chalk from 'chalk';
 import { cfg } from './config.js';
 
 export const notify = html => new Promise((resolve, reject) => {
@@ -77,3 +78,35 @@ export const notify = html => new Promise((resolve, reject) => {
 export const escapeHtml = unsafe => unsafe.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll('\'', '&#039;');
 
 export const html_game_list = games => games.map(g => `- <a href="${g.url}">${escapeHtml(g.title)}</a> (${g.status})`).join('<br>');
+
+const SECTION_WIDTH = 50;
+export const log = {
+  section: (title) => {
+    const pad = SECTION_WIDTH - title.length - 5;
+    console.log(`\n${'─'.repeat(3)} ${title} ${'─'.repeat(Math.max(3, pad))}`);
+  },
+  sectionEnd: () => {
+    console.log('─'.repeat(SECTION_WIDTH));
+  },
+  status: (label, value) => {
+    console.log(`  ${label}: ${value}`);
+  },
+  game: (name, status) => {
+    console.log(`  ${chalk.blue(name)} ${chalk.dim('→')} ${status}`);
+  },
+  skip: (name, reason) => {
+    console.log(`  ${chalk.dim(name)} ${chalk.dim('→')} ${chalk.yellow(reason)}`);
+  },
+  ok: (msg) => {
+    console.log(`  ${chalk.green('✓')} ${msg}`);
+  },
+  warn: (msg) => {
+    console.log(`  ${chalk.yellow('!')} ${msg}`);
+  },
+  fail: (msg) => {
+    console.log(`  ${chalk.red('✗')} ${msg}`);
+  },
+  summary: (parts) => {
+    console.log(`  ${chalk.dim('Summary:')} ${parts.join(', ')}`);
+  },
+};

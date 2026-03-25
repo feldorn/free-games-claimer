@@ -1,6 +1,6 @@
 import { chromium } from 'patchright';
 import chalk from 'chalk';
-import { resolve, jsonDb, datetime, filenamify, prompt, notify, html_game_list, handleSIGINT } from './src/util.js';
+import { resolve, jsonDb, datetime, filenamify, prompt, notify, html_game_list, handleSIGINT, log } from './src/util.js';
 import { cfg } from './src/config.js';
 
 const screenshot = (...a) => resolve(cfg.dir.screenshots, 'steam', ...a);
@@ -37,8 +37,10 @@ function parsePrice(text) {
   return isNaN(val) ? null : val;
 }
 
-console.log(datetime(), 'started checking steam');
-console.log(`Filters: min rating = ${cfg.steam_min_rating} (${Object.entries(RATING_MAP).find(([, v]) => v === cfg.steam_min_rating)?.[0] || '?'}), min original price = $${cfg.steam_min_price}`);
+log.section('Steam');
+log.status('Time', datetime());
+log.status('Min rating', `${cfg.steam_min_rating}/9 (${Object.entries(RATING_MAP).find(([, v]) => v === cfg.steam_min_rating)?.[0] || '?'})`);
+log.status('Min price', `$${cfg.steam_min_price}`);
 
 const db = await jsonDb('steam.json', {});
 
@@ -295,18 +297,18 @@ try {
   }
 
   user = (await page.locator('#account_pulldown').innerText()).trim();
-  console.log(`Signed in as ${user}`);
+  log.status('User', user);
   db.data[user] ||= {};
 
   const freeGames = await discoverFreeGames(page);
 
   if (freeGames.length === 0) {
-    console.log('No free-to-keep promotions found on SteamDB right now.');
+    log.ok('No free-to-keep promotions on SteamDB right now');
   } else {
-    console.log(`\nFree-to-keep promotion(s) from SteamDB:`);
+    console.log(`  Found ${freeGames.length} free-to-keep promotion(s):`);
     for (const g of freeGames) {
-      const endStr = g.endDate ? `ends ${g.endDate}` : 'end date unknown';
-      console.log(`  ${chalk.blue(g.name)} (app ${g.appId}) - ${endStr}`);
+      const endStr = g.endDate ? `ends ${g.endDate}` : '';
+      console.log(`    ${chalk.blue(g.name)} (app ${g.appId})${endStr ? ' - ' + endStr : ''}`);
     }
   }
 
@@ -315,10 +317,9 @@ try {
 
   for (const game of freeGames) {
     const appId = game.appId;
-    console.log(`\nProcessing: ${chalk.blue(game.name)} (app ${appId})`);
 
     if (db.data[user][appId]?.status === 'claimed' || db.data[user][appId]?.status === 'existed') {
-      console.log(`  Already processed (${db.data[user][appId].status}). Skipping.`);
+      log.skip(game.name, `already ${db.data[user][appId].status}`);
       continue;
     }
 
@@ -328,50 +329,49 @@ try {
     db.data[user][appId] ||= { title, time: datetime(), url: game.url };
 
     if (details.alreadyOwned) {
-      console.log('  Already in library! Nothing to claim.');
+      log.game(title, 'already in library');
       db.data[user][appId].status ||= 'existed';
       notify_games.push({ title, url: game.url, status: 'existed' });
       continue;
     }
 
     if (!details.isFree) {
-      console.log('  Game is not currently free on store page. Skipping.');
+      log.skip(title, 'not currently free on store page');
       skipped++;
       continue;
     }
 
     if (details.rating === null) {
-      console.log('  Skipped: no reviews on store page (unrated games are always skipped)');
+      log.skip(title, 'no reviews (unrated)');
       skipped++;
       continue;
     }
 
     if (details.rating < cfg.steam_min_rating) {
-      console.log(`  Skipped: rating ${details.ratingText} (${details.rating}/9) below minimum ${cfg.steam_min_rating}/9`);
+      log.skip(title, `rating ${details.rating}/9 (${details.ratingText}) < min ${cfg.steam_min_rating}`);
       skipped++;
       continue;
     }
 
     if (details.originalPrice !== null && details.originalPrice < cfg.steam_min_price) {
-      console.log(`  Skipped: original price $${details.originalPrice} below minimum $${cfg.steam_min_price}`);
+      log.skip(title, `price $${details.originalPrice} < min $${cfg.steam_min_price}`);
       skipped++;
       continue;
     }
 
     if (cfg.dryrun) {
-      console.log('  DRYRUN=1 -> Skip claiming!');
+      log.warn(`${title} - dry run, skipping claim`);
       notify_games.push({ title, url: game.url, status: 'skipped' });
       continue;
     }
 
     if (!details.canClaim) {
-      console.log('  No "Add to Account" button found. May require purchase or is unavailable.');
+      log.fail(`${title} - no "Add to Account" button`);
       db.data[user][appId].status = 'failed: no claim button';
       notify_games.push({ title, url: game.url, status: 'failed: no claim button' });
       continue;
     }
 
-    console.log('  Claiming...');
     try {
       const addBtn = page.locator('a.btn_green_steamui:has-text("Add to Account"), .game_purchase_action .btn_addtocart a:has-text("Add to Account")').first();
       await addBtn.click();
@@ -401,35 +401,37 @@ try {
       }
 
       if (success) {
-        console.log('  Claimed successfully!');
+        log.ok(`${title} - claimed!`);
         db.data[user][appId].status = 'claimed';
         db.data[user][appId].time = datetime();
         notify_games.push({ title, url: game.url, status: 'claimed' });
         claimed++;
       } else {
-        console.error('  Claim may have failed - could not verify ownership.');
+        log.fail(`${title} - could not verify claim`);
         db.data[user][appId].status = 'failed';
         notify_games.push({ title, url: game.url, status: 'failed' });
       }
 
       await page.screenshot({ path: screenshot(`${filenamify(title)}.png`) });
     } catch (e) {
-      console.error('  Error claiming:', e.message);
+      log.fail(`${title} - ${e.message}`);
       db.data[user][appId].status = 'failed';
       notify_games.push({ title, url: game.url, status: 'failed' });
       await page.screenshot({ path: screenshot('failed', `${filenamify(title)}_${filenamify(datetime())}.png`) });
     }
   }
 
-  console.log(`\nSteam summary: ${claimed} claimed, ${skipped} skipped (filters), ${notify_games.filter(g => g.status === 'existed').length} already owned`);
+  const existed = notify_games.filter(g => g.status === 'existed').length;
+  log.summary([`${claimed} claimed`, `${skipped} skipped`, `${existed} already owned`]);
 
 } catch (error) {
   process.exitCode ||= 1;
-  console.error('--- Exception:');
-  console.error(error);
+  log.fail(`Exception: ${error.message || error}`);
+  if (cfg.debug) console.error(error);
   if (error.message && process.exitCode != 130) await notify(`steam failed: ${error.message.split('\n')[0]}`);
 } finally {
   await db.write();
+  log.sectionEnd();
   if (notify_games.filter(g => g.status === 'claimed' || g.status === 'failed').length) {
     await notify(`steam (${user}):<br>${html_game_list(notify_games)}`);
   }

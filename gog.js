@@ -1,13 +1,14 @@
 import { chromium } from 'patchright';
 import chalk from 'chalk';
-import { resolve, jsonDb, datetime, filenamify, prompt, confirm, notify, html_game_list, handleSIGINT } from './src/util.js';
+import { resolve, jsonDb, datetime, filenamify, prompt, confirm, notify, html_game_list, handleSIGINT, log } from './src/util.js';
 import { cfg } from './src/config.js';
 
 const screenshot = (...a) => resolve(cfg.dir.screenshots, 'gog', ...a);
 
 const URL_CLAIM = 'https://www.gog.com/en';
 
-console.log(datetime(), 'started checking gog');
+log.section('GOG');
+log.status('Time', datetime());
 
 const db = await jsonDb('gog.json', {});
 
@@ -119,19 +120,19 @@ try {
       user = 'unknown';
     }
   }
-  console.log(`Signed in as ${user}`);
+  log.status('User', user);
   db.data[user] ||= {};
 
   const banner = page.locator('#giveaway');
   await page.waitForTimeout(2000); // TODO patchright sometimes missed banner otherwise
   if (!await banner.count()) {
-    console.log('Currently no free giveaway!');
+    log.ok('No free giveaway right now');
   } else {
     const text = await page.locator('.giveaway__content-header').innerText();
     const match_all = text.match(/Claim (.*) and don't miss the|Success! (.*) was added to/);
     const title = match_all[1] ? match_all[1] : match_all[2];
     const url = await banner.locator('a').first().getAttribute('href');
-    console.log(`Current free game: ${chalk.blue(title)} - ${url}`);
+    log.game(title, url);
     db.data[user][title] ||= { title, time: datetime(), url };
     if (cfg.dryrun) process.exit(1);
     if (cfg.interactive && !await confirm()) process.exit(0);
@@ -150,14 +151,14 @@ try {
     let status;
     if (response == '{}') {
       status = 'claimed';
-      console.log('  Claimed successfully!');
+      log.ok(`${title} - claimed!`);
     } else {
       const message = JSON.parse(response).message;
       if (message == 'Already claimed') {
-        status = 'existed'; // same status text as for epic-games
-        console.log('  Already in library! Nothing to claim.');
+        status = 'existed';
+        log.ok(`${title} - already in library`);
       } else {
-        console.log(response);
+        log.warn(`${title} - ${message}`);
         status = message;
       }
     }
@@ -173,12 +174,13 @@ try {
   }
 } catch (error) {
   process.exitCode ||= 1;
-  console.error('--- Exception:');
-  console.error(error); // .toString()?
+  log.fail(`Exception: ${error.message || error}`);
+  if (cfg.debug) console.error(error);
   if (error.message && process.exitCode != 130) await notify(`gog failed: ${error.message.split('\n')[0]}`);
 } finally {
-  await db.write(); // write out json db
-  if (notify_games.filter(g => g.status != 'existed').length) { // don't notify if all were already claimed
+  await db.write();
+  log.sectionEnd();
+  if (notify_games.filter(g => g.status != 'existed').length) {
     await notify(`gog (${user}):<br>${html_game_list(notify_games)}`);
   }
 }

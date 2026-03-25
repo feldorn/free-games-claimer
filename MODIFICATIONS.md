@@ -176,6 +176,36 @@ Automatically discovers and claims temporarily free games on Steam (100% off pro
 
 ---
 
+## Logging Improvements
+
+### Shared logging helpers in `src/util.js`
+- Added `log` object with structured output methods: `section()`, `sectionEnd()`, `status()`, `game()`, `skip()`, `ok()`, `warn()`, `fail()`, `summary()`
+- Consistent 50-character-wide section dividers using `─` characters
+- Color-coded output: blue for game names, green checkmarks for success, yellow for warnings/skips, red for failures, dim for secondary info
+
+### Startup banner in `docker-entrypoint.sh`
+- Replaced flat text output with boxed banner using `═` characters
+- Shows version, source URL, branch (if non-main), and build timestamp
+- VNC/noVNC info formatted with consistent indentation
+
+### Per-script section headers and footers
+- Each script now opens with `─── Site Name ───` section header via `log.section()`
+- Shows structured metadata: time, user, filters (Steam), game counts
+- Closes with `───` footer via `log.sectionEnd()`
+- Exception output simplified to one-line `log.fail()` (full stack trace only with `DEBUG=1`)
+
+### Noise reduction
+- `waitUntilStable` debug output in `prime-gaming.js` now gated behind `DEBUG=1`
+- Raw URL arrays in `epic-games.js` now gated behind `DEBUG=1` (shows count instead)
+- Replaced verbose `--- Exception:` + full stack dump with single-line `log.fail()` message
+
+### Files changed
+- `src/util.js`: Added `chalk` import and `log` helper object
+- `docker-entrypoint.sh`: Startup banner redesign
+- `prime-gaming.js`, `epic-games.js`, `gog.js`, `steam.js`: Section headers/footers, structured game output, reduced noise
+
+---
+
 ## Summary of All Changed Files
 
 | File | Changes |

@@ -2,18 +2,22 @@
 
 set -eo pipefail # exit on error, error on any fail in pipe (not just last cmd); add -x to print each cmd; see gist bash_strict_mode.md
 
+echo "══════════════════════════════════════════════════"
+echo "  Free Games Claimer"
 if [ -n "$COMMIT" ]; then
-  echo "Version: https://github.com/vogler/free-games-claimer/tree/${COMMIT}"
+  echo "  Version: ${COMMIT}"
 else
   LOCAL_COMMIT=$(git -C /fgc rev-parse --short HEAD 2>/dev/null || echo "unknown")
-  echo "Version: ${LOCAL_COMMIT}"
+  echo "  Version: ${LOCAL_COMMIT}"
 fi
-[ -n "$BRANCH" ] && [ "$BRANCH" != "main" ] && echo "Branch: ${BRANCH}"
+echo "  Source:  https://github.com/vogler/free-games-claimer"
+[ -n "$BRANCH" ] && [ "$BRANCH" != "main" ] && echo "  Branch:  ${BRANCH}"
 if [ -n "$NOW" ]; then
-  echo "Build: $NOW"
+  echo "  Build:   $NOW"
 else
-  echo "Build: $(date -u '+%Y-%m-%d %H:%M:%S UTC') (local)"
+  echo "  Build:   $(date -u '+%Y-%m-%d %H:%M:%S UTC') (local)"
 fi
+echo "══════════════════════════════════════════════════"
 
 BROWSER="${BROWSER_DIR:-data/browser}"
 
@@ -41,10 +45,9 @@ fi
 # TurboVNC server replaces Xvfb+x11vnc
 # shellcheck disable=SC2086
 /opt/TurboVNC/bin/vncserver $DISPLAY -geometry "${WIDTH}x${HEIGHT}" -depth "${DEPTH}" -rfbport "${VNC_PORT}" $pw -vgl -log /fgc/data/TurboVNC.log -xstartup /usr/bin/ratpoison 2>/dev/null # -noxstartup -novnc /usr/share/novnc/
-echo "TurboVNC is running on port $VNC_PORT ($pwt) with resolution ${WIDTH}x${HEIGHT}"
 websockify -D --web "/usr/share/novnc/" "$NOVNC_PORT" "localhost:$VNC_PORT" 2>/dev/null 1>&2 &
-echo "noVNC (VNC via browser) is running on http://localhost:$NOVNC_PORT/?autoconnect=true"
-echo
+echo "  VNC:   port ${VNC_PORT} (${pwt}), ${WIDTH}x${HEIGHT}"
+echo "  noVNC: http://localhost:${NOVNC_PORT}/?autoconnect=true"
 
 if [ "$LOGIN_MODE" = "1" ]; then
   echo "LOGIN_MODE=1: Starting interactive login panel on port ${PANEL_PORT:-7080}..."

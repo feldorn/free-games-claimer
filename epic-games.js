@@ -3,7 +3,7 @@ import { authenticator } from 'otplib';
 import chalk from 'chalk';
 import path from 'path';
 import { existsSync, writeFileSync } from 'fs';
-import { resolve, jsonDb, datetime, filenamify, prompt, confirm, notify, html_game_list, handleSIGINT } from './src/util.js';
+import { resolve, jsonDb, datetime, filenamify, prompt, confirm, notify, html_game_list, handleSIGINT, log } from './src/util.js';
 import { cfg } from './src/config.js';
 import { getMobileGames } from './src/epic-games-mobile.js';
 
@@ -12,7 +12,8 @@ const screenshot = (...a) => resolve(cfg.dir.screenshots, 'epic-games', ...a);
 const URL_CLAIM = 'https://store.epicgames.com/en-US/free-games';
 const URL_LOGIN = 'https://www.epicgames.com/id/login?lang=en-US&noHostRedirect=true&redirectUrl=' + URL_CLAIM;
 
-console.log(datetime(), 'started checking epic-games');
+log.section('Epic Games');
+log.status('Time', datetime());
 
 const db = await jsonDb('epic-games.json', {});
 
@@ -128,7 +129,7 @@ try {
     if (!cfg.debug) context.setDefaultTimeout(cfg.timeout);
   }
   user = await page.locator('egs-navigation').getAttribute('displayname'); // 'null' if !isloggedin
-  console.log(`Signed in as ${user}`);
+  log.status('User', user);
   db.data[user] ||= {};
   if (cfg.time) console.timeEnd('login');
   if (cfg.time) console.time('claim all games');
@@ -157,7 +158,8 @@ try {
     urls.push(...mobileGames.map(x => x.url));
   }
 
-  console.log('Free games:', urls);
+  log.status('Free games found', urls.length);
+  if (cfg.debug) console.log('  URLs:', urls);
 
   for (const url of urls) {
     if (cfg.time) console.time('claim game');
@@ -210,13 +212,13 @@ try {
     const game_id = page.url().split('/').pop();
     const existedInDb = db.data[user][game_id];
     db.data[user][game_id] ||= { title, time: datetime(), url: page.url() }; // this will be set on the initial run only!
-    console.log('Current free game:', chalk.blue(title));
+    log.game(title, 'checking');
     if (bundle_includes) console.log('  This bundle includes:', bundle_includes);
     const notify_game = { title, url, status: 'failed' };
     notify_games.push(notify_game); // status is updated below
 
     if (btnText == 'in library') {
-      console.log('  Already in library! Nothing to claim.');
+      log.ok(`${title} - already in library`);
       if (!existedInDb) await notify(`Game already in library: ${url}`);
       notify_game.status = 'existed';
       db.data[user][game_id].status ||= 'existed'; // does not overwrite claimed or failed
@@ -311,7 +313,7 @@ try {
         await page.locator('text=Thanks for your order!').waitFor({ state: 'attached' }); // TODO Bundle: got stuck here, but normal game now as well
         db.data[user][game_id].status = 'claimed';
         db.data[user][game_id].time = datetime(); // claimed time overwrites failed/dryrun time
-        console.log('  Claimed successfully!');
+        log.ok(`${title} - claimed!`);
         // context.setDefaultTimeout(cfg.timeout);
       } catch (e) {
         console.log(e);
@@ -330,13 +332,14 @@ try {
   }
 } catch (error) {
   process.exitCode ||= 1;
-  console.error('--- Exception:');
-  console.error(error); // .toString()?
+  log.fail(`Exception: ${error.message || error}`);
+  if (cfg.debug) console.error(error);
   if (error.message && process.exitCode != 130) await notify(`epic-games failed: ${error.message.split('\n')[0]}`);
 } finally {
   if (cfg.time) console.timeEnd('claim all games');
-  await db.write(); // write out json db
-  if (notify_games.filter(g => g.status == 'claimed' || g.status == 'failed').length) { // don't notify if all have status 'existed', 'manual', 'requires base game', 'unavailable-in-region', 'skipped'
+  await db.write();
+  log.sectionEnd();
+  if (notify_games.filter(g => g.status == 'claimed' || g.status == 'failed').length) {
     await notify(`epic-games (${user}):<br>${html_game_list(notify_games)}`);
   }
 }

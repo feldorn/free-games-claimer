@@ -1,7 +1,7 @@
 import { chromium } from 'patchright';
 import { authenticator } from 'otplib';
 import chalk from 'chalk';
-import { resolve, jsonDb, datetime, filenamify, prompt, confirm, notify, html_game_list, handleSIGINT } from './src/util.js';
+import { resolve, jsonDb, datetime, filenamify, prompt, confirm, notify, html_game_list, handleSIGINT, log } from './src/util.js';
 import { cfg } from './src/config.js';
 
 const screenshot = (...a) => resolve(cfg.dir.screenshots, 'prime-gaming', ...a);
@@ -10,7 +10,8 @@ const screenshot = (...a) => resolve(cfg.dir.screenshots, 'prime-gaming', ...a);
 const BASE_URL = 'https://luna.amazon.com';
 const URL_CLAIM = `${BASE_URL}/claims/home`;
 
-console.log(datetime(), 'started checking prime-gaming');
+log.section('Prime Gaming');
+log.status('Time', datetime());
 
 const db = await jsonDb('prime-gaming.json', {});
 
@@ -88,7 +89,7 @@ try {
     if (!cfg.debug) context.setDefaultTimeout(cfg.timeout);
   }
   user = await page.locator('[data-a-target="user-dropdown-first-name-text"]').first().innerText();
-  console.log(`Signed in as ${user}`);
+  log.status('User', user);
   // await page.click('button[aria-label="User dropdown and more options"]');
   // const twitch = await page.locator('[data-a-target="TwitchDisplayName"]').first().innerText();
   // console.log(`Twitch user name is ${twitch}`);
@@ -104,7 +105,7 @@ try {
     let v;
     while (true) {
       const v2 = await f();
-      console.log('waitUntilStable', v2);
+      if (cfg.debug) console.log('waitUntilStable', v2);
       if (v == v2) break;
       v = v2;
       await act();
@@ -126,7 +127,8 @@ try {
   await games.waitFor();
   // await scrollUntilStable(() => games.locator('.item-card__action').count()); // number of games
   await scrollUntilStable(() => page.evaluate(() => document.querySelector('.tw-full-width').scrollHeight)); // height may change during loading while number of games is still the same?
-  console.log('Number of already claimed games (total):', await games.locator('p:has-text("Collected")').count());
+  const alreadyClaimed = await games.locator('p:has-text("Collected")').count();
+  log.status('Already claimed (total)', alreadyClaimed);
   // can't use .all() since the list of elements via locator will change after click while we iterate over it
   const internal = await games.locator('.item-card__action:has(button[data-a-target="FGWPOffer"])').all();
   const external = await games.locator('.item-card__action:has(a[data-a-target="FGWPOffer"])').all();
@@ -152,7 +154,7 @@ try {
     if (isNew) await p.close();
     return daysLeft > cfg.pg_timeLeft;
   };
-  console.log('\nNumber of free unclaimed games (Prime Gaming):', internal.length);
+  log.status('Unclaimed (Prime Gaming)', internal.length);
   // claim games in internal store
   for (const card of internal) {
     await card.scrollIntoViewIfNeeded();
@@ -170,7 +172,7 @@ try {
     // console.log('Image:', img);
     await card.screenshot({ path: screenshot('internal', `${filenamify(title)}.png`) });
   }
-  console.log('\nNumber of free unclaimed games (external stores):', external.length);
+  log.status('Unclaimed (external stores)', external.length);
   // claim games in external/linked stores. Linked: origin.com, epicgames.com; Redeem-key: gog.com, legacygames.com, microsoft
   const external_info = [];
   for (const card of external) { // need to get data incl. URLs in this loop and then navigate in another, otherwise .all() would update after coming back and .elementHandles() like above would lead to error due to page navigation: elementHandle.$: Protocol error (Page.adoptNode)
@@ -436,12 +438,13 @@ try {
   }
 } catch (error) {
   process.exitCode ||= 1;
-  console.error('--- Exception:');
-  console.error(error); // .toString()?
+  log.fail(`Exception: ${error.message || error}`);
+  if (cfg.debug) console.error(error);
   if (error.message && process.exitCode != 130) await notify(`prime-gaming failed: ${error.message.split('\n')[0]}`);
 } finally {
-  await db.write(); // write out json db
-  if (notify_games.length) { // list should only include claimed games
+  await db.write();
+  log.sectionEnd();
+  if (notify_games.length) {
     await notify(`prime-gaming (${user}):<br>${html_game_list(notify_games)}`);
   }
 }
