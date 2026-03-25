@@ -1,0 +1,30 @@
+services:
+  free-games-claimer:
+    build: .
+    container_name: fgc-test
+    deploy:
+      resources:
+        limits:
+          memory: 2000M
+    environment:
+      - TZ=${TZ}
+      - NOTIFY=${NOTIFY}
+      - NOTIFY_TITLE=Free Games Claimer
+      - EMAIL=${GMAIL}
+      - EG_EMAIL=${GMAIL}
+      - EG_PASSWORD=${EG_PASSWORD}
+      - PG_EMAIL=${GMAIL}
+      - PG_PASSWORD=${PG_PASSWORD}
+      - GOG_EMAIL=${GMAIL}
+      - GOG_PASSWORD=${GOG_PASSWORD}
+      - LOGIN_MODE=${LOGIN_MODE:-0}
+    volumes:
+      - fgc-test:/fgc/data
+    ports:
+      - "6080:6080"
+      - "7080:7080"
+    restart: unless-stopped
+    command: bash -c "node prime-gaming; node epic-games; node gog; echo sleeping; sleep 1d"
+
+volumes:
+  fgc-test:
