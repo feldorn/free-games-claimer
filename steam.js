@@ -70,7 +70,7 @@ async function dismissAgeGate(p) {
   try {
     const ageGate = p.locator('#agegate_box, .agegate_text_container, .age_gate');
     if (await ageGate.count() > 0) {
-      console.log('  Handling age verification...');
+      if (cfg.debug) console.log('  Handling age verification...');
       const yearSelect = p.locator('#ageYear');
       if (await yearSelect.count() > 0) {
         await yearSelect.selectOption('1990');
@@ -244,13 +244,13 @@ try {
   };
 
   while (!await isLoggedIn()) {
-    console.error('Not signed in to Steam.');
+    log.warn('Not signed in to Steam');
     if (cfg.nowait) process.exit(1);
     await page.goto(URL_LOGIN, { waitUntil: 'domcontentloaded' });
     if (!cfg.debug) context.setDefaultTimeout(cfg.login_timeout);
-    console.info(`Login timeout is ${cfg.login_timeout / 1000} seconds!`);
-    if (cfg.steam_email && cfg.steam_password) console.info('Using email and password from environment.');
-    else console.info('Press ESC to skip the prompts if you want to login in the browser (not possible in headless mode).');
+    log.status('Login timeout', `${cfg.login_timeout / 1000}s`);
+    if (cfg.steam_email && cfg.steam_password) log.info('Using credentials from environment');
+    else log.info('Press ESC to login in browser (not possible in headless mode)');
     const email = cfg.steam_email || await prompt({ message: 'Enter Steam email/username' });
     const password = email && (cfg.steam_password || await prompt({ type: 'password', message: 'Enter Steam password' }));
     if (email && password) {
@@ -261,7 +261,7 @@ try {
       await passwordInput.fill(password);
       await page.locator('button[type="submit"], button:has-text("Sign in")').first().click();
       page.waitForSelector('[class*="newlogindialog_AwaitingMobileConfLabel"], [class*="segmentedinputs"]').then(async () => {
-        console.log('Steam Guard - enter the code from your authenticator app or email.');
+        log.info('Steam Guard — enter the code from your authenticator app or email');
         const code = await prompt({ type: 'text', message: 'Enter Steam Guard code', validate: n => n.toString().length == 5 || 'The code must be 5 characters!' });
         if (code) {
           const inputs = await page.locator('[class*="segmentedinputs"] input').all();
@@ -282,10 +282,10 @@ try {
         await page.waitForTimeout(3000);
       }
     } else {
-      console.log('Waiting for you to login in the browser.');
+      log.info('Waiting for you to login in the browser');
       await notify('steam: no longer signed in and not enough options set for automatic login.');
       if (cfg.headless) {
-        console.log('Run `SHOW=1 node steam` to login in the opened browser.');
+        log.info('Run `SHOW=1 node steam` to login in the opened browser');
         await context.close();
         process.exit(1);
       }
@@ -410,7 +410,7 @@ try {
 
       await page.screenshot({ path: screenshot(`${filenamify(title)}.png`) });
     } catch (e) {
-      log.fail(`${title} - ${e.message}`);
+      log.fail(`${title} — ${e.message}`);
       db.data[user][appId].status = 'failed';
       notify_games.push({ title, url: game.url, status: 'failed' });
       await page.screenshot({ path: screenshot('failed', `${filenamify(title)}_${filenamify(datetime())}.png`) });

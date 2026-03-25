@@ -199,10 +199,19 @@ Automatically discovers and claims temporarily free games on Steam (100% off pro
 - Raw URL arrays in `epic-games.js` now gated behind `DEBUG=1` (shows count instead)
 - Replaced verbose `--- Exception:` + full stack dump with single-line `log.fail()` message
 
+### Full console.log/error/info audit (all 4 scripts)
+- **Login flows**: Converted all raw `console.error`/`console.info` to `log.warn`/`log.info`/`log.status` across Prime Gaming, Epic Games, GOG, and Steam login handlers (sign-in prompts, MFA, captcha warnings, timeout info)
+- **Claim flows**: Converted `console.log('Current free game:')` to `log.game()`, claim results to `log.ok()`, failures to `log.fail()`, region/requirements to `log.skip()`
+- **Redeem flows** (Prime Gaming): Converted all code/URL/status output to `log.ok`/`log.info`/`log.warn` — captcha warnings, code-not-found, redeemed confirmations, store-specific messages
+- **DLC flows** (Prime Gaming): Converted progress/status to `log.info`/`log.status`/`log.game`/`log.warn`/`log.fail`, formatted unlinked accounts summary
+- **Debug-gated**: `skipBasedOnTime` timing data, `dismissAgeGate` message, mature content notice, bundle-includes errors, EULA HTML dumps, full exception stacks
+- **Em-dash consistency**: Normalized all `" - "` separators to `" — "` in `log.warn`/`log.fail`/`log.skip` messages
+- **Epic Games platform dedup**: Shows unique game count with platform variant note, e.g. `Free games found: 3 (4 incl. platform variants)` and per-game `(2 platforms)` suffix
+
 ### Files changed
 - `src/util.js`: Added `chalk` import and `log` helper object
 - `docker-entrypoint.sh`: Startup banner redesign
-- `prime-gaming.js`, `epic-games.js`, `gog.js`, `steam.js`: Section headers/footers, structured game output, reduced noise
+- `prime-gaming.js`, `epic-games.js`, `gog.js`, `steam.js`: Section headers/footers, structured game output, reduced noise, full console audit
 
 ---
 

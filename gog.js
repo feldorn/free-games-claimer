@@ -13,7 +13,7 @@ log.status('Time', datetime());
 const db = await jsonDb('gog.json', {});
 
 if (cfg.width < 1280) { // otherwise 'Sign in' and #menuUsername are hidden (but attached to DOM), see https://github.com/vogler/free-games-claimer/issues/335
-  console.error(`Window width is set to ${cfg.width} but needs to be at least 1280 for GOG!`);
+  log.warn(`Window width ${cfg.width} is below 1280 minimum for GOG`);
   process.exit(1);
 }
 
@@ -57,7 +57,7 @@ try {
     return await accountEl.count() > 0;
   };
   while (!await isLoggedIn()) {
-    console.error('Not signed in!');
+    log.warn('Not signed in');
     if (cfg.nowait) process.exit(1);
     if (await signIn.count() === 0) {
       throw new Error('Could not find sign-in button. GOG page layout may have changed.');
@@ -67,9 +67,9 @@ try {
     await page.waitForSelector('#GalaxyAccountsFrameContainer iframe'); // TODO needed?
     const iframe = page.frameLocator('#GalaxyAccountsFrameContainer iframe');
     if (!cfg.debug) context.setDefaultTimeout(cfg.login_timeout); // give user some extra time to log in
-    console.info(`Login timeout is ${cfg.login_timeout / 1000} seconds!`);
-    if (cfg.gog_email && cfg.gog_password) console.info('Using email and password from environment.');
-    else console.info('Press ESC to skip the prompts if you want to login in the browser (not possible in headless mode).');
+    log.status('Login timeout', `${cfg.login_timeout / 1000}s`);
+    if (cfg.gog_email && cfg.gog_password) log.info('Using credentials from environment');
+    else log.info('Press ESC to login in browser (not possible in headless mode)');
     const email = cfg.gog_email || await prompt({ message: 'Enter email' });
     const password = email && (cfg.gog_password || await prompt({ type: 'password', message: 'Enter password' }));
     if (email && password) {
@@ -83,8 +83,8 @@ try {
       await page.waitForTimeout(2000); // TODO patchright waits forever for MFA locator otherwise
       // handle MFA, but don't await it
       iframe.locator('form[name=second_step_authentication]').waitFor().then(async () => {
-        console.log('Two-Step Verification - Enter security code');
-        console.log(await iframe.locator('.form__description').innerText());
+        log.info('Two-Step Verification — enter security code');
+        log.info(await iframe.locator('.form__description').innerText());
         const otp = await prompt({ type: 'text', message: 'Enter two-factor sign in code', validate: n => n.toString().length == 4 || 'The code must be 4 digits!' }); // can't use type: 'number' since it strips away leading zeros and codes sometimes have them
         await iframe.locator('#second_step_authentication_token_letter_1').pressSequentially(otp.toString(), { delay: 10 });
         await iframe.locator('#second_step_authentication_send').click();
@@ -93,16 +93,16 @@ try {
       // iframe.locator('iframe[title=reCAPTCHA]').waitFor().then(() => {
       // iframe.locator('.g-recaptcha').waitFor().then(() => {
       iframe.locator('text=Invalid captcha').waitFor().then(() => {
-        console.error('Got a captcha during login (likely due to too many attempts)! You may solve it in the browser, get a new IP or try again in a few hours.');
+        log.warn('Got captcha during login — solve in browser, get a new IP or try again later');
         notify('gog: got captcha during login. Please check.');
         // TODO solve reCAPTCHA?
       }).catch(_ => { });
       await page.waitForSelector('#menuUsername, [hook-test="menuUsername"]');
     } else {
-      console.log('Waiting for you to login in the browser.');
+      log.info('Waiting for you to login in the browser');
       await notify('gog: no longer signed in and not enough options set for automatic login.');
       if (cfg.headless) {
-        console.log('Run `SHOW=1 node gog` to login in the opened browser.');
+        log.info('Run `SHOW=1 node gog` to login in the opened browser');
         await context.close();
         process.exit(1);
       }
@@ -158,7 +158,7 @@ try {
         status = 'existed';
         log.ok(`${title} — already in library`);
       } else {
-        log.warn(`${title} - ${message}`);
+        log.warn(`${title} — ${message}`);
         status = message;
       }
     }
@@ -166,7 +166,7 @@ try {
     notify_games.push({ title, url, status });
 
     if (status == 'claimed' && !cfg.gog_newsletter) {
-      console.log('Unsubscribe from \'Promotions and hot deals\' newsletter');
+      log.info('Unsubscribing from newsletters');
       await page.goto('https://www.gog.com/en/account/settings/subscriptions');
       await page.locator('li:has-text("Marketing communications through Trusted Partners") label').uncheck();
       await page.locator('li:has-text("Promotions and hot deals") label').uncheck();
