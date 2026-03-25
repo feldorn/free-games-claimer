@@ -149,63 +149,80 @@ async function discoverFreeGames(p) {
 
   const games = await p.evaluate(() => {
     const results = [];
-    const storeLinks = document.querySelectorAll('a[href*="store.steampowered.com/app/"]');
+
+    const mainEl = document.querySelector('#main, main, [role="main"]') || document.body;
+
+    let boundary = null;
+    const allHeadings = mainEl.querySelectorAll('h1, h2, h3');
+    for (const h of allHeadings) {
+      const t = h.innerText.toLowerCase();
+      if (t.includes('potentially upcoming') || t.includes('play for free') || t.includes('free weekend')) {
+        boundary = h;
+        break;
+      }
+    }
+
+    const storeLinks = mainEl.querySelectorAll('a[href*="store.steampowered.com/app/"]');
 
     for (const link of storeLinks) {
+      if (boundary && link.compareDocumentPosition(boundary) & Node.DOCUMENT_POSITION_PRECEDING) {
+        continue;
+      }
+
       const storeUrl = link.href;
       const appMatch = storeUrl.match(/\/app\/(\d+)/);
       if (!appMatch) continue;
       const appId = appMatch[1];
 
-      let container = link.parentElement;
-      for (let i = 0; i < 6 && container && container !== document.body; i++) {
-        const text = container.innerText || '';
-        const textLower = text.toLowerCase();
-        if (textLower.includes('free to keep') || textLower.includes('play for free') || textLower.includes('free weekend')) {
-          break;
-        }
-        container = container.parentElement;
+      let card = link.parentElement;
+      for (let i = 0; i < 8 && card && card !== mainEl && card !== document.body; i++) {
+        const siblings = card.parentElement?.children;
+        if (siblings && siblings.length > 1) break;
+        card = card.parentElement;
       }
-      if (!container || container === document.body) continue;
+      if (!card || card === mainEl || card === document.body) continue;
 
-      const containerText = container.innerText || '';
-      const containerLower = containerText.toLowerCase();
+      const cardText = card.innerText || '';
+      const cardLower = cardText.toLowerCase();
 
-      if (!containerLower.includes('free to keep')) continue;
-      if (containerLower.includes('play for free') || containerLower.includes('free weekend')) continue;
+      if (cardLower.includes('play for free') || cardLower.includes('free weekend')) continue;
 
       let name = null;
-      const headings = container.querySelectorAll('h1, h2, h3, h4, h5, h6');
+      const headings = card.querySelectorAll('h1, h2, h3, h4, h5, h6');
       for (const h of headings) {
         const t = h.innerText.trim();
-        if (t.length >= 2 && !t.toLowerCase().includes('free to keep')) {
+        if (t.length >= 2) {
           name = t;
           break;
         }
       }
       if (!name || name.length < 2) {
-        const bold = container.querySelector('b, strong');
-        if (bold) name = bold.innerText.trim();
+        const subLink = card.querySelector('a[href*="steamdb.info/sub/"], a[href*="steamdb.info/app/"]');
+        if (subLink) name = subLink.innerText.trim();
       }
       if (!name || name.length < 2) {
         name = `App ${appId}`;
       }
 
       let endDate = null;
-      const textLines = containerText.split('\n');
+      const textLines = cardText.split('\n');
       for (const line of textLines) {
         const lineLower = line.toLowerCase();
         if (lineLower.includes('expires') || lineLower.includes('ends')) {
-          const fullDateMatch = line.match(/(\d{1,2}\s+\w+\s+\d{4})\s*[\u2013\u2014\-–—]+\s*([\d:]+\s*UTC)/);
+          const fullDateMatch = line.match(/(\d{1,2}\s+\w+\s+\d{4})\s*[\u2013\u2014\-\u2015\u00ad–—]*\s*([\d:]+\s*UTC)/);
           if (fullDateMatch) {
             endDate = `${fullDateMatch[1]} ${fullDateMatch[2]}`;
-          } else {
-            const dateMatch = line.match(/(\d{1,2}\s+\w+\s+\d{4})/);
-            if (dateMatch) endDate = dateMatch[1];
+            break;
           }
-          if (!endDate) {
-            const relativeMatch = line.match(/(in\s+\d+\s+\w+|tomorrow|today)/i);
-            if (relativeMatch) endDate = relativeMatch[1];
+          const dateMatch = line.match(/(\d{1,2}\s+\w+\s+\d{4})/);
+          if (dateMatch) {
+            endDate = dateMatch[1];
+            break;
+          }
+          const relativeMatch = line.match(/(in\s+\d+\s+\w+|tomorrow|today)/i);
+          if (relativeMatch) {
+            endDate = relativeMatch[1];
+            break;
           }
         }
       }
