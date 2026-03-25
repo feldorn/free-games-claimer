@@ -5,20 +5,14 @@ A Node.js CLI automation tool that uses Playwright (headless Firefox) to automat
 - Amazon Luna (formerly Prime Gaming) - `luna.amazon.com/claims`
 - Epic Games Store - `store.epicgames.com` (separate browser profile, requires initial manual session)
 - GOG - `gog.com`
-- Unreal Engine (Assets) - not in workflow
-- AliExpress (experimental) - not in workflow
-- Steam (experimental) - not in workflow
 
 ## Project Structure
-- `prime-gaming.js` - Amazon Luna/Prime Gaming claimer (updated for Luna rebrand)
+- `prime-gaming.js` - Amazon Luna/Prime Gaming claimer
 - `epic-games.js` - Epic Games Store claimer (separate browser profile at `data/browser-eg/`)
-- `gog.js` - GOG claimer (updated selectors for current site)
-- `unrealengine.js` - Unreal Engine Assets claimer
-- `aliexpress.js` - AliExpress claimer (experimental)
-- `steam-games.js` - Steam claimer (experimental)
+- `gog.js` - GOG claimer
+- `src/browser.js` - Shared browser launch, stealth plugin, and SIGINT handling
 - `src/config.js` - Configuration via environment variables
-- `src/util.js` - Shared utilities (DB, browser helpers, notifications)
-- `src/migrate.js` - Data migration utilities
+- `src/util.js` - Shared utilities (DB, notifications, prompts, file helpers)
 - `data/` - Runtime data (browser profiles, JSON databases, screenshots)
 
 ## Key Changes from Upstream
@@ -31,8 +25,8 @@ A Node.js CLI automation tool that uses Playwright (headless Firefox) to automat
 - **Await notifications**: All `notify()` calls in catch/finally blocks are properly awaited
 - **Redeem error handling**: Auto-redeem wrapped in try/catch to prevent crashes on redeem failures
 - **DLC link detection**: Uses precise `[data-a-target="LinkAccountModal"]` instead of broad text match
-- **Login error fix**: Fixed `error.trim.length` → `error.trim().length` bug in Amazon login error detection
-- **Apprise installed**: Python `apprise` package for Pushover notifications
+- **Shared browser module**: `src/browser.js` centralizes browser launch, stealth, and SIGINT handling for all 3 scripts
+- **Code cleanup**: Removed dead scripts (aliexpress, steam, unrealengine, migrate), commented-out code, and stale TODOs
 
 ## Configuration
 All configuration is done via environment variables. Key variables:
