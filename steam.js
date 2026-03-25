@@ -141,18 +141,18 @@ async function getGameDetails(p, url) {
   } catch (_) {}
 
   try {
-    const discountEndEl = p.locator('.game_purchase_discount_countdown, .discount_countdown, [data-countdown-date]');
-    if (await discountEndEl.count() > 0) {
-      details.isTemporaryPromo = true;
-    }
-    const discountBlock = p.locator('.game_purchase_discount, .discount_block');
-    if (await discountBlock.count() > 0) {
-      const pctEl = discountBlock.locator('.discount_pct').first();
-      if (await pctEl.count() > 0) {
-        const pct = (await pctEl.innerText()).trim();
-        if (pct === '-100%' && details.originalPrice && details.originalPrice > 0) {
-          details.isTemporaryPromo = true;
-        }
+    const countdownSelectors = [
+      '.game_purchase_discount_countdown',
+      '.discount_countdown',
+      '[data-countdown-date]',
+      'p.game_purchase_discount_quantity:has-text("Offer ends")',
+      '.game_area_purchase_game_wrapper:has-text("Free to keep")',
+      '.game_area_purchase_game_wrapper:has-text("limited time")',
+    ];
+    for (const sel of countdownSelectors) {
+      if (await p.locator(sel).count() > 0) {
+        details.isTemporaryPromo = true;
+        break;
       }
     }
   } catch (_) {}
