@@ -144,6 +144,38 @@ Automatically discovers and claims temporarily free games on Steam (100% off pro
 
 ---
 
+## Task #6: Refactor Steam Discovery to Use SteamDB
+
+### Discovery source change
+- Replaced Steam store search (`/search/?maxprice=free&specials=1`) with SteamDB's curated free promotions page (`steamdb.info/upcoming/free/`)
+- SteamDB pre-separates "Free to Keep" promotions from "Free Weekend" / "Play for Free" events, eliminating the need for fragile heuristic detection
+
+### Removed complexity
+- **`parseSearchPage()`** — Entire function removed (parsed Steam search result rows for -100% discount badges)
+- **`discoverFreeGames()` pagination** — Replaced 5-page pagination loop with single SteamDB page scrape
+- **`isFreeToPlay` detection** — Removed from `getGameDetails()` (SteamDB excludes F2P games)
+- **`isFreeWeekend` detection** — Removed from `getGameDetails()` (SteamDB separates free weekends)
+- **`isTemporaryPromo` detection** — Removed countdown element / "Free to keep" text scanning (SteamDB only lists temporary promos)
+- **`isFree` check** — Removed (SteamDB confirms the game is currently free)
+- **Pre-filter by rating/price from search results** — Removed (rating/price now checked only from store page)
+- **`URL_SEARCH_FREE` constant** — Replaced with `URL_STEAMDB_FREE`
+
+### New discovery flow
+1. Navigate to `steamdb.info/upcoming/free/`
+2. Find all store links (`store.steampowered.com/app/`) in containers with "Free to Keep" text
+3. Skip any container with "Play for Free" or "Free Weekend" text
+4. Extract app ID, game name, and end date from each entry
+5. Visit each game's Steam store page for rating, price, ownership check, and claiming
+
+### End date logging
+- SteamDB provides promotion end dates — now logged per game in console output
+
+### Files changed
+- `steam.js`: Discovery rewritten, `getGameDetails` simplified, ~100 lines of filtering logic removed
+- `MODIFICATIONS.md`: Documented discovery source change
+
+---
+
 ## Summary of All Changed Files
 
 | File | Changes |

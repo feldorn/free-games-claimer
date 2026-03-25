@@ -6,7 +6,7 @@ import { cfg } from './src/config.js';
 const screenshot = (...a) => resolve(cfg.dir.screenshots, 'steam', ...a);
 
 const URL_STORE = 'https://store.steampowered.com';
-const URL_SEARCH_FREE = `${URL_STORE}/search/?maxprice=free&specials=1`;
+const URL_STEAMDB_FREE = 'https://steamdb.info/upcoming/free/';
 const URL_LOGIN = `${URL_STORE}/login/`;
 
 const RATING_MAP = {
@@ -87,7 +87,7 @@ async function getGameDetails(p, url) {
 
   await dismissAgeGate(p);
 
-  const details = { url, title: null, rating: null, ratingText: null, originalPrice: null, isFree: false, isFreeToPlay: false, isFreeWeekend: false, isTemporaryPromo: false, alreadyOwned: false, canClaim: false };
+  const details = { url, title: null, rating: null, ratingText: null, originalPrice: null, isFree: false, alreadyOwned: false, canClaim: false };
 
   try {
     details.title = await p.locator('#appHubAppName, .apphub_AppName').first().innerText();
@@ -97,18 +97,6 @@ async function getGameDetails(p, url) {
     } catch (__) {
       details.title = url.split('/').filter(Boolean).pop();
     }
-  }
-
-  const pageText = await p.locator('body').innerText().catch(() => '');
-  const pageTextLower = pageText.toLowerCase();
-
-  if (await p.locator('.game_area_free_to_play, .btn_addtocart_content:has-text("Play Game"), .game_purchase_action:has-text("Free to Play")').count() > 0
-      || pageTextLower.includes('free to play')) {
-    details.isFreeToPlay = true;
-  }
-
-  if (pageTextLower.includes('free weekend') || pageTextLower.includes('play for free!') && pageTextLower.includes('weekend')) {
-    details.isFreeWeekend = true;
   }
 
   try {
@@ -128,8 +116,7 @@ async function getGameDetails(p, url) {
   try {
     const discountOriginal = p.locator('.discount_original_price').first();
     if (await discountOriginal.count() > 0) {
-      const priceText = await discountOriginal.innerText();
-      details.originalPrice = parsePrice(priceText);
+      details.originalPrice = parsePrice(await discountOriginal.innerText());
     }
 
     const discountFinal = p.locator('.discount_final_price').first();
@@ -140,28 +127,11 @@ async function getGameDetails(p, url) {
     }
   } catch (_) {}
 
-  try {
-    const countdownSelectors = [
-      '.game_purchase_discount_countdown',
-      '.discount_countdown',
-      '[data-countdown-date]',
-      'p.game_purchase_discount_quantity:has-text("Offer ends")',
-      '.game_area_purchase_game_wrapper:has-text("Free to keep")',
-      '.game_area_purchase_game_wrapper:has-text("limited time")',
-    ];
-    for (const sel of countdownSelectors) {
-      if (await p.locator(sel).count() > 0) {
-        details.isTemporaryPromo = true;
-        break;
-      }
-    }
-  } catch (_) {}
-
   if (await p.locator('.game_area_already_owned').count() > 0) {
     details.alreadyOwned = true;
   }
 
-  if (!details.alreadyOwned && details.isFree && !details.isFreeToPlay && !details.isFreeWeekend) {
+  if (!details.alreadyOwned && details.isFree) {
     const addToAccount = p.locator('a.btn_green_steamui:has-text("Add to Account"), .game_purchase_action .btn_addtocart a:has-text("Add to Account")');
     if (await addToAccount.count() > 0) {
       details.canClaim = true;
@@ -171,93 +141,90 @@ async function getGameDetails(p, url) {
   return details;
 }
 
-async function parseSearchPage(p) {
-  const games = [];
-  const rows = await p.locator('#search_resultsRows a.search_result_row').all();
+async function discoverFreeGames(p) {
+  console.log('Checking SteamDB for free-to-keep promotions...');
 
-  for (const row of rows) {
-    try {
-      const href = await row.getAttribute('href');
-      const appUrl = href.split('?')[0];
-      const name = await row.locator('.title').innerText();
+  await p.goto(URL_STEAMDB_FREE, { waitUntil: 'domcontentloaded' });
+  await p.waitForTimeout(5000);
 
-      let originalPrice = null;
-      let isFreeToKeep = false;
+  const games = await p.evaluate(() => {
+    const results = [];
+    const storeLinks = document.querySelectorAll('a[href*="store.steampowered.com/app/"]');
 
-      const discountPct = row.locator('.discount_pct');
-      if (await discountPct.count() > 0) {
-        const pctText = await discountPct.innerText();
-        if (pctText.trim() === '-100%') {
-          isFreeToKeep = true;
+    for (const link of storeLinks) {
+      const storeUrl = link.href;
+      const appMatch = storeUrl.match(/\/app\/(\d+)/);
+      if (!appMatch) continue;
+      const appId = appMatch[1];
+
+      let container = link.parentElement;
+      for (let i = 0; i < 6 && container && container !== document.body; i++) {
+        const text = container.innerText || '';
+        const textLower = text.toLowerCase();
+        if (textLower.includes('free to keep') || textLower.includes('play for free') || textLower.includes('free weekend')) {
+          break;
+        }
+        container = container.parentElement;
+      }
+      if (!container || container === document.body) continue;
+
+      const containerText = container.innerText || '';
+      const containerLower = containerText.toLowerCase();
+
+      if (!containerLower.includes('free to keep')) continue;
+      if (containerLower.includes('play for free') || containerLower.includes('free weekend')) continue;
+
+      let name = null;
+      const headings = container.querySelectorAll('h1, h2, h3, h4, h5, h6');
+      for (const h of headings) {
+        const t = h.innerText.trim();
+        if (t.length >= 2 && !t.toLowerCase().includes('free to keep')) {
+          name = t;
+          break;
         }
       }
-
-      if (!isFreeToKeep) continue;
-
-      const origPriceEl = row.locator('.discount_original_price');
-      if (await origPriceEl.count() > 0) {
-        originalPrice = parsePrice(await origPriceEl.innerText());
+      if (!name || name.length < 2) {
+        const bold = container.querySelector('b, strong');
+        if (bold) name = bold.innerText.trim();
+      }
+      if (!name || name.length < 2) {
+        name = `App ${appId}`;
       }
 
-      if (originalPrice === null || originalPrice === 0) {
-        if (cfg.debug) console.log(`  Skipping "${name}": no original price or F2P`);
-        continue;
-      }
-
-      let ratingText = null;
-      let rating = null;
-      const reviewSpan = row.locator('.search_review_summary');
-      if (await reviewSpan.count() > 0) {
-        ratingText = await reviewSpan.getAttribute('data-tooltip-html');
-        if (ratingText) {
-          ratingText = ratingText.split('<br>')[0].trim();
-          const normalized = ratingText.toLowerCase().replace(/[^a-z ]/g, '').trim();
-          for (const [key, value] of Object.entries(RATING_MAP)) {
-            if (normalized.includes(key)) {
-              rating = value;
-              break;
-            }
+      let endDate = null;
+      const textLines = containerText.split('\n');
+      for (const line of textLines) {
+        const lineLower = line.toLowerCase();
+        if (lineLower.includes('expires') || lineLower.includes('ends')) {
+          const fullDateMatch = line.match(/(\d{1,2}\s+\w+\s+\d{4})\s*[\u2013\u2014\-–—]+\s*([\d:]+\s*UTC)/);
+          if (fullDateMatch) {
+            endDate = `${fullDateMatch[1]} ${fullDateMatch[2]}`;
+          } else {
+            const dateMatch = line.match(/(\d{1,2}\s+\w+\s+\d{4})/);
+            if (dateMatch) endDate = dateMatch[1];
+          }
+          if (!endDate) {
+            const relativeMatch = line.match(/(in\s+\d+\s+\w+|tomorrow|today)/i);
+            if (relativeMatch) endDate = relativeMatch[1];
           }
         }
       }
 
-      games.push({ url: appUrl, name, originalPrice, rating, ratingText });
-    } catch (e) {
-      if (cfg.debug) console.error('Error parsing search row:', e.message);
+      if (!results.some(g => g.appId === appId)) {
+        results.push({
+          appId,
+          name,
+          url: `https://store.steampowered.com/app/${appId}/`,
+          endDate,
+        });
+      }
     }
-  }
+
+    return results;
+  });
+
+  console.log(`Found ${games.length} free-to-keep promotion(s) on SteamDB`);
   return games;
-}
-
-async function discoverFreeGames(p) {
-  console.log('Searching for free-to-keep promotions on Steam...');
-
-  const allGames = [];
-  let pageNum = 1;
-  const MAX_PAGES = 5;
-
-  while (pageNum <= MAX_PAGES) {
-    const start = (pageNum - 1) * 25;
-    const url = `${URL_SEARCH_FREE}&start=${start}&count=25`;
-    await p.goto(url, { waitUntil: 'domcontentloaded' });
-    await p.waitForTimeout(3000);
-
-    const pageGames = await parseSearchPage(p);
-    if (pageGames.length === 0) break;
-    allGames.push(...pageGames);
-
-    const nextBtn = p.locator('.search_pagination_right a:last-child');
-    const hasNext = await nextBtn.count() > 0;
-    if (!hasNext) break;
-
-    const nextHref = await nextBtn.getAttribute('href');
-    if (!nextHref || nextHref.includes(`start=${start}`)) break;
-
-    pageNum++;
-  }
-
-  console.log(`Found ${allGames.length} free-to-keep promotion(s) across ${pageNum} page(s)`);
-  return allGames;
 }
 
 try {
@@ -336,13 +303,12 @@ try {
   const freeGames = await discoverFreeGames(page);
 
   if (freeGames.length === 0) {
-    console.log('No free-to-keep promotions found on Steam right now.');
+    console.log('No free-to-keep promotions found on SteamDB right now.');
   } else {
-    console.log(`\nFound ${freeGames.length} free-to-keep promotion(s):`);
+    console.log(`\nFree-to-keep promotion(s) from SteamDB:`);
     for (const g of freeGames) {
-      const ratingStr = g.ratingText ? `${g.ratingText} (${g.rating || '?'}/9)` : 'no reviews';
-      const priceStr = g.originalPrice ? `$${g.originalPrice}` : 'unknown';
-      console.log(`  ${chalk.blue(g.name)} - rating: ${ratingStr}, original price: ${priceStr}`);
+      const endStr = g.endDate ? `ends ${g.endDate}` : 'end date unknown';
+      console.log(`  ${chalk.blue(g.name)} (app ${g.appId}) - ${endStr}`);
     }
   }
 
@@ -350,29 +316,11 @@ try {
   let skipped = 0;
 
   for (const game of freeGames) {
-    const appId = game.url.match(/\/app\/(\d+)/)?.[1] || game.url.split('/').filter(Boolean).pop();
-    console.log(`\nProcessing: ${chalk.blue(game.name)}`);
+    const appId = game.appId;
+    console.log(`\nProcessing: ${chalk.blue(game.name)} (app ${appId})`);
 
     if (db.data[user][appId]?.status === 'claimed' || db.data[user][appId]?.status === 'existed') {
       console.log(`  Already processed (${db.data[user][appId].status}). Skipping.`);
-      continue;
-    }
-
-    if (game.rating === null) {
-      console.log('  Skipped: no reviews (unrated games are always skipped)');
-      skipped++;
-      continue;
-    }
-
-    if (game.rating < cfg.steam_min_rating) {
-      console.log(`  Skipped: rating ${game.ratingText} (${game.rating}/9) below minimum ${cfg.steam_min_rating}/9`);
-      skipped++;
-      continue;
-    }
-
-    if (game.originalPrice !== null && game.originalPrice < cfg.steam_min_price) {
-      console.log(`  Skipped: original price $${game.originalPrice} below minimum $${cfg.steam_min_price}`);
-      skipped++;
       continue;
     }
 
@@ -388,26 +336,8 @@ try {
       continue;
     }
 
-    if (details.isFreeToPlay) {
-      console.log('  Skipped: permanently Free to Play game (not a temporary promotion).');
-      skipped++;
-      continue;
-    }
-
-    if (details.isFreeWeekend) {
-      console.log('  Skipped: Free Weekend (temporary access, not free to keep).');
-      skipped++;
-      continue;
-    }
-
     if (!details.isFree) {
       console.log('  Game is not currently free on store page. Skipping.');
-      skipped++;
-      continue;
-    }
-
-    if (!details.isTemporaryPromo) {
-      console.log('  Skipped: could not confirm this is a temporary promotion (may be permanently free).');
       skipped++;
       continue;
     }
@@ -419,13 +349,13 @@ try {
     }
 
     if (details.rating < cfg.steam_min_rating) {
-      console.log(`  Skipped: store page rating ${details.ratingText} (${details.rating}/9) below minimum ${cfg.steam_min_rating}/9`);
+      console.log(`  Skipped: rating ${details.ratingText} (${details.rating}/9) below minimum ${cfg.steam_min_rating}/9`);
       skipped++;
       continue;
     }
 
     if (details.originalPrice !== null && details.originalPrice < cfg.steam_min_price) {
-      console.log(`  Skipped: store page original price $${details.originalPrice} below minimum $${cfg.steam_min_price}`);
+      console.log(`  Skipped: original price $${details.originalPrice} below minimum $${cfg.steam_min_price}`);
       skipped++;
       continue;
     }

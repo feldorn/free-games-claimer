@@ -13,7 +13,7 @@ Includes an interactive VNC login mode for establishing browser sessions manuall
 - `prime-gaming.js` - Amazon Luna/Prime Gaming claimer
 - `epic-games.js` - Epic Games Store claimer
 - `gog.js` - GOG claimer
-- `steam.js` - Steam free-to-keep game claimer (100% off promotions with rating/price filtering)
+- `steam.js` - Steam free-to-keep game claimer (discovers via SteamDB, claims on Steam store, with rating/price filtering)
 - `interactive-login.js` - Web-based VNC login control panel (Docker-only, launched with LOGIN_MODE=1)
 - `run.sh` - Launcher script that sets LD_LIBRARY_PATH for patchright's Chromium and execs `node`
 - `src/util.js` - Shared utilities (DB, notifications, prompts, file helpers, handleSIGINT)
