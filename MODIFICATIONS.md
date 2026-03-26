@@ -239,7 +239,7 @@ These files support running the project in the Replit environment and should not
 - Deterministic captcha detection: both the async callback flag and a direct iframe element check (`#h_captcha_challenge_checkout_free_prod iframe`) are used in the catch block
 
 ### Clearer log output
-- Epic Games claiming line now shows the game title at 4-space indent: `    ✓ Havendock — claiming (get)` instead of 2-space `  ✓ Not in library — claiming (get)`
+- Epic Games claiming line now uses `log.ok` (4-space indent) instead of `log.info` (2-space indent), matching the other game status lines: `    ✓ Havendock — claiming (get)` instead of `  ✓ Not in library — claiming (get)`
 
 ### Steam log consistency
 - Previously-seen owned games now log `✓ Counter-Strike 2 — already in library` instead of `✓ Counter-Strike 2 — already existed`
