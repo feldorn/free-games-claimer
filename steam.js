@@ -305,13 +305,15 @@ try {
 
   let claimed = 0;
   let skipped = 0;
+  let existed = 0;
 
   for (const game of freeGames) {
     const appId = game.appId;
 
     if (db.data[user][appId]?.status === 'claimed' || db.data[user][appId]?.status === 'existed') {
       const knownTitle = db.data[user][appId]?.title || game.name;
-      log.ok(`${knownTitle} — already ${db.data[user][appId].status}`);
+      log.ok(`${knownTitle} — already in library`);
+      existed++;
       continue;
     }
 
@@ -416,7 +418,7 @@ try {
     }
   }
 
-  const existed = notify_games.filter(g => g.status === 'existed').length;
+  existed += notify_games.filter(g => g.status === 'existed').length;
   log.summary([`${claimed} claimed`, `${skipped} skipped`, `${existed} already owned`]);
 
 } catch (error) {

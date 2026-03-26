@@ -252,7 +252,7 @@ try {
       urls.push(baseUrl); // add base game to the list of games to claim
       urls.push(url); // add add-on itself again
     } else { // GET
-      log.info(`${title} — claiming (${btnText})`);
+      log.ok(`${title} — claiming (${btnText})`);
       let captchaDetected = false;
       await purchaseBtn.click({ delay: 11 }); // got stuck here without delay (or mouse move), see #75, 1ms was also enough
 
