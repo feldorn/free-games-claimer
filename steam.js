@@ -79,7 +79,7 @@ async function dismissAgeGate(p) {
       }
       await p.waitForTimeout(2000);
     }
-  } catch (_) {}
+  } catch {}
 }
 
 async function getGameDetails(p, url) {
@@ -92,10 +92,10 @@ async function getGameDetails(p, url) {
 
   try {
     details.title = await p.locator('#appHubAppName, .apphub_AppName').first().innerText();
-  } catch (_) {
+  } catch {
     try {
       details.title = await p.locator('h2.pageheader').first().innerText();
-    } catch (__) {
+    } catch {
       details.title = url.split('/').filter(Boolean).pop();
     }
   }
@@ -112,7 +112,7 @@ async function getGameDetails(p, url) {
         }
       }
     }
-  } catch (_) {}
+  } catch {}
 
   try {
     const discountOriginal = p.locator('.discount_original_price').first();
@@ -126,7 +126,7 @@ async function getGameDetails(p, url) {
       const finalPrice = parsePrice(finalText);
       details.isFree = finalText === 'free' || (finalPrice !== null && finalPrice === 0);
     }
-  } catch (_) {}
+  } catch {}
 
   if (await p.locator('.game_area_already_owned').count() > 0) {
     details.alreadyOwned = true;
@@ -171,7 +171,7 @@ async function discoverFreeGames(p) {
         cardEl = cardEl.locator('..');
         try {
           cardText = await cardEl.innerText({ timeout: 2000 });
-        } catch (_) { break; }
+        } catch { break; }
         const cardLower = cardText.toLowerCase();
         if (cardLower.includes('free to keep') || cardLower.includes('play for free') || cardLower.includes('free weekend')) {
           break;
@@ -276,7 +276,7 @@ try {
       }).catch(_ => {});
       try {
         await page.waitForURL('https://store.steampowered.com/', { timeout: cfg.login_timeout });
-      } catch (_) {
+      } catch {
         await page.goto(URL_STORE, { waitUntil: 'domcontentloaded' });
         await page.waitForTimeout(3000);
       }

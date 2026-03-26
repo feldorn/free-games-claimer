@@ -76,7 +76,7 @@ const SITES = {
           return { loggedIn: true, user };
         }
         return { loggedIn: false };
-      } catch (_) {
+      } catch {
         return { loggedIn: false };
       }
     },
@@ -96,7 +96,7 @@ const SITES = {
           return { loggedIn: true, user: user || 'unknown' };
         }
         return { loggedIn: false };
-      } catch (_) {
+      } catch {
         return { loggedIn: false };
       }
     },
@@ -119,7 +119,7 @@ const SITES = {
           return { loggedIn: true, user: 'unknown' };
         }
         return { loggedIn: false };
-      } catch (_) {
+      } catch {
         return { loggedIn: false };
       }
     },
@@ -140,7 +140,7 @@ const SITES = {
           }
         }
         return { loggedIn: false };
-      } catch (_) {
+      } catch {
         return { loggedIn: false };
       }
     },
@@ -209,7 +209,7 @@ async function closeBrowser() {
   console.log(`[${datetime()}] Closing browser for ${SITES[activeBrowser.siteId].name}.`);
   try {
     await activeBrowser.context.close();
-  } catch (_) {}
+  } catch {}
   activeBrowser = null;
 }
 
@@ -254,7 +254,7 @@ async function checkSiteStatus(siteId) {
     return { loggedIn: false, site: siteId, error: e.message };
   } finally {
     if (context) {
-      try { await context.close(); } catch (_) {}
+      try { await context.close(); } catch {}
     }
     checkInProgress = false;
   }
@@ -280,7 +280,6 @@ function runAllScripts() {
   if (runProcess) return { success: false, error: 'Scripts are already running.' };
   if (activeBrowser) return { success: false, error: 'Close the active browser session first.' };
 
-  
   runLog = [];
   runStatus = 'running';
   console.log(`[${datetime()}] Starting all claiming scripts...`);
@@ -293,7 +292,7 @@ function runAllScripts() {
 
   runProcess = child;
 
-  child.stdout.on('data', (data) => {
+  child.stdout.on('data', data => {
     const lines = data.toString().split('\n').filter(l => l.length);
     lines.forEach(l => {
       runLog.push({ type: 'stdout', text: l, time: datetime() });
@@ -301,7 +300,7 @@ function runAllScripts() {
     });
   });
 
-  child.stderr.on('data', (data) => {
+  child.stderr.on('data', data => {
     const lines = data.toString().split('\n').filter(l => l.length);
     lines.forEach(l => {
       runLog.push({ type: 'stderr', text: l, time: datetime() });
@@ -309,7 +308,7 @@ function runAllScripts() {
     });
   });
 
-  child.on('close', (code) => {
+  child.on('close', code => {
     runStatus = code === 0 ? 'success' : 'finished';
     runLog.push({ type: 'system', text: `Scripts finished with exit code ${code}`, time: datetime() });
     runProcess = null;
@@ -557,7 +556,7 @@ function render() {
     banner.style.display = 'block';
     banner.className = 'status-banner needs-login';
     const missing = state.sites.filter(s => s.status === 'not_logged_in').map(s => s.name).join(', ');
-    banner.innerHTML = 'Login needed for: ' + missing + '. Click Login on each site, complete the login in the browser below, then click "I\\\'m Logged In".';
+    banner.innerHTML = 'Login needed for: ' + missing + '. Click Login on each site, complete the login in the browser below, then click "I\'m Logged In".';
   } else {
     banner.style.display = 'none';
   }
@@ -663,7 +662,7 @@ async function pollLog() {
     } else {
       await refreshState();
     }
-  } catch (_) {
+  } catch {
     logPollTimer = setTimeout(pollLog, 2000);
   }
 }
@@ -676,7 +675,7 @@ async function refreshState() {
   try {
     state = await api('GET', '/state');
     render();
-  } catch (_) {}
+  } catch {}
 }
 
 async function launchSite(siteId) {

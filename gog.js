@@ -112,10 +112,10 @@ try {
   const userEl = page.locator('#menuUsername, [hook-test="menuUsername"], .menu-username').first();
   try {
     user = (await userEl.textContent({ timeout: 10000 })).trim();
-  } catch (_) {
+  } catch {
     try {
       user = await page.locator('#menuUsername, [hook-test="menuUsername"], .menu-username').first().getAttribute('title', { timeout: 5000 }) || 'unknown';
-    } catch (__) {
+    } catch {
       user = 'unknown';
     }
   }
