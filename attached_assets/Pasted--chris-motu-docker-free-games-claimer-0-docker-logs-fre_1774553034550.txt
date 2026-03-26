@@ -1,0 +1,103 @@
+[chris@motu:~/docker/free-games-claimer][0]$ docker logs free-games-claimer
+══════════════════════════════════════════════════
+  Free Games Claimer
+  Version: 31b6d78000d1613ae7fa32a1fd2c7d361618c226
+  Source:  https://github.com/vogler/free-games-claimer
+  Build:   2026-03-25T17:24:26Z
+══════════════════════════════════════════════════
+  VNC:   port 5900 (no password!), 1920x1080
+  noVNC: http://localhost:6080/?autoconnect=true
+  Loop:    every 86400s
+
+─── Prime Gaming ─────────────────────────────────
+  Time: 2026-03-25 12:42:28.741
+  User: Christopher
+  Already claimed (total): 17
+  Unclaimed (Prime Gaming): 0
+  Unclaimed (external stores): 0
+──────────────────────────────────────────────────
+
+─── Epic Games ───────────────────────────────────
+  Time: 2026-03-25 12:42:45.505
+  User: Feldorn11906
+  Mobile games: included
+  Free games found: 3 (4 incl. platform variants)
+    ✓ Electrician Simulator — already in library
+    ✓ World of Warships — Epic Anniversary Tachibana Pack — already in library
+    ✓ Potion Permit — already in library
+    ✓ Potion Permit — already in library
+──────────────────────────────────────────────────
+
+─── GOG ──────────────────────────────────────────
+  Time: 2026-03-25 12:42:59.442
+  User: unknown
+  ✓ No free giveaway right now
+──────────────────────────────────────────────────
+
+─── Steam ────────────────────────────────────────
+  Time: 2026-03-25 12:43:20.913
+  Min rating: 6/9 (mostly positive)
+  Min price: $10
+  User: feldorn
+  Source: SteamDB (steamdb.info/upcoming/free)
+  Promotions found: 0
+  Summary: 0 claimed, 0 skipped, 0 already owned
+──────────────────────────────────────────────────
+Sleeping for 86400 seconds...
+
+─── Prime Gaming ─────────────────────────────────
+  Time: 2026-03-26 12:43:31.088
+  User: Christopher
+  Already claimed (total): 17
+  Unclaimed (Prime Gaming): 1
+    Deep Sky Derelicts → https://luna.amazon.com/claims/deep-sky-derelicts-aga/dp/amzn1.pg.item.2bee44d2-9560-4916-a052-6a41cd434318
+    ✓ Deep Sky Derelicts — claimed
+  Unclaimed (external stores): 3
+    Phantasie Memorial Set → https://luna.amazon.com/claims/phantasie-memorial-set-gog/dp/amzn1.pg.item.65303365-eba0-4a95-b10c-83c4303b9cba
+      Store: gog.com
+    ✓ Redeem code — 47WH9E47C93FE8E7D4
+    ✓ Redeem URL — https://www.gog.com/redeem/47WH9E47C93FE8E7D4
+    Total War: THREE KINGDOMS → https://luna.amazon.com/claims/total-war-three-kingdoms-epic/dp/amzn1.pg.item.320652b9-ed39-4323-8f84-65c356de1bf3
+      Store: epic games store
+    ! Account linking required for epic games store
+    Chimp Quest: Spirit Isle → https://luna.amazon.com/claims/chimp-quest-spirit-isle-legacy/dp/amzn1.pg.item.7a29f232-6382-4783-b5e0-dc09f2af4233
+      Store: legacy games
+    ✓ Redeem code — NALSJ-6XPNY-JSGS7
+    ✓ Redeem URL — https://promo.legacygames.com/chimp-quest-spirit-isle-luna/
+──────────────────────────────────────────────────
+
+─── Epic Games ───────────────────────────────────
+  Time: 2026-03-26 12:44:10.622
+  User: Feldorn11906
+  Mobile games: included
+  Free games found: 4
+  ✓ Not in library — claiming (get)
+    ✓ Havendock — claimed!
+  ✓ Not in library — claiming (get)
+    ! Got hCaptcha challenge — solve in browser or get a new IP address
+    ! Got hCaptcha challenge — solve in browser or get a new IP address
+  ✗ Hyper Echelon — failed to claim
+  ✓ Not in library — claiming (get)
+    ✓ The Wreck — claimed!
+  ✓ Not in library — claiming (get)
+    ✓ The Wreck — claimed!
+──────────────────────────────────────────────────
+
+─── GOG ──────────────────────────────────────────
+  Time: 2026-03-26 12:45:57.693
+  User: unknown
+  ✓ No free giveaway right now
+──────────────────────────────────────────────────
+
+─── Steam ────────────────────────────────────────
+  Time: 2026-03-26 12:46:19.122
+  Min rating: 6/9 (mostly positive)
+  Min price: $10
+  User: feldorn
+  Source: SteamDB (steamdb.info/upcoming/free)
+  Promotions found: 1
+    ✓ Counter-Strike 2 — already in library
+  Summary: 0 claimed, 0 skipped, 1 already owned
+──────────────────────────────────────────────────
+Sleeping for 86400 seconds...
+[chris@motu:~/docker/free-games-claimer][0]$
