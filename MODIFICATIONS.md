@@ -214,25 +214,43 @@ These files support running the project in the Replit environment and should not
 - Failed claims include the game URL directly in the notification body
 - Prime Gaming redeem codes include plaintext code + redeem URL in the notification details line (in addition to the existing HTML link in the status)
 
+### Clickable notification links
+- All `details` URLs use proper HTML `<a>` tags so they render as clickable links in Pushover and other HTML-capable notifiers
+- `details` field is rendered as raw HTML (not escaped) — same treatment as `status`, since all content is built internally
+- Epic failures: `<a href="...">View game</a>` links directly to the game's store page
+- Prime account linking: `<a href="...">Link your {store} account</a>` links to Prime Gaming connections settings
+- Prime redeem codes: `Code: XXXX — <a href="...">Redeem on {store}</a>` links to the store's redeem page with code embedded in URL (for GOG)
+
 ### Actionable failure notifications
-- Prime Gaming: "account linking required" now sends an immediate push notification with the game title, store name, and guidance on how to link
-- Epic Games: captcha notification now includes the game title (was previously blank: "got captcha challenge for.")
+- Prime Gaming: "account linking required" now sends an immediate push notification with the game title, store name, and direct link to `https://gaming.amazon.com/settings/connections`
+- Epic Games: captcha and failed-captcha notifications now include the game title and game URL
+
+### Prime Gaming — Account linking false-positive fix
+- Replaced broad `div:has-text("Link account")` selectors with specific `[data-a-target="LinkAccountModal"]` and `[data-a-target="LinkAccountButton"]` attribute selectors
+- Added success-first detection: checks for "You collected this" / "Success" text **before** checking for linking requirement — prevents false positives when a linked account (e.g., Epic) successfully claims a game
+- Added 2-second settle wait after clicking "Get game" to let the page transition to its final state
+- Previously, games claimed via linked accounts (like Luna/Epic) were incorrectly reported as "failed: need account linking" because a `div` elsewhere on the page contained "Link account" text
 
 ### Epic Games captcha retry
 - When a game fails due to hCaptcha, it's queued for retry
 - After all games are processed, captcha-failed games are retried once after a 60-second delay
 - If retry succeeds, the game status is updated to "claimed" in both the database and notification
 - If retry also fails, the notification includes "Retry also failed" with the game URL
+- Deterministic captcha detection: both the async callback flag and a direct iframe element check (`#h_captcha_challenge_checkout_free_prod iframe`) are used in the catch block
 
 ### Clearer log output
-- Epic Games claiming line now shows the game title: `✓ Havendock — claiming (get)` instead of `✓ Not in library — claiming (get)`
+- Epic Games claiming line now shows the game title at 4-space indent: `    ✓ Havendock — claiming (get)` instead of 2-space `  ✓ Not in library — claiming (get)`
+
+### Steam log consistency
+- Previously-seen owned games now log `✓ Counter-Strike 2 — already in library` instead of `✓ Counter-Strike 2 — already existed`
+- Summary counter fixed: games that were already recorded as owned (early `continue` path) are now counted — e.g., `Summary: 0 claimed, 0 skipped, 1 already owned` instead of `0 already owned`
 
 ### Files changed
-- `src/util.js`: `html_game_list` updated to support `details` field
-- `epic-games.js`: captcha retry loop, game name on claiming line, captcha tracking, details on failures
-- `prime-gaming.js`: account linking notification, redeem code details
+- `src/util.js`: `html_game_list` updated — `details` field supports HTML, no longer escaped
+- `epic-games.js`: captcha retry loop, deterministic captcha detection, game name on claiming line (4-space indent), clickable details links, failed-captcha notification with title/URL
+- `prime-gaming.js`: account linking detection fix (specific selectors, success-first check, settle wait), clickable redeem/linking details, immediate notification with direct URL
 - `gog.js`: failure details with game URL
-- `steam.js`: failure details with game URL
+- `steam.js`: "already in library" wording fix, summary counter fix, failure details with game URL
 
 ---
 
@@ -240,12 +258,12 @@ These files support running the project in the Replit environment and should not
 
 | File | Change Type | Description |
 |------|-------------|-------------|
-| `steam.js` | **New** | Steam free-to-keep game claimer with SteamDB discovery |
+| `steam.js` | **New** | Steam free-to-keep game claimer with SteamDB discovery, log consistency fixes |
 | `interactive-login.js` | **New** | Interactive VNC login panel with 4-site support |
-| `prime-gaming.js` | Modified | patchright import, login bug fix, awaited notify(), log.* audit, DLC flow cleanup |
-| `epic-games.js` | Modified | patchright import, awaited notify(), log.* audit, platform dedup, removed "in library" notification |
+| `prime-gaming.js` | Modified | patchright import, login bug fix, awaited notify(), log.* audit, DLC flow cleanup, account linking false-positive fix, clickable redeem/linking notifications |
+| `epic-games.js` | Modified | patchright import, awaited notify(), log.* audit, platform dedup, removed "in library" notification, captcha retry, clickable failure links |
 | `gog.js` | Modified | patchright import, awaited notify(), selector fix, log.* audit |
-| `src/util.js` | Modified | Removed stealth()/launchChromium(), added `log` helper object |
+| `src/util.js` | Modified | Removed stealth()/launchChromium(), added `log` helper object, `html_game_list` details with HTML support |
 | `src/config.js` | Modified | Removed AliExpress config, added login_mode, Steam config |
 | `Dockerfile` | Modified | patchright, PANEL_PORT, CMD order, added `node steam` |
 | `docker-compose.yml` | Modified | Port 7080, LOGIN_MODE, Steam config docs |
