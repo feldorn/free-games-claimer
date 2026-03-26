@@ -320,7 +320,7 @@ try {
         }).catch(_ => { }); // may time out if not shown
         iframe.locator('.payment__errors:has-text("Failed to challenge captcha, please try again later.")').waitFor().then(async () => {
           log.fail('Failed captcha challenge — try again later');
-          await notify('epic-games: failed to challenge captcha. Please check.');
+          await notify(`epic-games: failed captcha challenge for ${title}.\nGame link: ${url}`);
         }).catch(_ => { });
         await page.locator('text=Thanks for your order!').waitFor({ state: 'attached' }); // TODO Bundle: got stuck here, but normal game now as well
         db.data[user][game_id].status = 'claimed';
@@ -333,7 +333,8 @@ try {
         const p = screenshot('failed', `${game_id}_${filenamify(datetime())}.png`);
         await page.screenshot({ path: p, fullPage: true });
         db.data[user][game_id].status = 'failed';
-        if (captchaDetected) {
+        if (captchaDetected || await iframe.locator('#h_captcha_challenge_checkout_free_prod iframe').count().catch(() => 0) > 0) {
+          captchaDetected = true;
           notify_game.captcha = true;
         }
       }
