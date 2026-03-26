@@ -242,7 +242,7 @@ try {
     } else if (btnText == 'requires base game') {
       log.skip(title, 'requires base game');
       notify_game.status = 'requires base game';
-      notify_game.details = `Game: ${url}`;
+      notify_game.details = `<a href="${url}">View game</a>`;
       db.data[user][game_id].status ||= 'failed:requires-base-game';
       // TODO claim base game if it is free
       const baseUrl = 'https://store.epicgames.com' + await page.locator('a:has-text("Overview")').getAttribute('href');
@@ -278,7 +278,7 @@ try {
       if (await iframe.locator(':has-text("unavailable in your region")').count() > 0) {
         log.skip(title, 'unavailable in your region');
         db.data[user][game_id].status = notify_game.status = 'unavailable-in-region';
-        notify_game.details = `Game: ${url}`;
+        notify_game.details = `<a href="${url}">View game</a>`;
         if (cfg.time) console.timeEnd('claim game');
         continue;
       }
@@ -341,9 +341,9 @@ try {
       notify_game.status = db.data[user][game_id].status; // claimed or failed
       if (notify_game.status === 'failed') {
         if (captchaDetected) {
-          notify_game.details = `Captcha blocked claim — will retry. Game: ${url}`;
+          notify_game.details = `Captcha blocked claim — will retry. <a href="${url}">View game</a>`;
         } else {
-          notify_game.details = `Game: ${url}`;
+          notify_game.details = `<a href="${url}">View game</a>`;
         }
       }
 

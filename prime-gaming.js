@@ -204,7 +204,7 @@ try {
        || await page.locator('[data-a-target="LinkAccountButton"]').count() > 0)) {
       log.warn(`Account linking required for ${store}`);
       notify_game.status = `failed: need account linking for ${store}`;
-      notify_game.details = `Link your ${store} account at https://gaming.amazon.com/settings/connections`;
+      notify_game.details = `<a href="https://gaming.amazon.com/settings/connections">Link your ${store} account</a>`;
       await notify(`prime-gaming: ${title} requires account linking for ${store}.\nLink your account: https://gaming.amazon.com/settings/connections`);
       db.data[user][title].status = 'failed: need account linking';
       // await page.pause();
@@ -351,7 +351,7 @@ try {
         }
         notify_game.status = `<a href="${redeem_url}">${redeem_action}</a> ${code} on ${store}`;
         if (redeem_action === 'redeem' || redeem_action === 'redeem (got captcha)' || redeem_action === 'redeem (not found)') {
-          notify_game.details = `Code: ${code} — Redeem: ${redeem_url}`;
+          notify_game.details = `Code: ${code} — <a href="${redeem_url}">Redeem on ${store}</a>`;
         }
       } else {
         notify_game.status = `claimed on ${store}`;

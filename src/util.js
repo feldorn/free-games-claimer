@@ -79,7 +79,7 @@ export const escapeHtml = unsafe => unsafe.replaceAll('&', '&amp;').replaceAll('
 
 export const html_game_list = games => games.map(g => {
   let line = `- <a href="${g.url}">${escapeHtml(g.title)}</a> (${g.status})`;
-  if (g.details) line += `<br>  ${escapeHtml(g.details)}`;
+  if (g.details) line += `<br>  ${g.details}`;
   return line;
 }).join('<br>');
 
