@@ -462,7 +462,7 @@ const PANEL_HTML = `<!DOCTYPE html>
           <b>Step 1:</b> Click <b>Check All Sessions</b> above to see which sites need login.<br><br>
           <b>Step 2:</b> For each site showing <span style="color: #e94560;">red</span>, click its <b>Login</b> button.<br>
           &nbsp;&nbsp;&nbsp;&nbsp;A browser will appear here. Log in manually (handle captchas, MFA, etc.).<br>
-          &nbsp;&nbsp;&nbsp;&nbsp;When done, click <span class="highlight">"I'm Logged In"</span> to verify and save the session.<br><br>
+          &nbsp;&nbsp;&nbsp;&nbsp;When done, click <span class="highlight">"I\'m Logged In"</span> to verify and save the session.<br><br>
           <b>Step 3:</b> Once all sites show <span class="highlight">green</span>, click <b>Test Run All Scripts</b> to verify claiming works.<br><br>
           <b>Step 4:</b> Stop this container, remove <span style="color: #f0c040;">LOGIN_MODE=1</span>, and restart for automated claiming.
         </div>
