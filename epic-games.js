@@ -24,7 +24,7 @@ try {
     const isFree = promos.some(o => o.discountSetting?.discountPercentage === 0);
     if (!isFree) continue;
     const slug = el.catalogNs?.mappings?.[0]?.pageSlug || el.urlSlug;
-    if (slug) offerIdMap[slug] = el.id;
+    if (slug) offerIdMap[decodeURIComponent(slug).toLowerCase()] = el.id;
   }
   if (Object.keys(offerIdMap).length) {
     log.status('Offer IDs fetched', Object.keys(offerIdMap).length);
@@ -432,9 +432,13 @@ try {
   const failedGames = notify_games.filter(g => g.status === 'failed');
   if (failedGames.length && Object.keys(offerIdMap).length) {
     const slugFromUrl = url => {
-      try { return decodeURIComponent(new URL(url).pathname.replace(/\/+$/, '').split('/').pop()); } catch { return url.split('/').pop(); }
+      try { return decodeURIComponent(new URL(url).pathname.replace(/\/+$/, '').split('/').pop()).toLowerCase(); } catch { return url.split('/').pop().toLowerCase(); }
     };
     const failedOfferIds = [...new Set(failedGames.map(g => offerIdMap[slugFromUrl(g.url)]).filter(Boolean))];
+    if (cfg.debug) {
+      const unmatched = failedGames.filter(g => !offerIdMap[slugFromUrl(g.url)]);
+      if (unmatched.length) console.debug('  Cart fallback — unmatched slugs:', unmatched.map(g => slugFromUrl(g.url)));
+    }
     if (failedOfferIds.length) {
       log.info(`Cart fallback — ${failedOfferIds.length}/${failedGames.length} failed game(s) matched to offer IDs`);
       const cartUrl = `https://store.epicgames.com/en-US/cart?${failedOfferIds.map(id => `offerId=${id}`).join('&')}`;
