@@ -100,8 +100,10 @@ ENV DEPTH=24
 # Show browser instead of running headless
 ENV SHOW=1
 
-# mega-linter (KICS, Trivy) complained about it missing - usually this checks some API endpoint, for a container that runs ~1min a healthcheck doesn't make that much sense since playwright has timeouts for everything. Could react to SIGUSR1 and check something in JS - for now we just check that node is running and noVNC is reachable...
-HEALTHCHECK --interval=5s --timeout=5s CMD pgrep node && curl --fail http://localhost:6080 || exit 1
+# Health check verifies the container infrastructure (noVNC) is alive.
+# We don't check for a running node process because with LOOP mode the scripts
+# finish and the container sleeps between cycles — that's normal, not unhealthy.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s CMD curl --fail http://localhost:6080 || exit 1
 
 # Script to setup display server & VNC is always executed.
 ENTRYPOINT ["docker-entrypoint.sh"]
