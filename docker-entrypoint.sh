@@ -27,9 +27,11 @@ BROWSER="${BROWSER_DIR:-data/browser}"
 # https://bugs.chromium.org/p/chromium/issues/detail?id=367048
 rm -f "/fgc/$BROWSER/SingletonLock"
 
-# Remove X server display lock, fix for `docker compose up` which reuses container which made it fail after initial run, https://github.com/vogler/free-games-claimer/issues/31
-# Maybe no longer needed after adding #478's -nolisten unix below
+# Clean up stale display/VNC files from previous runs.
+# Fixes container failing to start after stop/start (without recreate) on Unraid and similar platforms.
 rm -f /tmp/.X1-lock
+rm -f /tmp/.X11-unix/X1
+/opt/TurboVNC/bin/vncserver -kill :1 2>/dev/null || true
 
 export DISPLAY=:1 # need to export this, otherwise playwright complains with 'Looks like you launched a headed browser without having a XServer running.'
 if [ -z "$VNC_PASSWORD" ]; then
@@ -38,7 +40,7 @@ if [ -z "$VNC_PASSWORD" ]; then
 else
         # pw="-passwd $VNC_PASSWORD" # not supported anymore
         pw="-rfbauth ~/.vnc/passwd"
-        mkdir ~/.vnc/
+        mkdir -p ~/.vnc/
         echo "$VNC_PASSWORD" | /opt/TurboVNC/bin/vncpasswd -f >~/.vnc/passwd
         pwt="with password"
 fi

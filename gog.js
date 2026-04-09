@@ -48,13 +48,10 @@ try {
 
   // page.click('#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll').catch(_ => { }); // does not work reliably, solved by setting CookieConsent above
   const signIn = page.locator('a:has-text("Sign in"), [hook-test="menuAnonymousButton"]').first();
-  const username = page.locator('#menuUsername, [hook-test="menuUsername"], .menu-username').first();
+  const loggedInSel = '#menuUsername, [hook-test="menuUsername"], .menu-username, .menu-username-text, a[href*="/account"]';
+  const username = page.locator(loggedInSel).first();
   await page.waitForTimeout(3000);
-  const isLoggedIn = async () => {
-    if (await username.count() > 0) return true;
-    const accountEl = page.locator('a[href*="/account"], .menu-username-text');
-    return await accountEl.count() > 0;
-  };
+  const isLoggedIn = async () => await username.count() > 0;
   while (!await isLoggedIn()) {
     log.warn('Not signed in');
     if (cfg.nowait) process.exit(1);
@@ -96,7 +93,7 @@ try {
         notify('gog: got captcha during login. Please check.');
         // TODO solve reCAPTCHA?
       }).catch(_ => { });
-      await page.waitForSelector('#menuUsername, [hook-test="menuUsername"]');
+      await page.waitForSelector(loggedInSel);
     } else {
       log.info('Waiting for you to login in the browser');
       await notify('gog: no longer signed in and not enough options set for automatic login.');
@@ -106,18 +103,38 @@ try {
         process.exit(1);
       }
     }
-    await page.waitForSelector('#menuUsername, [hook-test="menuUsername"]');
+    await page.waitForSelector(loggedInSel);
     if (!cfg.debug) context.setDefaultTimeout(cfg.timeout);
   }
-  const userEl = page.locator('#menuUsername, [hook-test="menuUsername"], .menu-username').first();
+  const userSelectors = '#menuUsername, [hook-test="menuUsername"], .menu-username, .menu-username-text';
+  const userEl = page.locator(userSelectors).first();
   try {
     user = (await userEl.textContent({ timeout: 10000 })).trim();
   } catch {
     try {
-      user = await page.locator('#menuUsername, [hook-test="menuUsername"], .menu-username').first().getAttribute('title', { timeout: 5000 }) || 'unknown';
-    } catch {
-      user = 'unknown';
-    }
+      user = await page.locator(userSelectors).first().getAttribute('title', { timeout: 5000 });
+    } catch {}
+  }
+  if (!user) {
+    try {
+      user = await page.evaluate(() => {
+        const el = document.querySelector('a[href*="/account"]');
+        if (el) {
+          const text = el.textContent?.trim();
+          if (text && text !== 'Account' && text.length > 0) return text;
+        }
+        const cookies = document.cookie.split(';');
+        for (const c of cookies) {
+          const [k, v] = c.trim().split('=');
+          if (k === 'gog_username' || k === 'gog-username') return decodeURIComponent(v);
+        }
+        return null;
+      });
+    } catch {}
+  }
+  if (!user) {
+    user = cfg.gog_email?.split('@')[0] || 'unknown';
+    log.warn(`Could not detect GOG username — using "${user}"`);
   }
   log.status('User', user);
   db.data[user] ||= {};

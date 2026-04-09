@@ -254,12 +254,25 @@ These files support running the project in the Replit environment and should not
 - Previously-seen owned games now log `✓ Counter-Strike 2 — already in library` instead of `✓ Counter-Strike 2 — already existed`
 - Summary counter fixed: games that were already recorded as owned (early `continue` path) are now counted — e.g., `Summary: 0 claimed, 0 skipped, 1 already owned` instead of `0 already owned`
 
+### Docker restart fix
+- Container would fail to start after stop/start (without recreate) — TurboVNC found stale X11 unix socket and exited immediately
+- Entrypoint now cleans up `/tmp/.X11-unix/X1` and kills any stale VNC server before starting a new one
+- `mkdir ~/.vnc/` changed to `mkdir -p` to avoid failure on restart when directory already exists
+- Reported by Unraid user
+
+### GOG username detection fix
+- Username detection now uses broader selectors (added `.menu-username-text`) with multiple fallback strategies
+- Falls back to account link text, then GOG cookies, then the email prefix from `GOG_EMAIL`
+- Logs a warning when falling back so the issue is diagnosable
+- Previously, GOG page layout changes caused "User: unknown" — games were stored under "unknown" in the database
+
 ### Files changed
 - `src/util.js`: `html_game_list` updated — `details` field supports HTML, no longer escaped
 - `epic-games.js`: captcha retry loop, deterministic captcha detection, game name on claiming line (4-space indent), clickable details links, failed-captcha notification with title/URL, cart link fallback with promotions API offer IDs
 - `prime-gaming.js`: account linking detection fix (specific selectors, success-first check, settle wait), clickable redeem/linking details, immediate notification with direct URL
-- `gog.js`: failure details with game URL
+- `gog.js`: failure details with game URL, improved username detection with multiple fallbacks
 - `steam.js`: "already in library" wording fix, summary counter fix, failure details with game URL
+- `docker-entrypoint.sh`: stale VNC/X11 cleanup on restart, `mkdir -p` for VNC password dir
 
 ---
 
@@ -271,12 +284,12 @@ These files support running the project in the Replit environment and should not
 | `interactive-login.js` | **New** | Interactive VNC login panel with 4-site support |
 | `prime-gaming.js` | Modified | patchright import, login bug fix, awaited notify(), log.* audit, DLC flow cleanup, account linking false-positive fix, clickable redeem/linking notifications |
 | `epic-games.js` | Modified | patchright import, awaited notify(), log.* audit, platform dedup, removed "in library" notification, captcha retry, clickable failure links, cart link fallback |
-| `gog.js` | Modified | patchright import, awaited notify(), selector fix, log.* audit |
+| `gog.js` | Modified | patchright import, awaited notify(), selector fix, log.* audit, username detection fallbacks |
 | `src/util.js` | Modified | Removed stealth()/launchChromium(), added `log` helper object, `html_game_list` details with HTML support |
 | `src/config.js` | Modified | Removed AliExpress config, added login_mode, Steam config |
 | `Dockerfile` | Modified | patchright, PANEL_PORT, CMD order, added `node steam` |
 | `docker-compose.yml` | Modified | Port 7080, LOGIN_MODE, Steam config docs |
-| `docker-entrypoint.sh` | Modified | LOGIN_MODE check, tini -s flag, startup banner |
+| `docker-entrypoint.sh` | Modified | LOGIN_MODE check, tini -s flag, startup banner, stale VNC cleanup on restart |
 | `package.json` | Modified | patchright dep, docker port 7080 |
 | `.github/workflows/docker-publish.yml` | **New** | Auto-build and push Docker image to ghcr.io |
 | `aliexpress.js` | **Deleted** | Unused AliExpress script |
