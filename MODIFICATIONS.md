@@ -268,6 +268,17 @@ These files support running the project in the Replit environment and should not
 - Other `I'm` occurrences on lines 586/588 already used `\\\'` or `\\'` correctly
 - Reported by user in Edge browser
 
+### Prime Gaming redeem notification fix
+- **Duplication removed**: Redemption code and store name previously appeared twice — once in the status parenthetical and again in the details line. Now, when manual redemption is needed, the status shows only the action (e.g., "redeem (got captcha)") as a clickable link, and the code + store redeem link appear only in the details line
+- **Link fixed**: The bare text `gog.com` in the status line was being auto-linked by Pushover to the GOG homepage instead of the redeem page. Now all store references are inside `<a href>` tags pointing to the correct redeem URL (e.g., `https://www.gog.com/redeem/CODE`)
+- **Manual redeem detection**: Consolidated check using `['redeem', 'redeem (got captcha)', 'redeem (not found)', 'redeem (login)'].includes(redeem_action)` — previously missed `'redeem (login)'`
+- For successfully redeemed games, the status wraps the full "redeemed on {store}" text in a single `<a>` tag — no details line needed
+
+### Notification literal quote fix
+- Removed literal single-quote wrapping from the Apprise body argument in `notify()` (`src/util.js`)
+- `execFile` passes arguments directly (no shell), so the `'...'` wrapping was not shell-escaping — the quote characters were passed literally and appeared in the notification text
+- Notifications previously showed `'prime-gaming...'` with visible quote characters at start and end
+
 ### docker-compose.yml fixes
 - Changed image reference from `ghcr.io/vogler/free-games-claimer` to `ghcr.io/feldorn/free-games-claimer` (upstream → fork)
 - Health check: removed `pgrep node &&` (node isn't running during LOOP sleep phase, causing false unhealthy reports)
@@ -295,10 +306,10 @@ These files support running the project in the Replit environment and should not
 |------|-------------|-------------|
 | `steam.js` | **New** | Steam free-to-keep game claimer with SteamDB discovery, log consistency fixes |
 | `interactive-login.js` | **New** | Interactive VNC login panel with 4-site support |
-| `prime-gaming.js` | Modified | patchright import, login bug fix, awaited notify(), log.* audit, DLC flow cleanup, account linking false-positive fix, clickable redeem/linking notifications |
+| `prime-gaming.js` | Modified | patchright import, login bug fix, awaited notify(), log.* audit, DLC flow cleanup, account linking false-positive fix, clickable redeem/linking notifications, redeem notification dedup/link fix |
 | `epic-games.js` | Modified | patchright import, awaited notify(), log.* audit, platform dedup, removed "in library" notification, captcha retry, clickable failure links, cart link fallback |
 | `gog.js` | Modified | patchright import, awaited notify(), selector fix, log.* audit, username detection fallbacks |
-| `src/util.js` | Modified | Removed stealth()/launchChromium(), added `log` helper object, `html_game_list` details with HTML support |
+| `src/util.js` | Modified | Removed stealth()/launchChromium(), added `log` helper object, `html_game_list` details with HTML support, notify() literal quote fix |
 | `src/config.js` | Modified | Removed AliExpress config, added login_mode, Steam config |
 | `Dockerfile` | Modified | patchright, PANEL_PORT, CMD order, added `node steam` |
 | `docker-compose.yml` | Modified | Port 7080, LOGIN_MODE, Steam config docs, fork image reference, healthcheck fix |
