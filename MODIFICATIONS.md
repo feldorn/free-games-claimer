@@ -260,6 +260,19 @@ These files support running the project in the Replit environment and should not
 - `mkdir ~/.vnc/` changed to `mkdir -p` to avoid failure on restart when directory already exists
 - Reported by Unraid user
 
+### Interactive login panel script parse error fix
+- All buttons in the login panel (Check All, Run All, Login, etc.) were non-functional in browsers — clicking any button threw `Uncaught ReferenceError: checkAll is not defined`
+- Root cause: the `PANEL_HTML` template literal (Node.js backticks) contained `I\'m` on line 559 — in template literals, `\'` is not a recognized escape sequence, so the backslash is silently dropped, producing an unescaped `I'm` that breaks the surrounding single-quoted JavaScript string in the browser
+- This single syntax error prevented the entire `<script>` block from parsing, so no functions were ever defined
+- Fix: changed `I\'m` to `I\\'m` — `\\` produces a literal backslash in the template output, which then serves as a valid escape for the apostrophe in the browser-side single-quoted string (`\'`)
+- Other `I'm` occurrences on lines 586/588 already used `\\\'` or `\\'` correctly
+- Reported by user in Edge browser
+
+### docker-compose.yml fixes
+- Changed image reference from `ghcr.io/vogler/free-games-claimer` to `ghcr.io/feldorn/free-games-claimer` (upstream → fork)
+- Health check: removed `pgrep node &&` (node isn't running during LOOP sleep phase, causing false unhealthy reports)
+- Health check: interval 5s → 30s, added 15s `start_period` (matches Dockerfile healthcheck fix)
+
 ### GOG username detection fix
 - Username detection now uses broader selectors (added `.menu-username-text`) with multiple fallback strategies
 - Falls back to account link text, then GOG cookies, then the email prefix from `GOG_EMAIL`
@@ -288,7 +301,7 @@ These files support running the project in the Replit environment and should not
 | `src/util.js` | Modified | Removed stealth()/launchChromium(), added `log` helper object, `html_game_list` details with HTML support |
 | `src/config.js` | Modified | Removed AliExpress config, added login_mode, Steam config |
 | `Dockerfile` | Modified | patchright, PANEL_PORT, CMD order, added `node steam` |
-| `docker-compose.yml` | Modified | Port 7080, LOGIN_MODE, Steam config docs |
+| `docker-compose.yml` | Modified | Port 7080, LOGIN_MODE, Steam config docs, fork image reference, healthcheck fix |
 | `docker-entrypoint.sh` | Modified | LOGIN_MODE check, tini -s flag, startup banner, stale VNC cleanup on restart |
 | `package.json` | Modified | patchright dep, docker port 7080 |
 | `.github/workflows/docker-publish.yml` | **New** | Auto-build and push Docker image to ghcr.io |

@@ -556,7 +556,7 @@ function render() {
     banner.style.display = 'block';
     banner.className = 'status-banner needs-login';
     const missing = state.sites.filter(s => s.status === 'not_logged_in').map(s => s.name).join(', ');
-    banner.innerHTML = 'Login needed for: ' + missing + '. Click Login on each site, complete the login in the browser below, then click "I\'m Logged In".';
+    banner.innerHTML = 'Login needed for: ' + missing + '. Click Login on each site, complete the login in the browser below, then click "I\\'m Logged In".';
   } else {
     banner.style.display = 'none';
   }
