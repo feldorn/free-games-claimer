@@ -31,6 +31,7 @@ rm -f "/fgc/$BROWSER/SingletonLock"
 # Fixes container failing to start after stop/start (without recreate) on Unraid and similar platforms.
 rm -f /tmp/.X1-lock
 rm -f /tmp/.X11-unix/X1
+rm -f ~/.vnc/*:1.pid
 /opt/TurboVNC/bin/vncserver -kill :1 2>/dev/null || true
 
 export DISPLAY=:1 # need to export this, otherwise playwright complains with 'Looks like you launched a headed browser without having a XServer running.'
