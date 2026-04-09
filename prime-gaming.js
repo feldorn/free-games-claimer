@@ -349,12 +349,9 @@ try {
           if (cfg.debug) await page2.pause();
           await page2.close();
         }
-        const needsManualRedeem = ['redeem', 'redeem (got captcha)', 'redeem (not found)', 'redeem (login)'].includes(redeem_action);
-        if (needsManualRedeem) {
-          notify_game.status = `<a href="${redeem_url}">${redeem_action}</a>`;
-          notify_game.details = `Code: ${code} — <a href="${redeem_url}">Redeem on ${store}</a>`;
-        } else {
-          notify_game.status = `<a href="${redeem_url}">${redeem_action} on ${store}</a>`;
+        notify_game.status = `<a href="${redeem_url}">${redeem_action} on ${store}</a>`;
+        if (['redeem', 'redeem (got captcha)', 'redeem (not found)', 'redeem (login)'].includes(redeem_action)) {
+          notify_game.details = `Code: ${code}`;
         }
       } else {
         notify_game.status = `claimed on ${store}`;

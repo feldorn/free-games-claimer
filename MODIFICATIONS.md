@@ -269,10 +269,9 @@ These files support running the project in the Replit environment and should not
 - Reported by user in Edge browser
 
 ### Prime Gaming redeem notification fix
-- **Duplication removed**: Redemption code and store name previously appeared twice — once in the status parenthetical and again in the details line. Now, when manual redemption is needed, the status shows only the action (e.g., "redeem (got captcha)") as a clickable link, and the code + store redeem link appear only in the details line
-- **Link fixed**: The bare text `gog.com` in the status line was being auto-linked by Pushover to the GOG homepage instead of the redeem page. Now all store references are inside `<a href>` tags pointing to the correct redeem URL (e.g., `https://www.gog.com/redeem/CODE`)
+- **Duplication removed**: Redemption code and store name previously appeared twice — once in the status parenthetical and again in the details line. Now: status always shows `<a href="redeem_url">{action} on {store}</a>` as a single clickable link; details shows only `Code: {code}` for manual-redeem cases (no repeated store link)
+- **Link fixed**: The bare text `gog.com` in the status line was being auto-linked by Pushover to the GOG homepage instead of the redeem page. Now the store name is always inside the `<a href>` tag pointing to the correct redeem URL (e.g., `https://www.gog.com/redeem/CODE`), so Pushover can't auto-link it
 - **Manual redeem detection**: Consolidated check using `['redeem', 'redeem (got captcha)', 'redeem (not found)', 'redeem (login)'].includes(redeem_action)` — previously missed `'redeem (login)'`
-- For successfully redeemed games, the status wraps the full "redeemed on {store}" text in a single `<a>` tag — no details line needed
 
 ### Notification literal quote fix
 - Removed literal single-quote wrapping from the Apprise body argument in `notify()` (`src/util.js`)
