@@ -264,16 +264,29 @@ async function login(page) {
   if (page.url().includes('/welcome')) {
     log.info('On welcome page — clicking Sign In');
     await page.waitForTimeout(2000); // allow JS to render
-    // Click the element directly — navigating to its href bypasses React Router
-    // and causes the SPA to redirect back to /welcome
-    const signInLink = page.locator('a, button').filter({ hasText: /^sign\s+in$/i }).first();
-    if (await signInLink.count() > 0) {
-      await signInLink.click();
-      // Wait for Microsoft login page to load
-      await page.waitForURL(url => !url.includes('rewards.bing.com'), { timeout: 10000 }).catch(() => {});
-      await page.waitForTimeout(2000);
+
+    // getByRole is the most reliable way to find interactive sign-in elements
+    const signInEl = page.getByRole('link', { name: /sign.{0,5}in/i })
+      .or(page.getByRole('button', { name: /sign.{0,5}in/i }))
+      .first();
+
+    if (await signInEl.isVisible().catch(() => false)) {
+      log.info('Found Sign In element — clicking');
+      await signInEl.click();
+      await page.waitForTimeout(3000);
     } else {
-      log.warn('Could not find Sign In link on welcome page — proceeding anyway');
+      // Dump links/buttons for debugging
+      const pageElements = await page.evaluate(() =>
+        [...document.querySelectorAll('a, button')].map(el =>
+          `<${el.tagName.toLowerCase()} href="${el.href || ''}">${el.textContent.trim().substring(0, 80)}</${el.tagName.toLowerCase()}>`
+        ).join('\n')
+      ).catch(() => 'could not dump');
+      log.warn('Could not find Sign In element on welcome page');
+      log.info(`Links/buttons on page:\n${pageElements}`);
+      // Fallback: go directly to Microsoft login with Rewards as return URL
+      log.info('Navigating directly to Microsoft login');
+      await page.goto('https://login.live.com/login.srf?wa=wsignin1.0&wreply=https%3A%2F%2Frewards.bing.com%2F&lc=1033');
+      await page.waitForTimeout(2000);
     }
   }
 
