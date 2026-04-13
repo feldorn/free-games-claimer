@@ -49,6 +49,10 @@ export const cfg = {
   steam_password: process.env.STEAM_PASSWORD || process.env.PASSWORD,
   steam_min_rating: Number(process.env.STEAM_MIN_RATING ?? 6), // minimum review rating on 1-9 scale (6 = Mostly Positive)
   steam_min_price: Number(process.env.STEAM_MIN_PRICE ?? 10), // minimum original price in USD to filter out cheap/shovelware games
+  // auth microsoft rewards
+  ms_email: process.env.MS_EMAIL || process.env.EMAIL,
+  ms_password: process.env.MS_PASSWORD || process.env.PASSWORD,
+  ms_otpkey: process.env.MS_OTPKEY,
   // experimental
   pg_redeem: process.env.PG_REDEEM == '1', // prime-gaming: redeem keys on external stores
   lg_email: process.env.LG_EMAIL || process.env.PG_EMAIL || process.env.EMAIL, // prime-gaming: external: legacy-games: email to use for redeeming

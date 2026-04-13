@@ -23,3 +23,6 @@ services:
       # - LOOP=28800 # repeat claiming every N seconds (e.g., 28800 = 8 hours); omit to run once and exit
       # - STEAM_MIN_RATING=6 # minimum review rating 1-9 (6 = Mostly Positive)
       # - STEAM_MIN_PRICE=10 # minimum original price in USD
+      # - MS_EMAIL=your@email.com # Microsoft account for Bing Rewards (defaults to EMAIL)
+      # - MS_PASSWORD=yourpassword # Microsoft account password (defaults to PASSWORD)
+      # - MS_OTPKEY=yourotpsecret # Microsoft 2FA TOTP secret (optional)

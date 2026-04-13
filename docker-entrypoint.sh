@@ -26,6 +26,7 @@ BROWSER="${BROWSER_DIR:-data/browser}"
 # Maybe due to changed hostname of container or due to how the docker container kills playwright - didn't check.
 # https://bugs.chromium.org/p/chromium/issues/detail?id=367048
 rm -f "/fgc/$BROWSER/SingletonLock"
+rm -f "/fgc/${BROWSER}-mobile/SingletonLock"
 
 # Clean up stale display/VNC files from previous runs.
 # Fixes container failing to start after stop/start (without recreate) on Unraid and similar platforms.

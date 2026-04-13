@@ -1,6 +1,6 @@
 import http from 'node:http';
 import { spawn } from 'node:child_process';
-import { chromium } from 'patchright';
+import { chromium, devices } from 'patchright';
 import { datetime } from './src/util.js';
 import { cfg } from './src/config.js';
 
@@ -145,6 +145,43 @@ const SITES = {
       }
     },
   },
+  'microsoft': {
+    name: 'Microsoft Rewards',
+    loginUrl: 'https://rewards.bing.com',
+    browserDir: cfg.dir.browser,
+    async checkLogin(page) {
+      try {
+        await page.goto('https://rewards.bing.com', { waitUntil: 'domcontentloaded', timeout: 20000 });
+        await page.waitForTimeout(3000);
+        const url = page.url();
+        if (url.includes('login.live.com') || url.includes('login.microsoftonline.com') || url.includes('account.microsoft.com')) {
+          return { loggedIn: false };
+        }
+        return { loggedIn: true, user: 'Microsoft account' };
+      } catch {
+        return { loggedIn: false };
+      }
+    },
+  },
+  'microsoft-mobile': {
+    name: 'Microsoft Rewards (Mobile)',
+    loginUrl: 'https://rewards.bing.com',
+    browserDir: cfg.dir.browser + '-mobile',
+    contextOptions: devices['Pixel 7'],
+    async checkLogin(page) {
+      try {
+        await page.goto('https://rewards.bing.com', { waitUntil: 'domcontentloaded', timeout: 20000 });
+        await page.waitForTimeout(3000);
+        const url = page.url();
+        if (url.includes('login.live.com') || url.includes('login.microsoftonline.com') || url.includes('account.microsoft.com')) {
+          return { loggedIn: false };
+        }
+        return { loggedIn: true, user: 'Microsoft account' };
+      } catch {
+        return { loggedIn: false };
+      }
+    },
+  },
 };
 
 let activeBrowser = null;
@@ -168,12 +205,13 @@ async function launchSite(siteId) {
     locale: 'en-US',
     handleSIGINT: false,
     args: ['--hide-crash-restore-bubble'],
+    ...(site.contextOptions || {}),
   });
 
   context.setDefaultTimeout(0);
 
   const page = context.pages().length ? context.pages()[0] : await context.newPage();
-  await page.setViewportSize({ width: cfg.width, height: cfg.height });
+  if (!site.contextOptions?.viewport) await page.setViewportSize({ width: cfg.width, height: cfg.height });
   await page.goto(site.loginUrl, { waitUntil: 'domcontentloaded' });
 
   activeBrowser = { siteId, context, page };
@@ -237,6 +275,7 @@ async function checkSiteStatus(siteId) {
       locale: 'en-US',
       handleSIGINT: false,
       args: ['--hide-crash-restore-bubble', '--no-sandbox', '--disable-gpu'],
+      ...(site.contextOptions || {}),
     });
 
     const page = context.pages()[0] || await context.newPage();
@@ -284,7 +323,7 @@ function runAllScripts() {
   runStatus = 'running';
   console.log(`[${datetime()}] Starting all claiming scripts...`);
 
-  const child = spawn('bash', ['-c', 'node prime-gaming.js; node epic-games.js; node gog.js; node steam.js'], {
+  const child = spawn('bash', ['-c', 'node prime-gaming.js; node epic-games.js; node gog.js; node steam.js; node microsoft.js'], {
     cwd: process.cwd(),
     env: process.env,
     stdio: ['ignore', 'pipe', 'pipe'],
