@@ -254,8 +254,10 @@ async function login(page) {
   // rewards.bing.com redirects to Microsoft login when not signed in
   await page.goto(BING_REWARDS_URL, { waitUntil: 'load' });
 
-  // Email step
-  await page.keyboard.type(email);
+  // Email step — wait for the field, click to focus, then fill
+  const emailInput = await page.waitForSelector('input[type="email"], input[name="loginfmt"], #i0116');
+  await emailInput.click();
+  await emailInput.fill(email);
   await page.keyboard.press('Enter');
   await page.waitForTimeout(3000);
 
