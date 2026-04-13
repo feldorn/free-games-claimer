@@ -222,7 +222,8 @@ async function createContext(isMobile) {
 
 async function isLoggedIn(page) {
   try {
-    await page.goto(BING_REWARDS_URL, { waitUntil: 'load' });
+    await page.goto(BING_REWARDS_URL, { waitUntil: 'domcontentloaded' });
+    await page.waitForTimeout(3000); // allow JS-based redirects to settle
     const url = page.url();
     return !url.includes('login.live.com')
       && !url.includes('login.microsoftonline.com')
@@ -254,10 +255,12 @@ async function login(page) {
 
   if (cfg.ms_email && cfg.ms_password) log.info('Using credentials from environment');
 
-  // rewards.bing.com may show a welcome/landing page rather than redirecting
-  // directly to the Microsoft login form. Find the sign-in link in the DOM
-  // and navigate to it directly to avoid text/visibility selector fragility.
-  await page.goto(BING_REWARDS_URL, { waitUntil: 'load' });
+  // rewards.bing.com may JS-redirect to a /welcome landing page rather than
+  // the Microsoft login form. Wait for that client-side redirect to settle
+  // before checking the URL, then find and follow the sign-in link.
+  await page.goto(BING_REWARDS_URL, { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(3000); // allow JS-based redirects to complete
+  log.status('Login page URL', page.url());
   if (page.url().includes('/welcome')) {
     log.info('On welcome page — locating sign-in link');
     await page.waitForTimeout(2000); // allow JS to render
