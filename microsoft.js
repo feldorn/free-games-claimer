@@ -262,26 +262,18 @@ async function login(page) {
   await page.waitForTimeout(3000); // allow JS-based redirects to complete
   log.status('Login page URL', page.url());
   if (page.url().includes('/welcome')) {
-    log.info('On welcome page — locating sign-in link');
+    log.info('On welcome page — clicking Sign In');
     await page.waitForTimeout(2000); // allow JS to render
-    const loginHref = await page.evaluate(() => {
-      // Prefer exact "Sign in" text match to avoid matching create-account links
-      // (which may contain 'signin' in their URL, e.g. anonsignin)
-      for (const el of document.querySelectorAll('a')) {
-        if (/^sign\s+in$/i.test((el.textContent || '').trim()) && el.href) return el.href;
-      }
-      // Fallback: href pointing to a known login domain
-      for (const el of document.querySelectorAll('a')) {
-        const href = el.href || '';
-        if ((href.includes('login.live.com') || href.includes('login.microsoftonline.com') || href.includes('/signin')) && !href.includes('createuser')) return href;
-      }
-      return null;
-    }).catch(() => null);
-    if (loginHref) {
-      log.status('Navigating to', loginHref);
-      await page.goto(loginHref, { waitUntil: 'load' });
+    // Click the element directly — navigating to its href bypasses React Router
+    // and causes the SPA to redirect back to /welcome
+    const signInLink = page.locator('a, button').filter({ hasText: /^sign\s+in$/i }).first();
+    if (await signInLink.count() > 0) {
+      await signInLink.click();
+      // Wait for Microsoft login page to load
+      await page.waitForURL(url => !url.includes('rewards.bing.com'), { timeout: 10000 }).catch(() => {});
+      await page.waitForTimeout(2000);
     } else {
-      log.warn('Could not find sign-in link on welcome page — proceeding anyway');
+      log.warn('Could not find Sign In link on welcome page — proceeding anyway');
     }
   }
 
