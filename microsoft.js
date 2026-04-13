@@ -224,7 +224,10 @@ async function isLoggedIn(page) {
   try {
     await page.goto(BING_REWARDS_URL, { waitUntil: 'load' });
     const url = page.url();
-    return !url.includes('login.live.com') && !url.includes('login.microsoftonline.com') && !url.includes('account.microsoft.com');
+    return !url.includes('login.live.com')
+      && !url.includes('login.microsoftonline.com')
+      && !url.includes('account.microsoft.com')
+      && !url.includes('/welcome');
   } catch {
     return false;
   }
@@ -251,8 +254,16 @@ async function login(page) {
 
   if (cfg.ms_email && cfg.ms_password) log.info('Using credentials from environment');
 
-  // rewards.bing.com redirects to Microsoft login when not signed in
+  // rewards.bing.com may show a welcome/landing page with a Sign In button
+  // rather than redirecting directly to the Microsoft login form
   await page.goto(BING_REWARDS_URL, { waitUntil: 'load' });
+  if (page.url().includes('/welcome')) {
+    const signInBtn = page.locator('a:has-text("Sign in"), button:has-text("Sign in")').first();
+    if (await signInBtn.isVisible().catch(() => false)) {
+      await signInBtn.click();
+      await page.waitForTimeout(3000);
+    }
+  }
 
   // Email step — wait for the field, click to focus, then fill
   const emailInput = await page.waitForSelector('input[type="email"], input[name="loginfmt"], #i0116');
