@@ -366,7 +366,13 @@ async function login(page) {
     log.info('Clicking "Stay signed in"');
     await stayBtn.click();
   }
-  await page.waitForTimeout(2000);
+  // Wait for the full OAuth redirect chain back to rewards.bing.com.
+  // ppsecure/post.srf does a form POST that triggers a multi-step redirect;
+  // a fixed timeout is not enough — wait for the URL to actually land.
+  log.info('Waiting for redirect back to rewards.bing.com...');
+  await page.waitForURL(/rewards\.bing\.com/, { timeout: 30000 }).catch(e => {
+    log.warn(`Redirect wait timed out or failed: ${e.message}`);
+  });
   log.status('URL after login complete', page.url());
 
   if (!cfg.debug) page.context().setDefaultTimeout(cfg.timeout);
