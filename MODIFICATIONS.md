@@ -299,10 +299,42 @@ These files support running the project in the Replit environment and should not
 
 ---
 
+## Microsoft Rewards Claimer
+
+### New file: `microsoft.js`
+Automates daily Microsoft Rewards point collection via Bing searches and activity card clicks.
+
+### Features
+- Desktop session: 35 randomized Bing searches
+- Mobile session: 25 randomized Bing searches in a Pixel 7 device profile (separate browser directory)
+- Clicks all pending activity cards on the rewards dashboard
+- Randomized search terms across 20 topic categories (language, cooking, health, etc.)
+- Randomized delays between searches (human-like pacing)
+
+### Login
+- Uses `MS_EMAIL` / `MS_PASSWORD` environment variables (falls back to `EMAIL` / `PASSWORD`)
+- Handles Microsoft's `/welcome` landing page (clicks Sign In element, falls back to direct `login.live.com` URL)
+- Handles "Sign in another way" → "Use your password" prompt
+- Handles TOTP 2FA via `MS_OTPKEY` (otplib) or interactive prompt
+- Handles "Stay signed in" prompt
+
+### Bot detection avoidance
+- Mobile context: full Pixel 7 device profile with realistic `navigator.plugins`, `navigator.mimeTypes`, `userAgentData`, `platform`, `maxTouchPoints`, `hardwareConcurrency`, `deviceMemory` spoofs
+- Passkey dialog suppressed on all contexts via `credentials.get/create` override
+- Popups closed automatically
+
+### Integration
+- `src/config.js`: Added `ms_email`, `ms_password`, `ms_otpkey`
+- `Dockerfile`: Added `node microsoft` to default CMD
+- `docker-compose.yml`: Added `MS_EMAIL`, `MS_PASSWORD`, `MS_OTPKEY` env var documentation
+
+---
+
 ## Summary of All Changed Files
 
 | File | Change Type | Description |
 |------|-------------|-------------|
+| `microsoft.js` | **New** | Microsoft Rewards daily point collector (desktop + mobile Bing searches, activity cards) |
 | `steam.js` | **New** | Steam free-to-keep game claimer with SteamDB discovery, log consistency fixes |
 | `interactive-login.js` | **New** | Interactive VNC login panel with 4-site support |
 | `prime-gaming.js` | Modified | patchright import, login bug fix, awaited notify(), log.* audit, DLC flow cleanup, account linking false-positive fix, clickable redeem/linking notifications, redeem notification dedup/link fix |
@@ -310,7 +342,7 @@ These files support running the project in the Replit environment and should not
 | `gog.js` | Modified | patchright import, awaited notify(), selector fix, log.* audit, username detection fallbacks |
 | `src/util.js` | Modified | Removed stealth()/launchChromium(), added `log` helper object, `html_game_list` details with HTML support, notify() literal quote fix |
 | `src/config.js` | Modified | Removed AliExpress config, added login_mode, Steam config |
-| `Dockerfile` | Modified | patchright, PANEL_PORT, CMD order, added `node steam` |
+| `Dockerfile` | Modified | patchright, PANEL_PORT, CMD order, added `node steam`, added `node microsoft` |
 | `docker-compose.yml` | Modified | Port 7080, LOGIN_MODE, Steam config docs, fork image reference, healthcheck fix |
 | `docker-entrypoint.sh` | Modified | LOGIN_MODE check, tini -s flag, startup banner, stale VNC cleanup on restart |
 | `package.json` | Modified | patchright dep, docker port 7080 |

@@ -108,4 +108,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15s CMD curl --fail http:
 # Script to setup display server & VNC is always executed.
 ENTRYPOINT ["docker-entrypoint.sh"]
 # Default command to run. This is replaced by appending own command, e.g. `docker run ... node prime-gaming` to only run this script.
-CMD node prime-gaming; node epic-games; node gog; node steam
+CMD node prime-gaming; node epic-games; node gog; node steam; node microsoft
