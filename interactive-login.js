@@ -154,7 +154,7 @@ const SITES = {
         await page.goto('https://rewards.bing.com', { waitUntil: 'domcontentloaded', timeout: 20000 });
         await page.waitForTimeout(3000);
         const url = page.url();
-        if (url.includes('login.live.com') || url.includes('login.microsoftonline.com') || url.includes('account.microsoft.com')) {
+        if (url.includes('login.live.com') || url.includes('login.microsoftonline.com') || url.includes('account.microsoft.com') || url.includes('/welcome')) {
           return { loggedIn: false };
         }
         return { loggedIn: true, user: 'Microsoft account' };
@@ -173,7 +173,7 @@ const SITES = {
         await page.goto('https://rewards.bing.com', { waitUntil: 'domcontentloaded', timeout: 20000 });
         await page.waitForTimeout(3000);
         const url = page.url();
-        if (url.includes('login.live.com') || url.includes('login.microsoftonline.com') || url.includes('account.microsoft.com')) {
+        if (url.includes('login.live.com') || url.includes('login.microsoftonline.com') || url.includes('account.microsoft.com') || url.includes('/welcome')) {
           return { loggedIn: false };
         }
         return { loggedIn: true, user: 'Microsoft account' };
