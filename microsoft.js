@@ -254,14 +254,26 @@ async function login(page) {
 
   if (cfg.ms_email && cfg.ms_password) log.info('Using credentials from environment');
 
-  // rewards.bing.com may show a welcome/landing page with a Sign In button
-  // rather than redirecting directly to the Microsoft login form
+  // rewards.bing.com may show a welcome/landing page rather than redirecting
+  // directly to the Microsoft login form. Find the sign-in link in the DOM
+  // and navigate to it directly to avoid text/visibility selector fragility.
   await page.goto(BING_REWARDS_URL, { waitUntil: 'load' });
   if (page.url().includes('/welcome')) {
-    const signInBtn = page.locator('a:has-text("Sign in"), button:has-text("Sign in")').first();
-    if (await signInBtn.isVisible().catch(() => false)) {
-      await signInBtn.click();
-      await page.waitForTimeout(3000);
+    log.info('On welcome page — locating sign-in link');
+    await page.waitForTimeout(2000); // allow JS to render
+    const loginHref = await page.evaluate(() => {
+      for (const el of document.querySelectorAll('a')) {
+        const href = el.href || '';
+        const text = (el.textContent || '').toLowerCase();
+        if (href.includes('login') || href.includes('signin') || text.includes('sign in')) return href;
+      }
+      return null;
+    }).catch(() => null);
+    if (loginHref) {
+      log.status('Navigating to', loginHref);
+      await page.goto(loginHref, { waitUntil: 'load' });
+    } else {
+      log.warn('Could not find sign-in link on welcome page — proceeding anyway');
     }
   }
 
