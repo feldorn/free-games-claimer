@@ -265,10 +265,15 @@ async function login(page) {
     log.info('On welcome page — locating sign-in link');
     await page.waitForTimeout(2000); // allow JS to render
     const loginHref = await page.evaluate(() => {
+      // Prefer exact "Sign in" text match to avoid matching create-account links
+      // (which may contain 'signin' in their URL, e.g. anonsignin)
+      for (const el of document.querySelectorAll('a')) {
+        if (/^sign\s+in$/i.test((el.textContent || '').trim()) && el.href) return el.href;
+      }
+      // Fallback: href pointing to a known login domain
       for (const el of document.querySelectorAll('a')) {
         const href = el.href || '';
-        const text = (el.textContent || '').toLowerCase();
-        if (href.includes('login') || href.includes('signin') || text.includes('sign in')) return href;
+        if ((href.includes('login.live.com') || href.includes('login.microsoftonline.com') || href.includes('/signin')) && !href.includes('createuser')) return href;
       }
       return null;
     }).catch(() => null);
