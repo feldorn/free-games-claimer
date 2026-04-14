@@ -128,10 +128,8 @@ function generateRandomSearchTermsList(length) {
   ).sort(() => Math.random() - 0.5).slice(0, length);
 }
 
-async function sleepRandomized(maxSeconds) {
-  const ms = Math.floor(Math.random() * (maxSeconds * 1000 - 1000 + 1)) + 1000;
-  log.status('Sleep', `${(ms / 1000).toFixed(1)}s`);
-  await delay(ms);
+function randomMs(maxSeconds) {
+  return Math.floor(Math.random() * (maxSeconds * 1000 - 1000 + 1)) + 1000;
 }
 
 async function createContext(isMobile) {
@@ -406,20 +404,20 @@ async function clickEveryPendingActivityCard(page) {
   await page.goto(BING_REWARDS_URL, { waitUntil: 'load' });
   const cards = await page.locator(BING_REWARDS_ACTIVITY_CARD_SELECTOR).elementHandles();
   log.status('Activity cards found', cards.length);
-  for (const card of cards) {
-    log.status('Clicking card', '...');
-    await card.click();
-    await sleepRandomized(15);
+  for (let i = 0; i < cards.length; i++) {
+    const ms = randomMs(15);
+    log.status(`Clicking card #${i + 1}`, `... Sleep: ${(ms / 1000).toFixed(1)}s ... done`);
+    await cards[i].click();
+    await delay(ms);
   }
 }
 
-async function executeBingSearch(page, searchTerm) {
-  log.status('Search', `"${searchTerm}"`);
+async function executeBingSearch(page, searchTerm, preEnterMs) {
   await page.goto(BING_URL, { waitUntil: 'load' });
   for (const char of searchTerm) {
     await page.keyboard.type(char, { delay: 100 + Math.floor(Math.random() * 100) });
   }
-  await sleepRandomized(10);
+  await delay(preEnterMs);
   await page.keyboard.press('Enter');
   await page.locator('#b_results').waitFor({ timeout: 60000 });
   // ~40% of the time, scroll down to simulate reading results
@@ -430,18 +428,27 @@ async function executeBingSearch(page, searchTerm) {
 }
 
 async function executeBingSearches(page, searchTerms) {
-  log.info(`Executing ${searchTerms.length} Bing searches`);
-  for (const term of searchTerms) {
-    await sleepRandomized(180);
+  const initMs = randomMs(180);
+  log.info(`Executing ${searchTerms.length} Bing searches ... Sleep: ${(initMs / 1000).toFixed(1)}s ... ready`);
+  await delay(initMs);
+  for (let i = 0; i < searchTerms.length; i++) {
+    const term = searchTerms[i];
+    const preEnterMs = randomMs(10);
+    const interMs = i < searchTerms.length - 1 ? randomMs(180) : 0;
+    const sleepStr = interMs > 0
+      ? `Sleep: ${(preEnterMs / 1000).toFixed(1)}s ... Sleep: ${(interMs / 1000).toFixed(1)}s`
+      : `Sleep: ${(preEnterMs / 1000).toFixed(1)}s`;
+    log.status(`Search #${i + 1}`, `"${term}" ... ${sleepStr} ... done`);
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
-        await executeBingSearch(page, term);
+        await executeBingSearch(page, term, preEnterMs);
         break;
       } catch (e) {
         log.warn(`Search failed (attempt ${attempt}/3): ${e.message}`);
         if (attempt === 3) log.fail(`Skipping search: "${term}"`);
       }
     }
+    if (interMs > 0) await delay(interMs);
   }
 }
 
@@ -464,8 +471,12 @@ log.section('Desktop');
   const { context, page } = await createContext(false);
   activeContext = context;
   try {
-    if (!await isLoggedIn(page)) await login(page);
-    if (await isLoggedIn(page)) {
+    let loggedIn = await isLoggedIn(page);
+    if (!loggedIn) {
+      await login(page);
+      loggedIn = await isLoggedIn(page);
+    }
+    if (loggedIn) {
       log.status('Signed in', 'yes');
       await clickEveryPendingActivityCard(page);
       await executeBingSearches(page, searchTerms.slice(0, desktopSearchCount));
@@ -489,8 +500,12 @@ log.section('Mobile');
   const { context, page } = await createContext(true);
   activeContext = context;
   try {
-    if (!await isLoggedIn(page)) await login(page);
-    if (await isLoggedIn(page)) {
+    let loggedIn = await isLoggedIn(page);
+    if (!loggedIn) {
+      await login(page);
+      loggedIn = await isLoggedIn(page);
+    }
+    if (loggedIn) {
       log.status('Signed in', 'yes');
       await clickEveryPendingActivityCard(page);
       await executeBingSearches(page, searchTerms.slice(-mobileSearchCount));
