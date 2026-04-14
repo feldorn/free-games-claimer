@@ -11,6 +11,7 @@ Claims free games periodically on:
 - <img alt="logo epic-games" src="https://github.com/user-attachments/assets/82e9e9bf-b6ac-4f20-91db-36d2c8429cb6" width="32" align="middle" /> [Epic Games Store](https://www.epicgames.com/store/free-games)
 - <img alt="logo gog" src="https://github.com/user-attachments/assets/49040b50-ee14-4439-8e3c-e93cafd7c3a5" width="32" align="middle" /> [GOG](https://www.gog.com)
 - <img alt="logo steam" src="https://store.steampowered.com/favicon.ico" width="32" align="middle" /> [Steam](https://store.steampowered.com) — free-to-keep promotions only (not F2P or free weekends)
+- 🎯 [Microsoft Rewards](https://rewards.bing.com) — daily Bing searches and activity cards for points
 
 Uses [patchright](https://github.com/nicbarker/patchright) (Chromium with built-in anti-detection). Runs in Docker with a virtual display and VNC access.
 
@@ -136,6 +137,7 @@ Each store can use the default `EMAIL`/`PASSWORD` or be overridden individually:
 | Prime Gaming | `PG_EMAIL` | `PG_PASSWORD` | `PG_OTPKEY` | `PG_REDEEM=1`, `PG_CLAIMDLC=1` |
 | GOG | `GOG_EMAIL` | `GOG_PASSWORD` | | `GOG_NEWSLETTER=1` |
 | Steam | `STEAM_EMAIL` | `STEAM_PASSWORD` | | `STEAM_MIN_RATING`, `STEAM_MIN_PRICE` |
+| Microsoft Rewards | `MS_EMAIL` | `MS_PASSWORD` | `MS_OTPKEY` | `MS_SCHEDULE_HOURS` |
 
 ### Steam-Specific Options
 
@@ -145,6 +147,17 @@ Each store can use the default `EMAIL`/`PASSWORD` or be overridden individually:
 | `STEAM_MIN_PRICE` | `10` | Minimum original price in USD. Filters out cheap/shovelware titles. |
 
 Steam discovers free-to-keep games via [SteamDB](https://steamdb.info/upcoming/free/) and only claims temporarily free promotions (100% off games that normally cost money). Free-to-play games and free weekend trials are excluded.
+
+### Microsoft Rewards Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `MS_EMAIL` | | Microsoft account email (falls back to `EMAIL`) |
+| `MS_PASSWORD` | | Microsoft account password (falls back to `PASSWORD`) |
+| `MS_OTPKEY` | | TOTP secret for automatic 2FA (otplib). Only needed if the account uses app-based TOTP, not phone push approval. |
+| `MS_SCHEDULE_HOURS` | `0` | Random startup delay window in hours. When set (e.g. `8`), waits a random 0–N hours before starting each run. Use with `LOOP=86400` to spread daily runs across a time window instead of always running at the same time. `0` = run immediately. |
+
+Microsoft Rewards collects daily points by running a desktop Bing session (33–37 searches) and a mobile session emulating a Pixel 7 (23–27 searches), plus clicking any pending activity cards. Search terms are sourced fresh each run from Google Trends and BBC/ESPN RSS feeds, with a 30-day dedup window to avoid repeating terms. The existing 800-term pool is used as fallback when live sources are unreachable.
 
 ---
 
@@ -224,6 +237,7 @@ All data is stored in the `data/` directory (mounted as a Docker volume):
 | `data/prime-gaming.json` | Claimed Prime Gaming titles, redeemed codes |
 | `data/gog.json` | Claimed GOG titles |
 | `data/steam.json` | Claimed Steam titles |
+| `data/ms-used-terms.json` | Microsoft Rewards — search terms used in the last 30 days (dedup window) |
 | `data/screenshots/` | Screenshots of claim results |
 
 ---

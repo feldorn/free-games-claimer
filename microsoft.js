@@ -8,6 +8,10 @@ const BING_REWARDS_URL = 'https://rewards.bing.com';
 const BING_URL = 'https://www.bing.com';
 const BING_REWARDS_ACTIVITY_CARD_SELECTOR = 'mee-card:has(.mee-icon-AddMedium)';
 
+// Force stdout to flush immediately — Node.js buffers writes to non-TTY pipes
+// (e.g. Docker), which causes log lines to appear in bursts instead of live.
+if (process.stdout._handle?.setBlocking) process.stdout._handle.setBlocking(true);
+
 log.section('Microsoft Rewards');
 log.status('Time', datetime());
 log.status('MS email', cfg.ms_email || '(none — will use EMAIL or prompt)');
@@ -489,10 +493,12 @@ async function clickEveryPendingActivityCard(page) {
   const cards = await page.locator(BING_REWARDS_ACTIVITY_CARD_SELECTOR).elementHandles();
   log.status('Activity cards found', cards.length);
   for (let i = 0; i < cards.length; i++) {
-    const ms = randomMs(15);
-    log.status(`Clicking card #${i + 1}`, `... Sleep: ${(ms / 1000).toFixed(1)}s ... done`);
+    log.progressStart(`Clicking card #${i + 1}: ...`);
     await cards[i].click();
+    const ms = randomMs(15);
+    log.progressAppend(` Sleep: ${(ms / 1000).toFixed(1)}s ...`);
     await delay(ms);
+    log.progressEnd(' done');
   }
 }
 
@@ -513,26 +519,36 @@ async function executeBingSearch(page, searchTerm, preEnterMs) {
 
 async function executeBingSearches(page, searchTerms) {
   const initMs = randomMs(180);
-  log.info(`Executing ${searchTerms.length} Bing searches ... Sleep: ${(initMs / 1000).toFixed(1)}s ... ready`);
+  log.progressInfo(`Executing ${searchTerms.length} Bing searches ... Sleep: ${(initMs / 1000).toFixed(1)}s ...`);
   await delay(initMs);
+  log.progressEnd(' ready');
   for (let i = 0; i < searchTerms.length; i++) {
     const term = searchTerms[i];
     const preEnterMs = randomMs(10);
     const interMs = i < searchTerms.length - 1 ? randomMs(180) : 0;
-    const sleepStr = interMs > 0
-      ? `Sleep: ${(preEnterMs / 1000).toFixed(1)}s ... Sleep: ${(interMs / 1000).toFixed(1)}s`
-      : `Sleep: ${(preEnterMs / 1000).toFixed(1)}s`;
-    log.status(`Search #${i + 1}`, `"${term}" ... ${sleepStr} ... done`);
+    log.progressStart(`Search #${i + 1}: "${term}" ...`);
+    let ok = false;
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
         await executeBingSearch(page, term, preEnterMs);
+        ok = true;
         break;
       } catch (e) {
-        log.warn(`Search failed (attempt ${attempt}/3): ${e.message}`);
-        if (attempt === 3) log.fail(`Skipping search: "${term}"`);
+        if (attempt < 3) {
+          log.progressAppend(` retry ${attempt + 1}...`);
+        } else {
+          log.progressEnd(' SKIP');
+          log.warn(`Search failed after 3 attempts: ${e.message}`);
+        }
       }
     }
-    if (interMs > 0) await delay(interMs);
+    if (!ok) continue;
+    log.progressAppend(` Sleep: ${(preEnterMs / 1000).toFixed(1)}s`);
+    if (interMs > 0) {
+      log.progressAppend(` ... Sleep: ${(interMs / 1000).toFixed(1)}s`);
+      await delay(interMs);
+    }
+    log.progressEnd(' ... done');
   }
 }
 

@@ -304,12 +304,11 @@ These files support running the project in the Replit environment and should not
 ### New file: `microsoft.js`
 Automates daily Microsoft Rewards point collection via Bing searches and activity card clicks.
 
-### Features
-- Desktop session: 35 randomized Bing searches
-- Mobile session: 25 randomized Bing searches in a Pixel 7 device profile (separate browser directory)
+### Sessions
+- Desktop session: 33–37 randomized Bing searches (varied each run)
+- Mobile session: 23–27 randomized Bing searches in a Pixel 7 device profile (separate browser directory)
 - Clicks all pending activity cards on the rewards dashboard
-- Randomized search terms across 20 topic categories (language, cooking, health, etc.)
-- Randomized delays between searches (human-like pacing)
+- 5–20 minute random gap between desktop and mobile sessions
 
 ### Login
 - Uses `MS_EMAIL` / `MS_PASSWORD` environment variables (falls back to `EMAIL` / `PASSWORD`)
@@ -317,16 +316,36 @@ Automates daily Microsoft Rewards point collection via Bing searches and activit
 - Handles "Sign in another way" → "Use your password" prompt
 - Handles TOTP 2FA via `MS_OTPKEY` (otplib) or interactive prompt
 - Handles "Stay signed in" prompt
+- `isLoggedIn` is only called twice when login is actually needed; saved sessions skip the second check entirely
 
 ### Bot detection avoidance
-- Mobile context: full Pixel 7 device profile with realistic `navigator.plugins`, `navigator.mimeTypes`, `userAgentData`, `platform`, `maxTouchPoints`, `hardwareConcurrency`, `deviceMemory` spoofs
+- **Desktop context**: `navigator.webdriver` deleted, `hardwareConcurrency` spoofed to 8, `deviceMemory` spoofed to 8, viewport randomized ±20px each run
+- **Mobile context**: full Pixel 7 device profile with realistic `navigator.plugins`, `navigator.mimeTypes`, `userAgentData`, `platform`, `maxTouchPoints`, `hardwareConcurrency`, `deviceMemory` spoofs
 - Passkey dialog suppressed on all contexts via `credentials.get/create` override
 - Popups closed automatically
+- Inter-search delay: random 1s–180s (human-like pacing)
+- ~40% of searches scroll down to simulate reading results
+- Search counts vary per run (33–37 desktop, 23–27 mobile) to avoid a fixed daily pattern
+
+### Search term sourcing (three-tier)
+1. **Google Trends RSS** (`trends.google.com/trending/rss?geo=US`) — up to ~10 real trending search queries per run
+2. **News RSS feeds** (BBC News + ESPN) — up to ~55 current headlines per run
+3. **Fallback pool** — 800 hardcoded terms across 20 topic categories (language, cooking, health, sports, etc.), used when live sources are unreachable or to fill remaining slots
+
+All used terms are tracked in `data/ms-used-terms.json` with a 30-day rolling dedup window — the same term will not be reused within 30 days. All fetch calls have 6s timeouts and return empty on failure.
+
+### Scheduling
+- `MS_SCHEDULE_HOURS` (default: `0`): random 0–N hour startup delay. Use with `LOOP=86400` to spread daily runs across a window instead of always running at the same time each day.
+
+### Logging
+- Progressive line output: each card click and search logs in real time as operations happen (not after)
+- `process.stdout._handle.setBlocking(true)` ensures immediate flush in Docker non-TTY environments
+- `src/util.js`: Added `log.progressStart`, `log.progressAppend`, `log.progressEnd`, `log.progressInfo` helpers for incremental line building
 
 ### Integration
-- `src/config.js`: Added `ms_email`, `ms_password`, `ms_otpkey`
+- `src/config.js`: Added `ms_email`, `ms_password`, `ms_otpkey`, `ms_schedule_hours`
 - `Dockerfile`: Added `node microsoft` to default CMD
-- `docker-compose.yml`: Added `MS_EMAIL`, `MS_PASSWORD`, `MS_OTPKEY` env var documentation
+- `docker-compose.yml`: Added `MS_EMAIL`, `MS_PASSWORD`, `MS_OTPKEY`, `MS_SCHEDULE_HOURS` env vars
 
 ---
 
@@ -334,7 +353,7 @@ Automates daily Microsoft Rewards point collection via Bing searches and activit
 
 | File | Change Type | Description |
 |------|-------------|-------------|
-| `microsoft.js` | **New** | Microsoft Rewards daily point collector (desktop + mobile Bing searches, activity cards) |
+| `microsoft.js` | **New** | Microsoft Rewards: desktop + mobile Bing searches, activity cards, bot hardening, live search terms, scheduling window, progressive logging |
 | `steam.js` | **New** | Steam free-to-keep game claimer with SteamDB discovery, log consistency fixes |
 | `interactive-login.js` | **New** | Interactive VNC login panel with 4-site support |
 | `prime-gaming.js` | Modified | patchright import, login bug fix, awaited notify(), log.* audit, DLC flow cleanup, account linking false-positive fix, clickable redeem/linking notifications, redeem notification dedup/link fix |

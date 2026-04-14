@@ -117,4 +117,10 @@ export const log = {
   summary: (parts) => {
     console.log(`  ${chalk.dim('Summary:')} ${parts.join(', ')}`);
   },
+  // Progressive line helpers — write pieces without newline, then end the line.
+  // Use these when you want log output to appear incrementally (e.g. during sleeps).
+  progressStart: (msg) => process.stdout.write(`  ${msg}`),
+  progressAppend: (msg) => process.stdout.write(msg),
+  progressEnd: (msg = '') => process.stdout.write(`${msg}\n`),
+  progressInfo: (msg) => process.stdout.write(`  ${chalk.green('✓')} ${msg}`),
 };
