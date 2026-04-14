@@ -17,6 +17,9 @@ log.status('Time', datetime());
 log.status('MS email', cfg.ms_email || '(none — will use EMAIL or prompt)');
 
 if (cfg.ms_schedule_hours > 0) {
+  // Intentionally delay BEFORE fetching search terms. Trending queries and RSS headlines
+  // are fetched at actual run time so they reflect what's current when the searches happen,
+  // not what was trending hours earlier when the container loop fired.
   const delayMs = Math.floor(Math.random() * cfg.ms_schedule_hours * 3600 * 1000);
   const runAt = new Date(Date.now() + delayMs);
   log.status('Scheduled start', `${runAt.toLocaleTimeString()} (+${(delayMs / 3600000).toFixed(1)}h of ${cfg.ms_schedule_hours}h window)`);
@@ -132,30 +135,42 @@ const BING_SEARCH_TERMS = [
 const USED_TERMS_FILE = dataDir('ms-used-terms.json');
 const USED_TERMS_WINDOW_DAYS = 30;
 
-function loadUsedTerms() {
+// Load the raw {term, ts} entries from disk, pruned to the rolling window.
+// Returns the raw array so it can be passed straight to saveUsedTerms —
+// avoiding a second file read inside that function.
+function loadRawUsedTerms() {
   try {
     if (existsSync(USED_TERMS_FILE)) {
       const data = JSON.parse(readFileSync(USED_TERMS_FILE, 'utf8'));
       const cutoff = Date.now() - USED_TERMS_WINDOW_DAYS * 86400000;
-      return data.filter(e => e.ts > cutoff).map(e => e.term.toLowerCase());
+      return data.filter(e => e.ts > cutoff);
     }
   } catch {}
   return [];
 }
 
-function saveUsedTerms(terms) {
-  let existing = [];
-  try {
-    if (existsSync(USED_TERMS_FILE)) existing = JSON.parse(readFileSync(USED_TERMS_FILE, 'utf8'));
-  } catch {}
-  const cutoff = Date.now() - USED_TERMS_WINDOW_DAYS * 86400000;
-  const pruned = existing.filter(e => e.ts > cutoff);
+function saveUsedTerms(newTerms, existingRaw) {
   const now = Date.now();
-  for (const term of terms) {
-    if (!pruned.some(e => e.term.toLowerCase() === term.toLowerCase()))
-      pruned.push({ term, ts: now });
+  const updated = [...existingRaw];
+  for (const term of newTerms) {
+    if (!updated.some(e => e.term.toLowerCase() === term.toLowerCase()))
+      updated.push({ term, ts: now });
   }
-  writeFileSync(USED_TERMS_FILE, JSON.stringify(pruned));
+  writeFileSync(USED_TERMS_FILE, JSON.stringify(updated));
+}
+
+// Normalize a headline string to clean ASCII: handles smart quotes, em-dashes,
+// accented characters, etc. rather than silently mangling or stripping them.
+function normalizeHeadline(raw) {
+  return raw.trim()
+    .normalize('NFKD')                      // decompose accented chars (é → e + combining)
+    .replace(/[\u0300-\u036f]/g, '')        // strip combining diacritics
+    .replace(/[\u2018\u2019\u0060\u00B4]/g, "'") // smart/curly single quotes → '
+    .replace(/[\u201C\u201D]/g, '"')        // smart double quotes → "
+    .replace(/[\u2013\u2014]/g, '-')        // en/em dash → -
+    .replace(/[\u2026]/g, '...')            // ellipsis → ...
+    .replace(/[^\x20-\x7E]/g, '')          // drop any remaining non-ASCII
+    .replace(/\s+/g, ' ').trim();
 }
 
 async function fetchGoogleTrending() {
@@ -163,10 +178,14 @@ async function fetchGoogleTrending() {
     const res = await fetch('https://trends.google.com/trending/rss?geo=US', { signal: AbortSignal.timeout(6000) });
     if (!res.ok) return [];
     const text = await res.text();
+    // Trends returns topic names like "Travis Scott" — not full queries.
+    // Occasionally append a natural suffix to make them read more like searches.
+    const suffixes = ['', '', '', ' news', ' update'];
     const terms = [];
     for (const m of text.matchAll(/<title>([^<]+)<\/title>/g)) {
-      const t = m[1].trim();
-      if (t && t !== 'Daily Search Trends') terms.push(t);
+      const t = normalizeHeadline(m[1]);
+      if (t && t !== 'Daily Search Trends')
+        terms.push(t + suffixes[Math.floor(Math.random() * suffixes.length)]);
     }
     return terms;
   } catch { return []; }
@@ -179,9 +198,7 @@ async function fetchRSSHeadlines(url) {
     const text = await res.text();
     const terms = [];
     for (const m of text.matchAll(/<title>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/title>/g)) {
-      const t = m[1].trim()
-        .replace(/[^\x20-\x7E]/g, '') // strip non-ASCII (emojis etc)
-        .replace(/\s+/g, ' ').trim();
+      const t = normalizeHeadline(m[1]);
       if (t.length > 10 && t.length < 75 && !/www\.|:\/\//.test(t)) terms.push(t);
     }
     return terms.slice(1); // skip feed title (first <title> is the channel name)
@@ -198,8 +215,8 @@ function fallbackTerms(count, usedSet) {
 }
 
 async function buildSearchList(count) {
-  const usedTerms = loadUsedTerms();
-  const usedSet = new Set(usedTerms);
+  const rawEntries = loadRawUsedTerms();
+  const usedSet = new Set(rawEntries.map(e => e.term.toLowerCase()));
 
   const [trending, bbc, espn] = await Promise.all([
     fetchGoogleTrending(),
@@ -212,7 +229,7 @@ async function buildSearchList(count) {
   const fallback = fallbackTerms(count, usedSet);
   const selected = [...live.sort(() => Math.random() - 0.5), ...fallback].slice(0, count);
 
-  saveUsedTerms(selected);
+  saveUsedTerms(selected, rawEntries); // pass already-loaded entries to avoid double read
   return selected;
 }
 
