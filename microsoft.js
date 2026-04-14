@@ -386,7 +386,7 @@ async function clickEveryPendingActivityCard(page) {
   for (const card of cards) {
     log.status('Clicking card', '...');
     await card.click();
-    await sleepRandomized(60);
+    await sleepRandomized(15);
   }
 }
 
@@ -404,7 +404,7 @@ async function executeBingSearch(page, searchTerm) {
 async function executeBingSearches(page, searchTerms) {
   log.info(`Executing ${searchTerms.length} Bing searches`);
   for (const term of searchTerms) {
-    await sleepRandomized(1200);
+    await sleepRandomized(90);
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
         await executeBingSearch(page, term);
