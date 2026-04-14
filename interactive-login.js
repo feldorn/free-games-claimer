@@ -171,12 +171,12 @@ const SITES = {
     async checkLogin(page) {
       try {
         await page.goto('https://rewards.bing.com', { waitUntil: 'domcontentloaded', timeout: 20000 });
-        await page.waitForTimeout(3000);
+        await page.waitForTimeout(5000); // mobile redirects settle more slowly
         const url = page.url();
         if (url.includes('login.live.com') || url.includes('login.microsoftonline.com') || url.includes('account.microsoft.com') || url.includes('/welcome')) {
           return { loggedIn: false };
         }
-        return { loggedIn: true, user: 'Microsoft account' };
+        return { loggedIn: true, user: 'Microsoft account (mobile)' };
       } catch {
         return { loggedIn: false };
       }
@@ -405,12 +405,12 @@ const PANEL_HTML = `<!DOCTYPE html>
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #1a1a2e; color: #e0e0e0; height: 100vh; display: flex; flex-direction: column; }
 
   .header { background: #16213e; padding: 12px 20px; border-bottom: 2px solid #0f3460; flex-shrink: 0; }
-  .header-top { display: flex; align-items: center; gap: 16px; margin-bottom: 8px; }
+  .header-top { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
   .header h1 { font-size: 18px; color: #e94560; white-space: nowrap; }
-  .header-actions { display: flex; gap: 8px; margin-left: auto; }
+  .header-actions { display: flex; gap: 8px; margin-left: auto; flex-wrap: wrap; justify-content: flex-end; }
 
-  .steps { display: flex; gap: 4px; align-items: center; font-size: 12px; color: #888; margin-bottom: 10px; }
-  .step { padding: 4px 10px; border-radius: 12px; background: #0f3460; }
+  .steps { display: flex; gap: 4px; align-items: center; font-size: 12px; color: #888; margin-bottom: 10px; flex-wrap: wrap; }
+  .step { padding: 4px 10px; border-radius: 12px; background: #0f3460; white-space: nowrap; }
   .step.active { background: #e94560; color: white; }
   .step.done { background: #4ecca3; color: #1a1a2e; }
   .step-arrow { color: #555; }
@@ -420,8 +420,8 @@ const PANEL_HTML = `<!DOCTYPE html>
   .status-banner.needs-login { background: #3a1a1e; border-bottom: 1px solid #e94560; color: #e94560; }
   .status-banner.running { background: #2a2a1e; border-bottom: 1px solid #f0c040; color: #f0c040; }
 
-  .site-cards { display: flex; gap: 12px; flex-wrap: wrap; }
-  .site-card { background: #0f3460; border-radius: 8px; padding: 10px 16px; display: flex; align-items: center; gap: 12px; min-width: 200px; flex: 1; }
+  .site-cards { display: flex; gap: 10px; flex-wrap: wrap; }
+  .site-card { background: #0f3460; border-radius: 8px; padding: 10px 14px; display: flex; align-items: center; gap: 10px; min-width: 200px; flex: 1; }
   .site-card .name { font-weight: 600; font-size: 14px; }
   .site-card .status { font-size: 12px; color: #888; margin-top: 2px; }
   .site-card .status.logged-in { color: #4ecca3; }
@@ -476,18 +476,40 @@ const PANEL_HTML = `<!DOCTYPE html>
   .toast.error { border-color: #e94560; }
   .toast.info { border-color: #f0c040; }
   @keyframes slideIn { from { transform: translateX(100px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+
+  /* Tablet (iPad): header-top wraps, step chips stay on their own row */
+  @media (max-width: 900px) {
+    .header-top { flex-wrap: wrap; row-gap: 8px; }
+    .header-actions { margin-left: auto; }
+    .site-card { min-width: calc(50% - 5px); flex: none; }
+  }
+
+  /* Landscape tablet / large phone */
+  @media (max-width: 700px) {
+    .header h1 { font-size: 16px; }
+    .btn { padding: 6px 10px; font-size: 12px; }
+    .site-card { min-width: calc(50% - 5px); }
+  }
+
+  /* Phone portrait */
+  @media (max-width: 480px) {
+    .header { padding: 10px 14px; }
+    .site-card { min-width: 100%; flex: none; }
+    .active-session { flex-wrap: wrap; }
+    .active-session .card-actions { width: 100%; justify-content: flex-end; }
+  }
 </style>
 </head>
 <body>
 <div class="header">
   <div class="header-top">
     <h1>Free Games Claimer</h1>
-    <div class="steps" id="steps"></div>
     <div class="header-actions">
       <button class="btn btn-check-all" onclick="checkAll()" id="btnCheckAll">Check All Sessions</button>
       <button class="btn btn-run" onclick="runAll()" id="btnRunAll">Test Run All Scripts</button>
     </div>
   </div>
+  <div class="steps" id="steps"></div>
   <div class="site-cards" id="siteCards"></div>
   <div id="activeSession" style="display:none"></div>
 </div>
