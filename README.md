@@ -155,7 +155,8 @@ Steam discovers free-to-keep games via [SteamDB](https://steamdb.info/upcoming/f
 | `MS_EMAIL` | | Microsoft account email (falls back to `EMAIL`) |
 | `MS_PASSWORD` | | Microsoft account password (falls back to `PASSWORD`) |
 | `MS_OTPKEY` | | TOTP secret for automatic 2FA (otplib). Only needed if the account uses app-based TOTP, not phone push approval. |
-| `MS_SCHEDULE_HOURS` | `0` | Random startup delay window in hours. When set (e.g. `8`), waits a random 0–N hours before starting each run. Use with `LOOP=86400` to spread daily runs across a time window instead of always running at the same time. `0` = run immediately. |
+| `MS_SCHEDULE_HOURS` | `0` | Schedule window width in hours. When set, picks a random time within the window each day and waits until then. Use with `MS_SCHEDULE_START`. `0` = run immediately. |
+| `MS_SCHEDULE_START` | `8` | Window start hour (0–23). With `MS_SCHEDULE_HOURS=4` and `MS_SCHEDULE_START=8`, runs land randomly between 8am and 12pm each day. The LOOP sleep anchors to this time to prevent daily drift. |
 
 Microsoft Rewards collects daily points by running a desktop Bing session (33–37 searches) and a mobile session emulating a Pixel 7 (23–27 searches), plus clicking any pending activity cards. Search terms are sourced fresh each run from Google Trends and BBC/ESPN RSS feeds, with a 30-day dedup window to avoid repeating terms. The existing 800-term pool is used as fallback when live sources are unreachable.
 

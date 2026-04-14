@@ -328,14 +328,17 @@ Automates daily Microsoft Rewards point collection via Bing searches and activit
 - Search counts vary per run (33–37 desktop, 23–27 mobile) to avoid a fixed daily pattern
 
 ### Search term sourcing (three-tier)
-1. **Google Trends RSS** (`trends.google.com/trending/rss?geo=US`) — up to ~10 real trending search queries per run
-2. **News RSS feeds** (BBC News + ESPN) — up to ~55 current headlines per run
+1. **Google Trends RSS** (`trends.google.com/trending/rss?geo=US`) — up to ~10 real trending queries per run, occasionally suffixed with "news"/"update"
+2. **News RSS feeds** (BBC News + ESPN) — up to ~55 headlines per run; unicode-normalized; sliced to a random 3–5 word window via `randomHeadlineSlice()` to simulate a user searching a topic rather than pasting the full headline
 3. **Fallback pool** — 800 hardcoded terms across 20 topic categories (language, cooking, health, sports, etc.), used when live sources are unreachable or to fill remaining slots
 
 All used terms are tracked in `data/ms-used-terms.json` with a 30-day rolling dedup window — the same term will not be reused within 30 days. All fetch calls have 6s timeouts and return empty on failure.
 
 ### Scheduling
-- `MS_SCHEDULE_HOURS` (default: `0`): random 0–N hour startup delay. Use with `LOOP=86400` to spread daily runs across a window instead of always running at the same time each day.
+- `MS_SCHEDULE_START` (default: `8`): window start hour. `MS_SCHEDULE_HOURS` (default: `0`): window width in hours. Together they define a daily time window (e.g. `MS_SCHEDULE_START=8` + `MS_SCHEDULE_HOURS=4` = 8am–12pm) within which the run is randomly placed each day.
+- Uses a target clock time rather than a random duration — prevents the window from drifting forward each day as runs take varying amounts of time.
+- `docker-entrypoint.sh`: when `MS_SCHEDULE_HOURS > 0`, the LOOP sleep is replaced with an anchor-based sleep until 30 minutes before the window opens, ensuring the loop fires at the same clock time every day.
+- Delay is intentionally before the search fetch so trending terms are current at actual run time.
 
 ### Logging
 - Progressive line output: each card click and search logs in real time as operations happen (not after)
