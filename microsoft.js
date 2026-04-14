@@ -1,6 +1,7 @@
 import { chromium, devices } from 'patchright';
 import { authenticator } from 'otplib';
-import { delay, datetime, prompt, notify, log } from './src/util.js';
+import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { delay, datetime, prompt, notify, log, dataDir } from './src/util.js';
 import { cfg } from './src/config.js';
 
 const BING_REWARDS_URL = 'https://rewards.bing.com';
@@ -122,10 +123,93 @@ const BING_SEARCH_TERMS = [
   ],
 ].map(category => category[0].flatMap(a1 => category[1].map(a2 => `${a1} ${a2}`)));
 
-function generateRandomSearchTermsList(length) {
+// ── Search term sourcing ─────────────────────────────────────────────────────
+
+const USED_TERMS_FILE = dataDir('ms-used-terms.json');
+const USED_TERMS_WINDOW_DAYS = 30;
+
+function loadUsedTerms() {
+  try {
+    if (existsSync(USED_TERMS_FILE)) {
+      const data = JSON.parse(readFileSync(USED_TERMS_FILE, 'utf8'));
+      const cutoff = Date.now() - USED_TERMS_WINDOW_DAYS * 86400000;
+      return data.filter(e => e.ts > cutoff).map(e => e.term.toLowerCase());
+    }
+  } catch {}
+  return [];
+}
+
+function saveUsedTerms(terms) {
+  let existing = [];
+  try {
+    if (existsSync(USED_TERMS_FILE)) existing = JSON.parse(readFileSync(USED_TERMS_FILE, 'utf8'));
+  } catch {}
+  const cutoff = Date.now() - USED_TERMS_WINDOW_DAYS * 86400000;
+  const pruned = existing.filter(e => e.ts > cutoff);
+  const now = Date.now();
+  for (const term of terms) {
+    if (!pruned.some(e => e.term.toLowerCase() === term.toLowerCase()))
+      pruned.push({ term, ts: now });
+  }
+  writeFileSync(USED_TERMS_FILE, JSON.stringify(pruned));
+}
+
+async function fetchGoogleTrending() {
+  try {
+    const res = await fetch('https://trends.google.com/trending/rss?geo=US', { signal: AbortSignal.timeout(6000) });
+    if (!res.ok) return [];
+    const text = await res.text();
+    const terms = [];
+    for (const m of text.matchAll(/<title>([^<]+)<\/title>/g)) {
+      const t = m[1].trim();
+      if (t && t !== 'Daily Search Trends') terms.push(t);
+    }
+    return terms;
+  } catch { return []; }
+}
+
+async function fetchRSSHeadlines(url) {
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(6000) });
+    if (!res.ok) return [];
+    const text = await res.text();
+    const terms = [];
+    for (const m of text.matchAll(/<title>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/title>/g)) {
+      const t = m[1].trim()
+        .replace(/[^\x20-\x7E]/g, '') // strip non-ASCII (emojis etc)
+        .replace(/\s+/g, ' ').trim();
+      if (t.length > 10 && t.length < 75 && !/www\.|:\/\//.test(t)) terms.push(t);
+    }
+    return terms.slice(1); // skip feed title (first <title> is the channel name)
+  } catch { return []; }
+}
+
+function fallbackTerms(count, usedSet) {
   return BING_SEARCH_TERMS.flatMap(category =>
-    category.slice().sort(() => Math.random() - 0.5).slice(0, Math.ceil(length / BING_SEARCH_TERMS.length))
-  ).sort(() => Math.random() - 0.5).slice(0, length);
+    category.slice()
+      .filter(t => !usedSet.has(t.toLowerCase()))
+      .sort(() => Math.random() - 0.5)
+      .slice(0, Math.ceil(count / BING_SEARCH_TERMS.length))
+  ).sort(() => Math.random() - 0.5);
+}
+
+async function buildSearchList(count) {
+  const usedTerms = loadUsedTerms();
+  const usedSet = new Set(usedTerms);
+
+  const [trending, bbc, espn] = await Promise.all([
+    fetchGoogleTrending(),
+    fetchRSSHeadlines('https://feeds.bbci.co.uk/news/rss.xml'),
+    fetchRSSHeadlines('https://www.espn.com/espn/rss/news/rss.xml'),
+  ]);
+  log.status('Live terms', `${trending.length} trending, ${bbc.length} BBC, ${espn.length} ESPN`);
+
+  const live = [...trending, ...bbc, ...espn].filter(t => !usedSet.has(t.toLowerCase()));
+  const fallback = fallbackTerms(count, usedSet);
+  const selected = [...live.sort(() => Math.random() - 0.5), ...fallback].slice(0, count);
+
+  saveUsedTerms(selected);
+  return selected;
 }
 
 function randomMs(maxSeconds) {
@@ -463,7 +547,7 @@ process.on('SIGINT', async () => {
 // Vary search counts slightly each run to avoid a fixed daily pattern
 const desktopSearchCount = 33 + Math.floor(Math.random() * 5); // 33–37
 const mobileSearchCount = 23 + Math.floor(Math.random() * 5);  // 23–27
-const searchTerms = generateRandomSearchTermsList(desktopSearchCount + mobileSearchCount);
+const searchTerms = await buildSearchList(desktopSearchCount + mobileSearchCount);
 
 // Desktop session
 log.section('Desktop');
