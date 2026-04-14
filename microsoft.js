@@ -17,12 +17,21 @@ log.status('Time', datetime());
 log.status('MS email', cfg.ms_email || '(none — will use EMAIL or prompt)');
 
 if (cfg.ms_schedule_hours > 0) {
-  // Intentionally delay BEFORE fetching search terms. Trending queries and RSS headlines
-  // are fetched at actual run time so they reflect what's current when the searches happen,
-  // not what was trending hours earlier when the container loop fired.
-  const delayMs = Math.floor(Math.random() * cfg.ms_schedule_hours * 3600 * 1000);
-  const runAt = new Date(Date.now() + delayMs);
-  log.status('Scheduled start', `${runAt.toLocaleTimeString()} (+${(delayMs / 3600000).toFixed(1)}h of ${cfg.ms_schedule_hours}h window)`);
+  // Intentionally delay BEFORE fetching search terms — we want current trending
+  // queries at actual run time, not stale ones from when the loop fired hours earlier.
+  //
+  // Uses a target clock time (MS_SCHEDULE_START + random offset) rather than a random
+  // duration from "now". This prevents drift: if LOOP fires at 7:30am every day and
+  // the window is 8am–12pm, runs always land within that window regardless of how long
+  // previous runs took.
+  const now = new Date();
+  const startHour = cfg.ms_schedule_start; // e.g. 8 for 8am
+  const offsetMinutes = Math.floor(Math.random() * cfg.ms_schedule_hours * 60);
+  const target = new Date(now);
+  target.setHours(startHour, offsetMinutes, 0, 0);
+  if (target <= now) target.setDate(target.getDate() + 1); // already past? push to tomorrow
+  const delayMs = target - now;
+  log.status('Scheduled start', `${target.toLocaleTimeString()} (+${(delayMs / 3600000).toFixed(1)}h)`);
   await delay(delayMs);
   log.status('Starting now', datetime());
 }
@@ -191,6 +200,17 @@ async function fetchGoogleTrending() {
   } catch { return []; }
 }
 
+// Pick a random contiguous 3–5 word window from a headline.
+// Simulates how a real user skims a headline and types the phrase that caught their eye,
+// rather than searching the full title verbatim.
+function randomHeadlineSlice(headline) {
+  const words = headline.split(/\s+/).filter(w => w.length > 3);
+  if (words.length <= 4) return headline; // already short enough
+  const len = 3 + Math.floor(Math.random() * 3); // 3–5 words
+  const start = Math.floor(Math.random() * Math.max(1, words.length - len));
+  return words.slice(start, start + len).join(' ');
+}
+
 async function fetchRSSHeadlines(url) {
   try {
     const res = await fetch(url, { signal: AbortSignal.timeout(6000) });
@@ -199,7 +219,8 @@ async function fetchRSSHeadlines(url) {
     const terms = [];
     for (const m of text.matchAll(/<title>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/title>/g)) {
       const t = normalizeHeadline(m[1]);
-      if (t.length > 10 && t.length < 75 && !/www\.|:\/\//.test(t)) terms.push(t);
+      if (t.length > 10 && t.length < 75 && !/www\.|:\/\//.test(t))
+        terms.push(randomHeadlineSlice(t));
     }
     return terms.slice(1); // skip feed title (first <title> is the channel name)
   } catch { return []; }

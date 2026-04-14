@@ -62,8 +62,22 @@ if [ -n "$LOOP" ]; then
   echo "  Loop:    every ${LOOP}s"
   while true; do
     tini -s -g -- "$@" || true
-    echo "Sleeping for ${LOOP} seconds..."
-    sleep "$LOOP"
+    if [ -n "$MS_SCHEDULE_HOURS" ] && [ "$MS_SCHEDULE_HOURS" -gt 0 ] 2>/dev/null; then
+      # Anchor-based sleep: wake 30 minutes before the schedule window opens so
+      # the loop fires before microsoft.js starts waiting for its target time.
+      # This prevents drift — the loop always fires at roughly the same clock time
+      # rather than LOOP seconds after the previous run finished.
+      anchor="${MS_SCHEDULE_START:-8}"
+      wake_hour=$(( anchor > 0 ? anchor - 1 : 23 ))
+      next=$(date -d "tomorrow $(printf '%02d:30' $wake_hour)" +%s)
+      now_ts=$(date +%s)
+      sleep_secs=$(( next - now_ts ))
+      echo "Sleeping until $(date -d "@$next" '+%Y-%m-%d %H:%M') (window opens ${anchor}:00, ${sleep_secs}s)..."
+      sleep "$sleep_secs"
+    else
+      echo "Sleeping for ${LOOP} seconds..."
+      sleep "$LOOP"
+    fi
   done
 else
   exec tini -s -g -- "$@" # https://github.com/krallin/tini/issues/8 node/playwright respond to signals like ctrl-c, but unsure about zombie processes
