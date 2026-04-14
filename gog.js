@@ -109,7 +109,7 @@ try {
   const userSelectors = '#menuUsername, [hook-test="menuUsername"], .menu-username, .menu-username-text';
   const userEl = page.locator(userSelectors).first();
   try {
-    user = (await userEl.textContent({ timeout: 10000 })).trim();
+    user = (await userEl.textContent({ timeout: 10000 })).trim().split(/\n/)[0].trim();
   } catch {
     try {
       user = await page.locator(userSelectors).first().getAttribute('title', { timeout: 5000 });

@@ -59,7 +59,12 @@ if [ "$LOGIN_MODE" = "1" ]; then
 fi
 
 if [ -n "$LOOP" ]; then
-  echo "  Loop:    every ${LOOP}s"
+  loop_human="${LOOP}s"
+  if   [ $((LOOP % 86400)) -eq 0 ]; then loop_human="$((LOOP/86400))d"
+  elif [ $((LOOP % 3600))  -eq 0 ]; then loop_human="$((LOOP/3600))h"
+  elif [ $((LOOP % 60))    -eq 0 ]; then loop_human="$((LOOP/60))m"
+  fi
+  echo "  Loop:   every ${loop_human}"
   while true; do
     tini -s -g -- "$@" || true
     if [ -n "$MS_SCHEDULE_HOURS" ] && [ "$MS_SCHEDULE_HOURS" -gt 0 ] 2>/dev/null; then
