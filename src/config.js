@@ -53,6 +53,7 @@ export const cfg = {
   ms_email: process.env.MS_EMAIL || process.env.EMAIL,
   ms_password: process.env.MS_PASSWORD || process.env.PASSWORD,
   ms_otpkey: process.env.MS_OTPKEY,
+  ms_schedule_hours: Number(process.env.MS_SCHEDULE_HOURS) || 0, // random startup delay: 0-N hours before beginning each run
   // experimental
   pg_redeem: process.env.PG_REDEEM == '1', // prime-gaming: redeem keys on external stores
   lg_email: process.env.LG_EMAIL || process.env.PG_EMAIL || process.env.EMAIL, // prime-gaming: external: legacy-games: email to use for redeeming

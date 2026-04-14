@@ -11,6 +11,14 @@ log.section('Microsoft Rewards');
 log.status('Time', datetime());
 log.status('MS email', cfg.ms_email || '(none — will use EMAIL or prompt)');
 
+if (cfg.ms_schedule_hours > 0) {
+  const delayMs = Math.floor(Math.random() * cfg.ms_schedule_hours * 3600 * 1000);
+  const runAt = new Date(Date.now() + delayMs);
+  log.status('Scheduled start', `${runAt.toLocaleTimeString()} (+${(delayMs / 3600000).toFixed(1)}h of ${cfg.ms_schedule_hours}h window)`);
+  await delay(delayMs);
+  log.status('Starting now', datetime());
+}
+
 const BING_SEARCH_TERMS = [
   // Language
   [
@@ -130,9 +138,15 @@ async function createContext(isMobile) {
   const browserDir = cfg.dir.browser + (isMobile ? '-mobile' : '');
   const deviceSettings = isMobile ? devices['Pixel 7'] : {};
 
+  // Slightly vary desktop viewport each run so it's not identical every time
+  const viewport = isMobile ? { width: cfg.width, height: cfg.height } : {
+    width: cfg.width + Math.floor(Math.random() * 41) - 20,   // ±20px
+    height: cfg.height + Math.floor(Math.random() * 41) - 20, // ±20px
+  };
+
   const context = await chromium.launchPersistentContext(browserDir, {
     headless: false,
-    viewport: { width: cfg.width, height: cfg.height },
+    viewport,
     locale: 'en-US',
     handleSIGINT: false,
     args: [
@@ -152,6 +166,15 @@ async function createContext(isMobile) {
       navigator.credentials.create = () => Promise.resolve(null);
     }
   });
+
+  // Desktop: remove automation fingerprints and spoof hardware properties
+  if (!isMobile) {
+    await context.addInitScript(() => {
+      delete Object.getPrototypeOf(navigator).webdriver;
+      Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
+      Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
+    });
+  }
 
   // Fake mobile navigator APIs to avoid bot detection on mobile context
   if (isMobile) {
@@ -399,12 +422,17 @@ async function executeBingSearch(page, searchTerm) {
   await sleepRandomized(10);
   await page.keyboard.press('Enter');
   await page.locator('#b_results').waitFor({ timeout: 60000 });
+  // ~40% of the time, scroll down to simulate reading results
+  if (Math.random() < 0.4) {
+    await page.mouse.wheel(0, 300 + Math.floor(Math.random() * 400));
+    await delay(500 + Math.floor(Math.random() * 1000));
+  }
 }
 
 async function executeBingSearches(page, searchTerms) {
   log.info(`Executing ${searchTerms.length} Bing searches`);
   for (const term of searchTerms) {
-    await sleepRandomized(90);
+    await sleepRandomized(180);
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
         await executeBingSearch(page, term);
@@ -425,9 +453,12 @@ process.on('SIGINT', async () => {
   if (activeContext) await activeContext.close();
 });
 
-const searchTerms = generateRandomSearchTermsList(60);
+// Vary search counts slightly each run to avoid a fixed daily pattern
+const desktopSearchCount = 33 + Math.floor(Math.random() * 5); // 33–37
+const mobileSearchCount = 23 + Math.floor(Math.random() * 5);  // 23–27
+const searchTerms = generateRandomSearchTermsList(desktopSearchCount + mobileSearchCount);
 
-// Desktop session (35 searches)
+// Desktop session
 log.section('Desktop');
 {
   const { context, page } = await createContext(false);
@@ -437,7 +468,7 @@ log.section('Desktop');
     if (await isLoggedIn(page)) {
       log.status('Signed in', 'yes');
       await clickEveryPendingActivityCard(page);
-      await executeBingSearches(page, searchTerms.slice(0, 35));
+      await executeBingSearches(page, searchTerms.slice(0, desktopSearchCount));
     } else {
       log.fail('Login failed or timed out — skipping desktop session');
     }
@@ -447,7 +478,12 @@ log.section('Desktop');
   }
 }
 
-// Mobile session (25 searches, separate browser profile)
+// Random gap between sessions — a human wouldn't switch devices instantly
+const interSessionMinutes = 5 + Math.floor(Math.random() * 16); // 5–20 min
+log.status('Inter-session gap', `${interSessionMinutes}m`);
+await delay(interSessionMinutes * 60 * 1000);
+
+// Mobile session (separate browser profile)
 log.section('Mobile');
 {
   const { context, page } = await createContext(true);
@@ -457,7 +493,7 @@ log.section('Mobile');
     if (await isLoggedIn(page)) {
       log.status('Signed in', 'yes');
       await clickEveryPendingActivityCard(page);
-      await executeBingSearches(page, searchTerms.slice(-25));
+      await executeBingSearches(page, searchTerms.slice(-mobileSearchCount));
     } else {
       log.fail('Login failed or timed out — skipping mobile session');
     }
