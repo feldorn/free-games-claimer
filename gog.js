@@ -257,7 +257,64 @@ try {
         await pgDb.write();
         log.info(`Reconciled ${reconciled}/${candidates.length} pending Prime Gaming code(s) against GOG library`);
       } else {
-        log.info(`No pending Prime Gaming codes matched — ${candidates.length} remain truly pending`);
+        log.info(`No pending Prime Gaming codes matched against library — checking remaining codes against GOG redeem endpoint`);
+      }
+
+      // Second pass: for codes still pending after the library reconcile, drive
+      // the /redeem page to learn each code's actual state. GOG's response to
+      // the Continue click differentiates code_not_found / code_used / valid /
+      // captcha-gated. We stop as soon as captcha appears (rate-limit signal)
+      // — everything beyond that would need a human anyway.
+      const stillPending = candidates.filter(({ entry }) => !/redeemed|expired|invalid/i.test(String(entry.status || '')));
+      if (stillPending.length) {
+        log.status('Probing remaining codes via redeem endpoint', `${stillPending.length}`);
+        let probed = 0, notFound = 0, used = 0, captcha = 0;
+        const probePage = await context.newPage();
+        try {
+          for (const { title, entry } of stillPending) {
+            try {
+              await probePage.goto('https://www.gog.com/redeem', { waitUntil: 'domcontentloaded', timeout: 20000 });
+              await probePage.fill('#codeInput', entry.code);
+              const respPromise = probePage.waitForResponse(
+                r => r.request().method() === 'GET' && r.url().startsWith('https://redeem.gog.com/v1/bonusCodes/'),
+                { timeout: 15000 },
+              );
+              await probePage.click('[type="submit"]');
+              const resp = await respPromise;
+              const body = await resp.text();
+              probed++;
+              let j;
+              try { j = JSON.parse(body); } catch { j = {}; }
+              const reason = String(j.reason || '').toLowerCase();
+              if (reason === 'code_not_found') {
+                entry.status = 'claimed, code expired or invalid';
+                notFound++;
+                log.warn(`${title} — code not found on GOG, marked invalid`);
+              } else if (reason === 'code_used') {
+                entry.status = 'claimed and redeemed (verified via GOG)';
+                used++;
+                log.ok(`${title} — already redeemed on GOG, marked redeemed`);
+              } else if (reason.includes('captcha')) {
+                captcha++;
+                log.warn(`${title} — captcha required, stopping probe (${stillPending.length - probed} remaining)`);
+                break;
+              } else if (j?.products?.length) {
+                log.info(`${title} — valid and redeemable (${j.products[0]?.title}); leaving pending for manual redeem`);
+              } else {
+                if (cfg.debug) console.debug(`  Probe response for ${title}:`, body);
+                log.info(`${title} — unknown response, leaving pending`);
+              }
+            } catch (err) {
+              log.warn(`${title} — probe error: ${err.message}`);
+            }
+          }
+        } finally {
+          await probePage.close();
+        }
+        if (notFound || used) {
+          await pgDb.write();
+          log.info(`Probed ${probed}: ${used} redeemed, ${notFound} invalid${captcha ? `, ${captcha} captcha-gated` : ''}`);
+        }
       }
     }
   } catch (e) {
