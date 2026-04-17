@@ -272,7 +272,7 @@ try {
       urls.push(baseUrl); // add base game to the list of games to claim
       urls.push(url); // add add-on itself again
     } else { // GET
-      log.ok(`${title} — claiming (${btnText})`);
+      log.game(title, `claiming (${btnText})`);
       let captchaDetected = false;
       await purchaseBtn.click({ delay: 11 }); // got stuck here without delay (or mouse move), see #75, 1ms was also enough
 
@@ -404,7 +404,7 @@ try {
           retry.details = `Retry also failed. Game: ${retry.url}`;
           continue;
         }
-        log.info(`${retry.title} — claiming (retry)`);
+        log.game(retry.title, 'claiming (retry)');
         await purchaseBtn.click({ delay: 11 });
         page.click('button:has-text("Continue")').catch(_ => { });
         page.click('button:has-text("Yes, buy now")').catch(_ => { });

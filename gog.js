@@ -109,7 +109,18 @@ try {
   const userSelectors = '#menuUsername, [hook-test="menuUsername"], .menu-username, .menu-username-text';
   const userEl = page.locator(userSelectors).first();
   try {
-    user = (await userEl.textContent({ timeout: 10000 })).trim().split(/\n/)[0].trim();
+    await userEl.waitFor({ timeout: 10000 });
+    // Read only direct text nodes to exclude nested notification badges (e.g., unread-count "0").
+    user = await userEl.evaluate(el => {
+      const direct = Array.from(el.childNodes)
+        .filter(n => n.nodeType === Node.TEXT_NODE)
+        .map(n => n.textContent)
+        .join('')
+        .replace(/\s+/g, ' ')
+        .trim();
+      if (direct) return direct;
+      return (el.textContent || '').replace(/\s+/g, ' ').trim();
+    });
   } catch {
     try {
       user = await page.locator(userSelectors).first().getAttribute('title', { timeout: 5000 });
