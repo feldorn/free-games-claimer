@@ -837,6 +837,7 @@ const PANEL_HTML = `<!DOCTYPE html>
   .step { padding: 4px 10px; border-radius: 12px; background: #0f3460; white-space: nowrap; }
   .step.active { background: #e94560; color: white; }
   .step.done { background: #4ecca3; color: #1a1a2e; }
+  .step.waiting { background: #2a2a4e; color: #f0c040; }
   .step-arrow { color: #555; }
 
   .status-banner { padding: 10px 20px; font-size: 14px; font-weight: 500; flex-shrink: 0; }
@@ -992,8 +993,12 @@ function getStep() {
   const anyChecked = state.sites.some(s => s.status !== 'unknown');
   if (!anyChecked) return 1;
   if (!state.allLoggedIn) return 2;
-  if (state.runStatus === 'idle') return 3;
-  return 4;
+  if (state.runStatus === 'running') return 3;
+  if (state.lastRun) return 4;
+  // Logged in, no run yet. If scheduler is enabled the scheduler will handle
+  // it — return 'waiting' so the step shows subtle yellow instead of active
+  // red (which would imply the user needs to act).
+  return state.loopEnabled ? 'waiting' : 3;
 }
 
 function render() {
@@ -1069,13 +1074,18 @@ function render() {
     batchInfo.style.display = 'none';
   }
 
-  const stepLabels = ['Check sessions', 'Log in to sites', 'Test run', 'Done!'];
+  const stepLabels = ['Check sessions', 'Log in to sites', 'First run', 'Done!'];
   steps.innerHTML = stepLabels.map((label, i) => {
     const num = i + 1;
     let cls = 'step';
-    if (num < currentStep) cls += ' done';
-    else if (num === currentStep) cls += ' active';
-    if (num === 4 && state.allLoggedIn) cls += ' done';
+    if (currentStep === 'waiting') {
+      if (num <= 2) cls += ' done';
+      else if (num === 3) cls += ' waiting';
+    } else {
+      if (num < currentStep) cls += ' done';
+      else if (num === currentStep) cls += ' active';
+    }
+    if (num === 4 && state.allLoggedIn && state.lastRun) cls += ' done';
     return (i > 0 ? '<span class="step-arrow">&rarr;</span>' : '') + '<span class="' + cls + '">' + num + '. ' + label + '</span>';
   }).join('');
 
