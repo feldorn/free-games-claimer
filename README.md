@@ -199,14 +199,19 @@ To get OTP keys for automatic 2FA:
 
 ## Scheduling
 
-The recommended approach is to use `LOOP` in Docker:
+Set `LOOP` to enable the built-in scheduler:
 
 ```yaml
 environment:
-  - LOOP=86400  # run every 24 hours
+  - LOOP=86400  # wake every 24 hours
 ```
 
-The entrypoint will run all claimers, sleep for the specified interval, and repeat. Combined with `restart: unless-stopped`, this keeps claiming running indefinitely.
+The control panel process owns the scheduler — it sleeps until the next anchored
+wake time, fires the full claim sequence (including `microsoft.js` which has its
+own internal window-based timing), then sleeps again. No immediate run on
+container boot — the panel stays interactive at startup so you can log in, use
+**Run Now**, or **Batch Redeem** right away. First scheduled run happens at the
+next anchored time.
 
 **How often to run?**
 - **Epic Games**: New free games weekly (daily before Christmas)
@@ -216,11 +221,64 @@ The entrypoint will run all claimers, sleep for the specified interval, and repe
 
 Running once daily (`86400`) is recommended.
 
-**Alternative scheduling** (without `LOOP`):
-- Linux/macOS: `crontab -e`
-- macOS: launchd
-- Windows: Task Scheduler
-- Any OS: [pm2](https://pm2.keymetrics.io/docs/usage/restart-strategies/)
+---
+
+## Control Panel
+
+The control panel at **`http://localhost:7080`** is always running and serves as
+the single interface for everything that requires — or benefits from — an
+interactive browser session:
+
+- **Session cards** for each site (Prime, Epic, GOG, Steam, MS Rewards, MS Mobile).
+  Green = session valid, red = needs re-login. Backed by real URL-based auth
+  checks (not DOM presence), so a session that GOG considers expired won't show
+  as green just because the cached UI looks logged in.
+
+- **Login button** per site. Launches a Chromium session in the embedded noVNC
+  window; you can sign in manually, handle captchas / MFA / phone verification,
+  then click **I'm Logged In** and the panel verifies + persists the session.
+
+  Since this is a real browser on your account, you can also **freely navigate
+  while logged in** — useful for clearing captcha state, verifying game ownership,
+  or manually redeeming individual codes in a separate tab. Anything you do stays
+  in the session and carries over to future automated runs.
+
+- **Run Now** triggers an on-demand claim cycle (Prime / Epic / GOG / Steam).
+  Skips `microsoft.js` by default because that script has an internal delay
+  until its scheduled window — override via `CLAIM_CMD_MANUAL` if you want
+  the full set on demand.
+
+- **Batch Redeem** appears when Prime Gaming has delivered GOG codes that
+  weren't successfully redeemed (captcha-gated, script interrupted, etc.).
+  Opens the GOG redeem page for each pending code: you solve the captcha once
+  in noVNC, and the panel drives Continue/Redeem clicks for the rest of the
+  queue. Captcha re-challenges pause the batch and wait for you.
+
+- **Next run / Last run** info shown prominently so you can see scheduler
+  health at a glance.
+
+### Notification deep-links
+
+When `PUBLIC_URL` is set (the panel's externally-reachable URL), Pushover /
+Telegram / etc. notifications include tap-targets that go straight to the
+relevant action:
+
+- Stale-session notification: per-site link like `?login=gog` that auto-opens
+  the Login flow when you land.
+- Pending-redeem notification: includes `?batch=gog` header link that
+  auto-starts the batch-redeem when you land.
+
+### First-time setup
+
+1. Start the container (see [Docker Compose](#docker-compose)).
+2. Open the panel at `http://localhost:7080` (or your `PUBLIC_URL` if
+   reverse-proxied).
+3. Wait for the startup auto-check banner to finish (~30s).
+4. Click **Login** on each site showing red — solve whatever GOG / Amazon /
+   Epic / etc. asks for in the embedded browser.
+5. Once all site cards are green, you're done. Leave the container running;
+   the scheduler handles daily claims. Come back to the panel if a session
+   expires (Pushover will notify).
 
 ---
 
