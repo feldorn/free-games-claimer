@@ -36,6 +36,7 @@ await page.setViewportSize({ width: cfg.width, height: cfg.height }); // TODO wo
 // console.debug('userAgent:', await page.evaluate(() => navigator.userAgent));
 
 const notify_games = [];
+const notify_pending = []; // separate list — sent in chunks to avoid Pushover body truncation
 let user;
 
 try {
@@ -127,7 +128,7 @@ try {
       // field the user might tap must wrap such text inside an <a href> pointing where we
       // want, and the game's .url must be the redeem URL (not Amazon, since that's already
       // marked collected and useless here). See MODIFICATIONS.md.
-      notify_games.push({
+      notify_pending.push({
         title: dbTitle,
         url: redeem_url,
         status: `<a href="${redeem_url}">pending redeem on ${entry.store}</a> — code: ${entry.code}`,
@@ -482,6 +483,19 @@ try {
   log.sectionEnd();
   if (notify_games.length) {
     await notify(`prime-gaming (${user}):<br>${html_game_list(notify_games)}`);
+  }
+  // Pending redeems sent as their own notifications, chunked to stay under Pushover's
+  // ~1024-char body limit. Each chunk labeled (i/N) when there's more than one.
+  if (notify_pending.length) {
+    const chunkSize = 10;
+    const total = notify_pending.length;
+    const chunks = [];
+    for (let i = 0; i < total; i += chunkSize) chunks.push(notify_pending.slice(i, i + chunkSize));
+    for (let i = 0; i < chunks.length; i++) {
+      const partLabel = chunks.length > 1 ? ` (${i + 1}/${chunks.length})` : '';
+      const header = `prime-gaming (${user}) — ${total} pending redeem${total === 1 ? '' : 's'}${partLabel}:`;
+      await notify(`${header}<br>${html_game_list(chunks[i])}`);
+    }
   }
 }
 if (page.video()) log.info(`Recorded video — ${await page.video().path()}`);
