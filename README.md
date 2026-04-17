@@ -118,6 +118,8 @@ Options are set via environment variables. You can pass them directly, use `--en
 | `NOTIFY_TITLE` | | Optional title for notifications |
 | `LOOP` | | Repeat claiming every N seconds (e.g., `86400` = 24h). Omit to run once and exit. |
 | `LOGIN_MODE` | `0` | Set to `1` to launch the interactive login panel instead of automated claiming |
+| `BASE_PATH` | | URL prefix when serving the panel under a reverse-proxy subfolder (e.g. `/free-games`). Leave empty for root or subdomain. |
+| `PUBLIC_URL` | | Full external URL of the panel (e.g. `https://example.com/free-games`). Used in notifications so tap-targets land on the panel. |
 | `SHOW` | `1` (Docker) | Show browser GUI. Default is headless outside Docker. |
 | `WIDTH` | `1920` | Browser/screen width |
 | `HEIGHT` | `1080` | Browser/screen height |

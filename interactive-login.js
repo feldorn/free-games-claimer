@@ -7,6 +7,8 @@ import { cfg } from './src/config.js';
 const PANEL_PORT = Number(process.env.PANEL_PORT) || 7080;
 const NOVNC_PORT = process.env.NOVNC_PORT || 6080;
 const PANEL_PASSWORD = process.env.PANEL_PASSWORD || process.env.VNC_PASSWORD || '';
+const BASE_PATH = cfg.base_path; // e.g. "/free-games" when behind a subfolder proxy, or ""
+const PUBLIC_URL = cfg.public_url || `http://localhost:${PANEL_PORT}${BASE_PATH}`;
 
 import crypto from 'node:crypto';
 const sessionTokens = new Set();
@@ -52,7 +54,7 @@ const LOGIN_HTML = `<!DOCTYPE html>
 document.getElementById('pw').addEventListener('keydown', e => { if (e.key === 'Enter') login(); });
 async function login() {
   const pw = document.getElementById('pw').value;
-  const r = await fetch('/api/auth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: pw }) });
+  const r = await fetch('${BASE_PATH}/api/auth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: pw }) });
   const j = await r.json();
   if (j.success) { location.reload(); }
   else { document.getElementById('error').style.display = 'block'; }
@@ -533,6 +535,7 @@ const PANEL_HTML = `<!DOCTYPE html>
 </div>
 <script>
 const NOVNC_PORT = ${NOVNC_PORT};
+const BASE_PATH = '${BASE_PATH}';
 let state = { sites: [], activeBrowser: null, allLoggedIn: false, runStatus: 'idle' };
 let busy = false;
 let showingLog = false;
@@ -542,7 +545,7 @@ let logPollTimer = null;
 async function api(method, path, body) {
   const opts = { method, headers: { 'Content-Type': 'application/json' } };
   if (body) opts.body = JSON.stringify(body);
-  const res = await fetch('/api' + path, opts);
+  const res = await fetch(BASE_PATH + '/api' + path, opts);
   return res.json();
 }
 
@@ -662,7 +665,11 @@ function showVnc() {
   if (placeholder) placeholder.style.display = 'none';
   if (!container.querySelector('iframe')) {
     const iframe = document.createElement('iframe');
-    iframe.src = location.protocol + '//' + location.hostname + ':' + NOVNC_PORT + '/vnc.html?autoconnect=true&resize=scale';
+    // Through a reverse proxy (BASE_PATH set) noVNC is proxied at \${BASE_PATH}/novnc/.
+    // For direct access (no BASE_PATH) the container's noVNC port is reachable at the same host.
+    iframe.src = BASE_PATH
+      ? BASE_PATH + '/novnc/vnc.html?autoconnect=true&resize=scale'
+      : location.protocol + '//' + location.hostname + ':' + NOVNC_PORT + '/vnc.html?autoconnect=true&resize=scale';
     container.appendChild(iframe);
   }
 }
@@ -835,6 +842,12 @@ setInterval(refreshState, 10000);
 
 const server = http.createServer(async (req, res) => {
   try {
+    // Strip BASE_PATH prefix if present so existing route matchers keep working for both
+    // direct access (http://host:7080/...) and subfolder-proxied access (https://host/base/...).
+    if (BASE_PATH && (req.url === BASE_PATH || req.url.startsWith(BASE_PATH + '/') || req.url.startsWith(BASE_PATH + '?'))) {
+      req.url = req.url.slice(BASE_PATH.length) || '/';
+    }
+
     if (req.method === 'POST' && req.url === '/api/auth') {
       const { password } = await parseBody(req);
       if (password === PANEL_PASSWORD) {
@@ -962,8 +975,9 @@ process.on('SIGTERM', async () => {
 
 server.listen(PANEL_PORT, async () => {
   console.log(`[${datetime()}] Free Games Claimer - Interactive Login Panel`);
-  console.log(`[${datetime()}] Control panel: http://localhost:${PANEL_PORT}`);
-  console.log(`[${datetime()}] noVNC viewer:  http://localhost:${NOVNC_PORT}`);
+  console.log(`[${datetime()}] Control panel: http://localhost:${PANEL_PORT}${BASE_PATH}`);
+  if (cfg.public_url) console.log(`[${datetime()}] Public URL:    ${PUBLIC_URL}`);
+  console.log(`[${datetime()}] noVNC viewer:  http://localhost:${NOVNC_PORT}${BASE_PATH ? ` (proxied at ${BASE_PATH}/novnc/)` : ''}`);
   console.log(`[${datetime()}] Password protection: ${PANEL_PASSWORD ? 'ENABLED' : 'DISABLED (set PANEL_PASSWORD or VNC_PASSWORD to enable)'}`);
   console.log(`[${datetime()}] Open the control panel URL in your browser to start.`);
   console.log(`[${datetime()}] Auto-checking all sessions...`);

@@ -22,6 +22,11 @@ export const cfg = {
   login_timeout: (Number(process.env.LOGIN_TIMEOUT) || 180) * 1000, // higher timeout for login, will wait twice: prompt + wait for manual login
   login_mode: process.env.LOGIN_MODE == '1', // launch interactive VNC login panel instead of automated claiming
   novnc_port: process.env.NOVNC_PORT, // running in docker if set
+  // Panel URL config — Radarr-style URLBase. Set BASE_PATH when serving the panel under
+  // a reverse-proxy subfolder (e.g. BASE_PATH=/free-games for https://example.com/free-games/).
+  // PUBLIC_URL is the full external URL used in notifications so the user can tap straight in.
+  base_path: (process.env.BASE_PATH || '').replace(/^(?!$)(?!\/)/, '/').replace(/\/+$/, ''), // empty or "/leading-no-trailing"
+  public_url: (process.env.PUBLIC_URL || '').replace(/\/+$/, ''),
   notify: process.env.NOTIFY, // apprise notification services
   notify_title: process.env.NOTIFY_TITLE, // apprise notification title
   get dir() { // avoids ReferenceError: Cannot access 'dataDir' before initialization
