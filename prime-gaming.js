@@ -124,15 +124,10 @@ try {
       const base = redeemBaseUrls[entry.store];
       const redeem_url = entry.store === 'gog.com' ? `${base}/${entry.code}` : base;
       log.warn(`${dbTitle} — pending manual redeem on ${entry.store}`);
-      // NOTE: Pushover auto-linkifies bare domain text like "gog.com". Every notification
-      // field the user might tap must wrap such text inside an <a href> pointing where we
-      // want, and the game's .url must be the redeem URL (not Amazon, since that's already
-      // marked collected and useless here). See MODIFICATIONS.md.
-      notify_pending.push({
-        title: dbTitle,
-        url: redeem_url,
-        status: `<a href="${redeem_url}">pending redeem on ${entry.store}</a> — code: ${entry.code}`,
-      });
+      // Pushover strips HTML tags before rendering, so we can't rely on <a href>.
+      // We build bare-URL plain-text lines below in the chunked sender so the mobile
+      // OS auto-linkifies the full redeem URL (not just the domain).
+      notify_pending.push({ title: dbTitle, url: redeem_url });
     }
   }
 
@@ -366,12 +361,15 @@ try {
         const needsManual = ['redeem', 'redeem (got captcha)', 'redeem (not found)', 'redeem (login)', 'unknown'].includes(redeem_action);
         if (redeem_action == 'redeemed' || redeem_action == 'redeemed?' || redeem_action == 'already redeemed') claimedCount++;
         else if (needsManual) needsActionCount++;
-        // Wrap the store name in an anchor so Pushover can't auto-linkify bare "gog.com"
-        // to https://gog.com. See MODIFICATIONS.md — this is a regression-prone spot.
-        notify_game.status = `<a href="${redeem_url}">${redeem_action} on ${store}</a>`;
+        // Pushover strips HTML tags, so <a> anchors don't survive. We avoid the bare
+        // "gog.com" token (iOS would auto-linkify it to the homepage) by using "GOG"
+        // and putting the full redeem URL as plain text so auto-linkify grabs the
+        // tappable full URL instead.
+        const storeLabel = store === 'gog.com' ? 'GOG' : store;
+        notify_game.status = `${redeem_action} on ${storeLabel}`;
         if (needsManual) {
-          notify_game.url = redeem_url; // override Amazon URL so title tap → redeem
-          notify_game.details = `Code: ${code}`;
+          notify_game.url = redeem_url;
+          notify_game.details = `${redeem_url} (code: ${code})`;
         }
       } else {
         log.ok(`${title} — claimed on ${store}`);
@@ -485,7 +483,8 @@ try {
     await notify(`prime-gaming (${user}):<br>${html_game_list(notify_games)}`);
   }
   // Pending redeems sent as their own notifications, chunked to stay under Pushover's
-  // ~1024-char body limit. Each chunk labeled (i/N) when there's more than one.
+  // ~1024-char body limit. Plain-text format with bare redeem URLs — Pushover strips
+  // any <a> tags, so the URL must be literal text for the mobile OS to auto-linkify it.
   if (notify_pending.length) {
     const chunkSize = 10;
     const total = notify_pending.length;
@@ -494,7 +493,8 @@ try {
     for (let i = 0; i < chunks.length; i++) {
       const partLabel = chunks.length > 1 ? ` (${i + 1}/${chunks.length})` : '';
       const header = `prime-gaming (${user}) — ${total} pending redeem${total === 1 ? '' : 's'}${partLabel}:`;
-      await notify(`${header}<br>${html_game_list(chunks[i])}`);
+      const lines = chunks[i].map(g => `- ${g.title} → ${g.url}`);
+      await notify(`${header}<br>${lines.join('<br>')}`);
     }
   }
 }
