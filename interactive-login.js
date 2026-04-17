@@ -325,7 +325,10 @@ let runLog = [];
 let runStatus = 'idle';
 let runSource = null; // 'panel' | 'scheduler'
 
-const CLAIM_CMD = process.env.CLAIM_CMD || 'node prime-gaming.js; node epic-games.js; node gog.js; node steam.js; node microsoft.js';
+// gog.js runs first so its Prime-Gaming-code reconcile (library + redeem-endpoint
+// probe) updates prime-gaming.json BEFORE prime-gaming.js fires its pending-redeem
+// notification. Otherwise the notification goes out with a stale pending count.
+const CLAIM_CMD = process.env.CLAIM_CMD || 'node gog.js; node prime-gaming.js; node epic-games.js; node steam.js; node microsoft.js';
 
 // Unified profile-busy check. The chromium user-data-dir only supports one
 // process at a time — three distinct code paths can hold it: session-checks
