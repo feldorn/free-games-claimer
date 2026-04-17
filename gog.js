@@ -147,6 +147,9 @@ try {
     user = cfg.gog_email?.split('@')[0] || 'unknown';
     log.warn(`Could not detect GOG username — using "${user}"`);
   }
+  // Safety-net: collapse any residual whitespace (tabs, newlines, unicode separators)
+  // in case a code path above leaked a notification-badge count into the string.
+  user = user.replace(/\s+/g, ' ').trim();
   log.status('User', user);
   db.data[user] ||= {};
 
