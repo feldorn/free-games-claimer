@@ -666,10 +666,15 @@ function showVnc() {
   if (!container.querySelector('iframe')) {
     const iframe = document.createElement('iframe');
     // Through a reverse proxy (BASE_PATH set) noVNC is proxied at \${BASE_PATH}/novnc/.
+    // We must also tell noVNC where to open its WebSocket — by default it assumes
+    // "/websockify" at the origin root, which won't exist when proxied at a subfolder.
     // For direct access (no BASE_PATH) the container's noVNC port is reachable at the same host.
-    iframe.src = BASE_PATH
-      ? BASE_PATH + '/novnc/vnc.html?autoconnect=true&resize=scale'
-      : location.protocol + '//' + location.hostname + ':' + NOVNC_PORT + '/vnc.html?autoconnect=true&resize=scale';
+    if (BASE_PATH) {
+      const wsPath = BASE_PATH.replace(/^\\//, '') + '/novnc/websockify';
+      iframe.src = BASE_PATH + '/novnc/vnc.html?autoconnect=true&resize=scale&path=' + encodeURIComponent(wsPath);
+    } else {
+      iframe.src = location.protocol + '//' + location.hostname + ':' + NOVNC_PORT + '/vnc.html?autoconnect=true&resize=scale';
+    }
     container.appendChild(iframe);
   }
 }
