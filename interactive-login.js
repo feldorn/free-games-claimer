@@ -70,6 +70,8 @@ const SITES = {
       try {
         await page.goto('https://luna.amazon.com/claims', { waitUntil: 'domcontentloaded', timeout: 20000 });
         await page.waitForTimeout(3000);
+        // Amazon redirects stale sessions to /ap/signin — check final URL first (real auth signal).
+        if (/\/ap\/signin|\/sign[-_]?in/i.test(page.url())) return { loggedIn: false };
         const signInBtn = await page.locator('button:has-text("Sign in")').count();
         if (signInBtn > 0) return { loggedIn: false };
         const userEl = page.locator('[data-a-target="user-dropdown-first-name-text"]');
@@ -109,18 +111,34 @@ const SITES = {
     browserDir: cfg.dir.browser,
     async checkLogin(page) {
       try {
-        await page.goto('https://www.gog.com/en', { waitUntil: 'domcontentloaded', timeout: 20000 });
+        // Navigate to /account — GOG server-side requires a valid session here;
+        // stale sessions get redirected to the homepage with an #openlogin overlay.
+        // Homepage-based DOM checks get fooled by cached UI (we hit this earlier),
+        // so we use the final URL as the definitive signal.
+        await page.goto('https://www.gog.com/account', { waitUntil: 'domcontentloaded', timeout: 20000 });
         await page.waitForTimeout(3000);
-        const usernameSelector = '#menuUsername, [hook-test="menuUsername"], .menu-username';
-        const menuUser = page.locator(usernameSelector);
-        if (await menuUser.count() > 0) {
-          const user = (await menuUser.first().textContent()).trim();
+        const url = page.url();
+        if (url.includes('openlogin') || url.includes('/login')) return { loggedIn: false };
+        if (!url.includes('/account')) return { loggedIn: false };
+        // Extract username from menu element — direct text nodes only so the
+        // nested notification-count badge doesn't leak "0" into the name.
+        const el = page.locator('#menuUsername, [hook-test="menuUsername"], .menu-username').first();
+        if (await el.count() > 0) {
+          const user = await el.evaluate(el => {
+            const direct = Array.from(el.childNodes).filter(n => n.nodeType === 3).map(n => n.textContent).join('').replace(/\s+/g, ' ').trim();
+            return direct || (el.textContent || '').replace(/\s+/g, ' ').trim();
+          });
           return { loggedIn: true, user: user || 'unknown' };
         }
-        if (await page.locator('[href*="/account"]').count() > 0) {
-          return { loggedIn: true, user: 'unknown' };
-        }
-        return { loggedIn: false };
+        const cookieUser = await page.evaluate(() => {
+          for (const c of document.cookie.split(';')) {
+            const [k, v] = c.trim().split('=');
+            if (k === 'gog_username' || k === 'gog-username') return decodeURIComponent(v);
+          }
+          return null;
+        });
+        if (cookieUser) return { loggedIn: true, user: cookieUser };
+        return { loggedIn: true, user: 'unknown' };
       } catch {
         return { loggedIn: false };
       }
@@ -132,14 +150,14 @@ const SITES = {
     browserDir: cfg.dir.browser,
     async checkLogin(page) {
       try {
-        await page.goto('https://store.steampowered.com/', { waitUntil: 'domcontentloaded', timeout: 20000 });
+        // /account/ is auth-gated — stale sessions get redirected to /login/.
+        await page.goto('https://store.steampowered.com/account/', { waitUntil: 'domcontentloaded', timeout: 20000 });
         await page.waitForTimeout(3000);
+        if (page.url().includes('/login/')) return { loggedIn: false };
         const pulldown = page.locator('#account_pulldown');
         if (await pulldown.count() > 0) {
           const user = (await pulldown.innerText()).trim();
-          if (user.length > 0) {
-            return { loggedIn: true, user };
-          }
+          if (user.length > 0) return { loggedIn: true, user };
         }
         return { loggedIn: false };
       } catch {
