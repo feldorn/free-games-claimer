@@ -101,9 +101,8 @@ try {
   }
 
   // Surface codes that were claimed on Prime but never confirmed redeemed on the key-store.
-  // These entries would otherwise be "lost" since Prime shows the game as collected and
-  // never resurfaces the Claim button. We re-notify newly-pending entries (one-shot per
-  // entry via pendingNotified flag). Set PG_RESURFACE_PENDING=1 to re-notify everything.
+  // Prime won't show these again (code already delivered), so the only way to keep them
+  // visible is to re-include them in every run's notification until status flips to redeemed.
   const keyStores = new Set(['gog.com', 'microsoft store', 'xbox']);
   const redeemBaseUrls = {
     'gog.com': 'https://www.gog.com/redeem',
@@ -119,10 +118,8 @@ try {
     pending.push({ dbTitle, entry });
   }
   if (pending.length) {
-    const resurface = cfg.pg_resurface_pending;
-    const toSurface = pending.filter(({ entry }) => resurface || !entry.pendingNotified);
-    log.status('Pending manual redeem', `${pending.length} code(s)${toSurface.length && toSurface.length !== pending.length ? ` (${toSurface.length} new)` : ''}`);
-    for (const { dbTitle, entry } of toSurface) {
+    log.status('Pending manual redeem', `${pending.length} code(s)`);
+    for (const { dbTitle, entry } of pending) {
       const base = redeemBaseUrls[entry.store];
       const redeem_url = entry.store === 'gog.com' ? `${base}/${entry.code}` : base;
       log.warn(`${dbTitle} — pending manual redeem on ${entry.store}`);
@@ -132,9 +129,7 @@ try {
         status: `pending manual redeem on ${entry.store}`,
         details: `👉 <a href="${redeem_url}"><b>Tap to redeem manually</b></a> (code: ${entry.code})`,
       });
-      entry.pendingNotified = true;
     }
-    if (!toSurface.length) log.info('All pending already notified — set PG_RESURFACE_PENDING=1 to re-notify');
   }
 
   const waitUntilStable = async (f, act) => {
@@ -370,8 +365,6 @@ try {
         notify_game.status = `${redeem_action} on ${store}`;
         if (needsManual) {
           notify_game.details = `👉 <a href="${redeem_url}"><b>Tap to redeem manually</b></a> (code: ${code})`;
-          // Mark as notified so the pending-redeem scanner on next run doesn't re-surface it.
-          db.data[user][title].pendingNotified = true;
         }
       } else {
         log.ok(`${title} — claimed on ${store}`);
