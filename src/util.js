@@ -77,6 +77,17 @@ export const notify = html => new Promise((resolve, reject) => {
 
 export const escapeHtml = unsafe => unsafe.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll('\'', '&#039;');
 
+// Normalize a game title for fuzzy cross-store matching: lowercase, collapse
+// separators/punctuation/whitespace. Used to reconcile Prime Gaming entries
+// against the authenticated GOG library where exact punctuation / edition
+// suffixes may differ between stores.
+export const normalizeTitle = s => (s || '')
+  .toLowerCase()
+  .replace(/[:;\-–—_/\\]/g, ' ')
+  .replace(/['".,!?()[\]®™©]/g, '')
+  .replace(/\s+/g, ' ')
+  .trim();
+
 export const html_game_list = games => games.map(g => {
   if (g.status === 'action') return `<b><a href="${g.url}">${escapeHtml(g.title)}</a></b>`;
   let line = `- <a href="${g.url}">${escapeHtml(g.title)}</a> (${g.status})`;

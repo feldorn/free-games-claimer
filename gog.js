@@ -1,5 +1,5 @@
 import { chromium } from 'patchright';
-import { resolve, jsonDb, datetime, filenamify, prompt, confirm, notify, html_game_list, handleSIGINT, log } from './src/util.js';
+import { resolve, jsonDb, datetime, filenamify, prompt, confirm, notify, html_game_list, handleSIGINT, log, normalizeTitle } from './src/util.js';
 import { cfg } from './src/config.js';
 
 const screenshot = (...a) => resolve(cfg.dir.screenshots, 'gog', ...a);
@@ -205,6 +205,64 @@ try {
       await page.locator('li:has-text("Marketing communications through Trusted Partners") label').uncheck();
       await page.locator('li:has-text("Promotions and hot deals") label').uncheck();
     }
+  }
+
+  // Reconcile Prime Gaming's pending GOG codes against the authenticated user's library.
+  // Prime only knows whether a code was *delivered*, not whether it was *redeemed* —
+  // many codes end up already-used (redeemed manually or by an earlier script version).
+  // We fetch the owned-games list here and mark anything we own as redeemed so it drops
+  // out of the Prime Gaming pending notification on the next run.
+  try {
+    const pgDb = await jsonDb('prime-gaming.json', {});
+    const candidates = [];
+    for (const games of Object.values(pgDb.data)) {
+      if (!games || typeof games !== 'object') continue;
+      for (const [title, entry] of Object.entries(games)) {
+        if (!entry || typeof entry !== 'object') continue;
+        if (entry.store !== 'gog.com') continue;
+        if (!entry.code) continue;
+        if (/redeemed|expired|invalid/i.test(String(entry.status || ''))) continue;
+        candidates.push({ title, entry });
+      }
+    }
+    if (candidates.length) {
+      log.status('Reconciling Prime Gaming codes', `${candidates.length} pending GOG entries`);
+      const libraryTitles = new Set();
+      let pageNum = 1;
+      let totalPages = 1;
+      do {
+        const body = await page.evaluate(async p => {
+          const r = await fetch(`https://www.gog.com/account/getFilteredProducts?mediaType=1&page=${p}&sortBy=title`, { credentials: 'include' });
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          return r.text();
+        }, pageNum);
+        const j = JSON.parse(body);
+        totalPages = j.totalPages || 1;
+        for (const product of j.products || []) {
+          if (product?.title) libraryTitles.add(normalizeTitle(product.title));
+        }
+        pageNum++;
+      } while (pageNum <= totalPages && pageNum <= 30);
+      log.status('GOG library', `${libraryTitles.size} title(s) loaded`);
+
+      let reconciled = 0;
+      for (const { title, entry } of candidates) {
+        if (libraryTitles.has(normalizeTitle(title))) {
+          entry.status = 'claimed and redeemed (verified via GOG library)';
+          reconciled++;
+          log.ok(`${title} — found in GOG library, marked redeemed`);
+        }
+      }
+      if (reconciled) {
+        await pgDb.write();
+        log.info(`Reconciled ${reconciled}/${candidates.length} pending Prime Gaming code(s) against GOG library`);
+      } else {
+        log.info(`No pending Prime Gaming codes matched — ${candidates.length} remain truly pending`);
+      }
+    }
+  } catch (e) {
+    log.warn(`Library reconcile skipped — ${e.message}`);
+    if (cfg.debug) console.error(e);
   }
 
 } catch (error) {
