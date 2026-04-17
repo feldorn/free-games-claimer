@@ -324,6 +324,9 @@ let runDone = null; // Promise that resolves when runProcess finishes (for sched
 let runLog = [];
 let runStatus = 'idle';
 let runSource = null; // 'panel' | 'scheduler'
+let lastRun = null; // { at, source, exitCode, status, startedAt, durationSec }
+let runStartedAt = null;
+let startupAutoCheck = null; // { current, total, siteName } while auto-check is walking sites
 
 // gog.js runs first so its Prime-Gaming-code reconcile (library + redeem-endpoint
 // probe) updates prime-gaming.json BEFORE prime-gaming.js fires its pending-redeem
@@ -609,6 +612,7 @@ function runAllScripts({ source = 'panel' } = {}) {
   runLog = [];
   runStatus = 'running';
   runSource = source;
+  runStartedAt = Date.now();
   console.log(`[${datetime()}] Starting all claiming scripts (${source})...`);
 
   // For scheduled runs, set NOWAIT=1 so scripts exit fast on stale sessions
@@ -648,8 +652,16 @@ function runAllScripts({ source = 'panel' } = {}) {
     child.on('close', code => {
       runStatus = code === 0 ? 'success' : 'finished';
       runLog.push({ type: 'system', text: `Scripts finished with exit code ${code}`, time: datetime() });
+      lastRun = {
+        at: datetime(),
+        source: runSource,
+        exitCode: code,
+        status: runStatus,
+        durationSec: runStartedAt ? Math.round((Date.now() - runStartedAt) / 1000) : null,
+      };
       runProcess = null;
       runSource = null;
+      runStartedAt = null;
       console.log(`[${datetime()}] All scripts finished (exit code ${code}).`);
       resolve(code);
     });
@@ -657,8 +669,17 @@ function runAllScripts({ source = 'panel' } = {}) {
     child.on('error', err => {
       runStatus = 'error';
       runLog.push({ type: 'system', text: `Error: ${err.message}`, time: datetime() });
+      lastRun = {
+        at: datetime(),
+        source: runSource,
+        exitCode: -1,
+        status: 'error',
+        durationSec: runStartedAt ? Math.round((Date.now() - runStartedAt) / 1000) : null,
+        error: err.message,
+      };
       runProcess = null;
       runSource = null;
+      runStartedAt = null;
       resolve(-1);
     });
   });
@@ -690,8 +711,9 @@ function computeNextWakeMs() {
 
 async function postRunSessionCheck() {
   // After a scheduled run, probe each site. Any that come back not-logged-in
-  // get a single aggregated Pushover notification with PUBLIC_URL as the
-  // tap-target — the user opens the panel, clicks Login on the red card, done.
+  // get a single aggregated Pushover notification with per-site deep-links
+  // (?login=<siteId>) so tapping the right line lands the user directly in
+  // that site's Login flow instead of the dashboard root.
   console.log(`[${datetime()}] Scheduler: verifying session health...`);
   const results = await checkAllSites();
   const stale = [];
@@ -705,10 +727,15 @@ async function postRunSessionCheck() {
   }
   const names = stale.map(id => SITES[id]?.name || id);
   console.log(`[${datetime()}] Scheduler: stale sessions detected — ${names.join(', ')}.`);
-  // Plain-text body with bare URL — Pushover strips HTML but auto-linkifies
-  // full URLs in the remaining plaintext (see MODIFICATIONS / memory notes).
+  // Plain-text body; Pushover strips HTML but auto-linkifies full URLs, so
+  // we put one URL per line per site and keep the text on separate lines.
   const plural = stale.length > 1 ? 's' : '';
-  const body = `Free Games Claimer — ${stale.length} session${plural} expired: ${names.join(', ')}.<br>Log in at: ${PUBLIC_URL}`;
+  const lines = [`Free Games Claimer — ${stale.length} session${plural} expired. Tap to log in:`];
+  for (const siteId of stale) {
+    const name = SITES[siteId]?.name || siteId;
+    lines.push(`- ${name}: ${PUBLIC_URL}/?login=${encodeURIComponent(siteId)}`);
+  }
+  const body = lines.join('<br>');
   try {
     await notify(body);
   } catch (e) {
@@ -770,6 +797,8 @@ function getState() {
       startedAt: batchRedeem.startedAt,
       updatedAt: batchRedeem.updatedAt,
     } : null,
+    startupAutoCheck,
+    lastRun,
   };
 }
 
@@ -921,7 +950,7 @@ const PANEL_HTML = `<!DOCTYPE html>
           <b>Step 2:</b> For each site showing <span style="color: #e94560;">red</span>, click its <b>Login</b> button.<br>
           &nbsp;&nbsp;&nbsp;&nbsp;A browser will appear here. Log in manually (handle captchas, MFA, etc.).<br>
           &nbsp;&nbsp;&nbsp;&nbsp;When done, click <span class="highlight">"I\'m Logged In"</span> to verify and save the session.<br><br>
-          <b>Step 3:</b> Once all sites show <span class="highlight">green</span>, click <b>Test Run All Scripts</b> to verify claiming works.<br><br>
+          <b>Step 3:</b> Once all sites show <span class="highlight">green</span>, click <b>Run Now</b> to verify claiming works.<br><br>
           <b>Step 4:</b> You're done — the scheduler (if <span style="color: #f0c040;">LOOP</span> is set) runs claims automatically. Come back to this panel when a session expires.
         </div>
       </div>
@@ -978,16 +1007,29 @@ function render() {
   const btnCheckAll = document.getElementById('btnCheckAll');
   const currentStep = getStep();
 
-  if (state.loopEnabled) {
+  // Scheduler + last-run info, promoted into a single prominent row under the
+  // step bar. During the container's startup auto-check, replace it with a
+  // progress banner so the user knows why Login buttons are briefly disabled.
+  if (state.startupAutoCheck) {
     schedulerInfo.style.display = 'block';
+    schedulerInfo.style.color = '#f0c040';
+    schedulerInfo.innerHTML = '⏳ Startup: checking sessions (' + state.startupAutoCheck.current + '/' + state.startupAutoCheck.total + ') — ' + state.startupAutoCheck.siteName + '…';
+  } else if (state.loopEnabled || state.lastRun) {
+    schedulerInfo.style.display = 'block';
+    schedulerInfo.style.color = '#888';
+    const parts = [];
     if (state.runStatus === 'running') {
       const src = state.runSource === 'scheduler' ? 'scheduler' : 'manual';
-      schedulerInfo.innerHTML = 'Run in progress (' + src + ')…';
+      parts.push('<span style="color:#f0c040">● Run in progress (' + src + ')…</span>');
     } else if (state.nextScheduledRun) {
-      schedulerInfo.innerHTML = 'Next scheduled run: ' + state.nextScheduledRun;
-    } else {
-      schedulerInfo.innerHTML = 'Scheduler: idle';
+      parts.push('Next run: ' + state.nextScheduledRun);
     }
+    if (state.lastRun) {
+      const statusColor = state.lastRun.status === 'success' ? '#4ecca3' : state.lastRun.status === 'error' ? '#e94560' : '#f0c040';
+      const dur = state.lastRun.durationSec != null ? Math.round(state.lastRun.durationSec / 60) + 'm' : '';
+      parts.push('Last run: ' + state.lastRun.at + ' (' + state.lastRun.source + ') — <span style="color:' + statusColor + '">' + state.lastRun.status + '</span>' + (dur ? ' · ' + dur : ''));
+    }
+    schedulerInfo.innerHTML = parts.join(' · ');
   } else {
     schedulerInfo.style.display = 'none';
   }
@@ -1051,6 +1093,13 @@ function render() {
     btnRunAll.textContent = 'Run Now';
     btnRunAll.className = 'btn btn-run';
     btnRunAll.onclick = runAll;
+  }
+
+  // Hide the "how to set up" placeholder once the user is past first-run state
+  // (all sessions logged in, no active operation). Veteran users don't need it.
+  const placeholder = document.getElementById('vncPlaceholder');
+  if (placeholder && !state.activeBrowser && !state.batchRedeem) {
+    placeholder.style.display = state.allLoggedIn ? 'none' : 'flex';
   }
 
   if (state.allLoggedIn && !state.activeBrowser && state.runStatus !== 'running') {
@@ -1337,10 +1386,49 @@ function updateBatchPolling() {
   }
 }
 
+async function handleDeepLink() {
+  // Deep-links from Pushover notifications:
+  //   ?login=<siteId>  → auto-open the Login flow for that site
+  //   ?batch=gog       → auto-start batch redeem for pending GOG codes
+  // After triggering, strip the query so a refresh doesn't re-fire.
+  const params = new URLSearchParams(location.search);
+  const loginSite = params.get('login');
+  const batch = params.get('batch');
+  if (!loginSite && !batch) return;
+  const stripQuery = () => {
+    const url = location.pathname + location.hash;
+    history.replaceState(null, '', url);
+  };
+  // Wait for state to have loaded so busy-checks are accurate.
+  if (loginSite) {
+    if (state.sites.find(s => s.id === loginSite)) {
+      showToast('Opening Login flow for ' + loginSite + '…', 'info');
+      stripQuery();
+      await launchSite(loginSite);
+    } else {
+      showToast('Unknown site: ' + loginSite, 'error');
+      stripQuery();
+    }
+  } else if (batch === 'gog') {
+    if (pendingGogCount > 0 && !state.batchRedeem) {
+      showToast('Starting batch redeem…', 'info');
+      stripQuery();
+      await startBatchRedeem();
+    } else if (state.batchRedeem) {
+      showToast('Batch redeem already running.', 'info');
+      stripQuery();
+    } else {
+      showToast('No pending GOG codes to redeem.', 'info');
+      stripQuery();
+    }
+  }
+}
+
 async function initialLoad() {
   await refreshPendingGogCount();
   await refreshState();
   updateBatchPolling();
+  await handleDeepLink();
 }
 initialLoad();
 setInterval(async () => {
@@ -1527,11 +1615,19 @@ server.listen(PANEL_PORT, async () => {
   } else {
     console.log(`[${datetime()}] Scheduler: disabled (set LOOP or MS_SCHEDULE_HOURS to enable)`);
   }
+  if (cfg.notify && !cfg.public_url) {
+    console.log(`[${datetime()}] ⚠  NOTIFY is set but PUBLIC_URL is not — notification tap-targets will point to http://localhost:${PANEL_PORT}${BASE_PATH} which won't work from a mobile device. Set PUBLIC_URL to the externally-reachable panel URL.`);
+  }
   console.log(`[${datetime()}] Open the control panel URL in your browser.`);
   console.log(`[${datetime()}] Auto-checking all sessions...`);
-  for (const siteId of Object.keys(SITES)) {
+  const siteIds = Object.keys(SITES);
+  startupAutoCheck = { current: 0, total: siteIds.length, siteName: '' };
+  for (const siteId of siteIds) {
+    startupAutoCheck.siteName = SITES[siteId].name;
     await checkSiteStatus(siteId);
+    startupAutoCheck.current++;
   }
+  startupAutoCheck = null;
   console.log(`[${datetime()}] Auto-check complete.`);
 
   // Kick off the scheduler after session auto-check so first run sees fresh status.

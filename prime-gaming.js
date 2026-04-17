@@ -485,7 +485,12 @@ try {
   // Pending redeems sent as their own notifications, chunked to stay under Pushover's
   // ~1024-char body limit. Plain-text format with bare redeem URLs — Pushover strips
   // any <a> tags, so the URL must be literal text for the mobile OS to auto-linkify it.
+  // When PUBLIC_URL is set (panel reachable from mobile), the first chunk also
+  // includes a ?batch=gog deep-link so the user can run all codes through the
+  // panel's batch-redeem flow with a single tap instead of per-code.
   if (notify_pending.length) {
+    const panelUrl = (process.env.PUBLIC_URL || '').replace(/\/+$/, '');
+    const batchLink = panelUrl ? `Batch redeem all: ${panelUrl}/?batch=gog` : null;
     const chunkSize = 10;
     const total = notify_pending.length;
     const chunks = [];
@@ -494,7 +499,10 @@ try {
       const partLabel = chunks.length > 1 ? ` (${i + 1}/${chunks.length})` : '';
       const header = `prime-gaming (${user}) — ${total} pending redeem${total === 1 ? '' : 's'}${partLabel}:`;
       const lines = chunks[i].map(g => `- ${g.title} → ${g.url}`);
-      await notify(`${header}<br>${lines.join('<br>')}`);
+      const parts = [header];
+      if (i === 0 && batchLink) parts.push(batchLink);
+      parts.push(lines.join('<br>'));
+      await notify(parts.join('<br>'));
     }
   }
 }
