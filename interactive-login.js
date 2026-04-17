@@ -1,7 +1,7 @@
 import http from 'node:http';
 import { spawn } from 'node:child_process';
 import { chromium, devices } from 'patchright';
-import { datetime } from './src/util.js';
+import { datetime, notify } from './src/util.js';
 import { cfg } from './src/config.js';
 
 const PANEL_PORT = Number(process.env.PANEL_PORT) || 7080;
@@ -345,9 +345,16 @@ function runAllScripts({ source = 'panel' } = {}) {
   runSource = source;
   console.log(`[${datetime()}] Starting all claiming scripts (${source})...`);
 
+  // For scheduled runs, set NOWAIT=1 so scripts exit fast on stale sessions
+  // instead of waiting for interactive login. We follow up with a session
+  // re-check to notify the user about any sites that now need manual action.
+  const childEnv = source === 'scheduler'
+    ? { ...process.env, NOWAIT: '1' }
+    : process.env;
+
   const child = spawn('bash', ['-c', CLAIM_CMD], {
     cwd: process.cwd(),
-    env: process.env,
+    env: childEnv,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 
@@ -415,6 +422,34 @@ function computeNextWakeMs() {
   return LOOP_SECONDS * 1000;
 }
 
+async function postRunSessionCheck() {
+  // After a scheduled run, probe each site. Any that come back not-logged-in
+  // get a single aggregated Pushover notification with PUBLIC_URL as the
+  // tap-target — the user opens the panel, clicks Login on the red card, done.
+  console.log(`[${datetime()}] Scheduler: verifying session health...`);
+  const results = await checkAllSites();
+  const stale = [];
+  for (const [siteId, r] of Object.entries(results)) {
+    if (!r || r.error) continue;
+    if (r.loggedIn === false) stale.push(siteId);
+  }
+  if (!stale.length) {
+    console.log(`[${datetime()}] Scheduler: all sessions valid.`);
+    return;
+  }
+  const names = stale.map(id => SITES[id]?.name || id);
+  console.log(`[${datetime()}] Scheduler: stale sessions detected — ${names.join(', ')}.`);
+  // Plain-text body with bare URL — Pushover strips HTML but auto-linkifies
+  // full URLs in the remaining plaintext (see MODIFICATIONS / memory notes).
+  const plural = stale.length > 1 ? 's' : '';
+  const body = `Free Games Claimer — ${stale.length} session${plural} expired: ${names.join(', ')}.<br>Log in at: ${PUBLIC_URL}`;
+  try {
+    await notify(body);
+  } catch (e) {
+    console.error(`[${datetime()}] Scheduler: notify failed:`, e.message);
+  }
+}
+
 async function schedulerLoop() {
   // Wait for the first computed wake time BEFORE running — otherwise a mid-day
   // container restart fires an immediate claim run, and if MS_SCHEDULE_HOURS is
@@ -437,7 +472,10 @@ async function schedulerLoop() {
       try { await runDone; } catch (e) { console.error(`[${datetime()}] Scheduler run error:`, e); }
     } else if (!res.success) {
       console.log(`[${datetime()}] Scheduler: ${res.error}`);
+      continue;
     }
+    // Run finished — check which sessions survived and notify about stale ones.
+    try { await postRunSessionCheck(); } catch (e) { console.error(`[${datetime()}] Session check failed:`, e); }
   }
 }
 
