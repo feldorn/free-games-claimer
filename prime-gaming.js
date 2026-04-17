@@ -123,11 +123,14 @@ try {
       const base = redeemBaseUrls[entry.store];
       const redeem_url = entry.store === 'gog.com' ? `${base}/${entry.code}` : base;
       log.warn(`${dbTitle} — pending manual redeem on ${entry.store}`);
+      // NOTE: Pushover auto-linkifies bare domain text like "gog.com". Every notification
+      // field the user might tap must wrap such text inside an <a href> pointing where we
+      // want, and the game's .url must be the redeem URL (not Amazon, since that's already
+      // marked collected and useless here). See MODIFICATIONS.md.
       notify_games.push({
         title: dbTitle,
-        url: entry.url || redeem_url,
-        status: `pending manual redeem on ${entry.store}`,
-        details: `👉 <a href="${redeem_url}"><b>Tap to redeem manually</b></a> (code: ${entry.code})`,
+        url: redeem_url,
+        status: `<a href="${redeem_url}">pending redeem on ${entry.store}</a> — code: ${entry.code}`,
       });
     }
   }
@@ -362,9 +365,12 @@ try {
         const needsManual = ['redeem', 'redeem (got captcha)', 'redeem (not found)', 'redeem (login)', 'unknown'].includes(redeem_action);
         if (redeem_action == 'redeemed' || redeem_action == 'redeemed?' || redeem_action == 'already redeemed') claimedCount++;
         else if (needsManual) needsActionCount++;
-        notify_game.status = `${redeem_action} on ${store}`;
+        // Wrap the store name in an anchor so Pushover can't auto-linkify bare "gog.com"
+        // to https://gog.com. See MODIFICATIONS.md — this is a regression-prone spot.
+        notify_game.status = `<a href="${redeem_url}">${redeem_action} on ${store}</a>`;
         if (needsManual) {
-          notify_game.details = `👉 <a href="${redeem_url}"><b>Tap to redeem manually</b></a> (code: ${code})`;
+          notify_game.url = redeem_url; // override Amazon URL so title tap → redeem
+          notify_game.details = `Code: ${code}`;
         }
       } else {
         log.ok(`${title} — claimed on ${store}`);
