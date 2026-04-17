@@ -118,7 +118,7 @@ Options are set via environment variables. You can pass them directly, use `--en
 | `NOTIFY_TITLE` | | Optional title for notifications |
 | `LOOP` | | Repeat claiming every N seconds (e.g., `86400` = 24h). Omit to run once and exit. |
 | `LOGIN_MODE` | `0` | Set to `1` to launch the interactive login panel instead of automated claiming |
-| `BASE_PATH` | | URL prefix when serving the panel under a reverse-proxy subfolder (e.g. `/free-games`). Leave empty for root or subdomain. |
+| `BASE_PATH` | | URL prefix when serving the panel under a reverse-proxy subfolder (e.g. `/free-games`). Leave empty for root or subdomain. See [Reverse-Proxy Setup](#reverse-proxy-setup) below. |
 | `PUBLIC_URL` | | Full external URL of the panel (e.g. `https://example.com/free-games`). Used in notifications so tap-targets land on the panel. |
 | `SHOW` | `1` (Docker) | Show browser GUI. Default is headless outside Docker. |
 | `WIDTH` | `1920` | Browser/screen width |
@@ -226,6 +226,65 @@ Running once daily (`86400`) is recommended.
 - macOS: launchd
 - Windows: Task Scheduler
 - Any OS: [pm2](https://pm2.keymetrics.io/docs/usage/restart-strategies/)
+
+---
+
+## Reverse-Proxy Setup
+
+The interactive-login panel can be served behind a reverse proxy at either a subdomain
+(e.g. `https://fgc.example.com`) or a subfolder (e.g. `https://example.com/free-games`).
+
+### Subdomain (simplest)
+
+No special configuration needed on the app side. Point your reverse proxy at
+`http://fgc:7080/` and `http://fgc:6080/` for the panel and noVNC respectively.
+
+### Subfolder
+
+Set `BASE_PATH` to the prefix and `PUBLIC_URL` to the full external URL:
+
+```yaml
+environment:
+  - BASE_PATH=/free-games
+  - PUBLIC_URL=https://example.com/free-games
+```
+
+The app will:
+- Strip `BASE_PATH` from incoming request URLs before routing.
+- Build all client-side URLs (`fetch`, noVNC iframe `src`) with the prefix.
+- Include `PUBLIC_URL` in notifications so tap-targets land on the panel.
+
+Example SWAG / nginx config (save as `free-games.subfolder.conf` in
+`proxy-confs/`). **Important**: `proxy_pass` must not have a trailing slash —
+the app handles prefix stripping itself. The `^~` modifier ensures this
+location wins over any regex locations elsewhere in your nginx config.
+
+```nginx
+location ^~ /free-games/ {
+    # auth_request /auth-1;   # optional Organizr / Authelia
+    include /config/nginx/proxy.conf;
+    include /config/nginx/resolver.conf;
+    set $upstream_app free-games-claimer;
+    set $upstream_port 7080;
+    set $upstream_proto http;
+    proxy_pass $upstream_proto://$upstream_app:$upstream_port;
+}
+
+location ^~ /free-games/novnc/ {
+    # auth_request /auth-1;
+    include /config/nginx/proxy.conf;
+    include /config/nginx/resolver.conf;
+    set $upstream_app free-games-claimer;
+    set $upstream_port 6080;
+    set $upstream_proto http;
+    proxy_pass $upstream_proto://$upstream_app:$upstream_port/;
+}
+```
+
+The `/novnc/` block uses a trailing slash on `proxy_pass` because noVNC serves
+at the root of port `6080` and must not see the `/free-games/novnc/` prefix.
+Your `proxy.conf` must pass `Upgrade` / `Connection` headers for the WebSocket
+to work (SWAG's default `proxy.conf` already does).
 
 ---
 
