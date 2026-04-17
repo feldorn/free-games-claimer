@@ -277,14 +277,16 @@ location ^~ /free-games/novnc/ {
     set $upstream_app free-games-claimer;
     set $upstream_port 6080;
     set $upstream_proto http;
-    proxy_pass $upstream_proto://$upstream_app:$upstream_port/;
+    proxy_pass $upstream_proto://$upstream_app:$upstream_port;
+    rewrite /free-games/novnc/(.*) /$1 break;
 }
 ```
 
-The `/novnc/` block uses a trailing slash on `proxy_pass` because noVNC serves
-at the root of port `6080` and must not see the `/free-games/novnc/` prefix.
-Your `proxy.conf` must pass `Upgrade` / `Connection` headers for the WebSocket
-to work (SWAG's default `proxy.conf` already does).
+The `/novnc/` block strips the prefix via `rewrite` (not `proxy_pass` trailing
+slash — that doesn't reliably pass subpaths in this setup) so noVNC sees
+`/vnc.html`, `/app/styles/base.css`, etc. at the root path it expects. Your
+`proxy.conf` must pass `Upgrade` / `Connection` headers for the WebSocket to
+work (SWAG's default `proxy.conf` already does).
 
 ---
 
