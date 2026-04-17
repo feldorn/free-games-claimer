@@ -193,9 +193,10 @@ for (const id of Object.keys(SITES)) {
 }
 
 async function launchSite(siteId) {
-  if (runProcess) {
-    throw new Error('A claim run is in progress — wait for it to finish before opening a browser.');
-  }
+  // launchSite may legitimately replace an existing activeBrowser, so we allow
+  // that case and closeBrowser() below. Any other busy reason is a hard error.
+  const busy = browserBusy({ allowActiveBrowser: true });
+  if (busy) throw new Error(`Cannot launch browser — ${busy}.`);
   if (activeBrowser) {
     await closeBrowser();
   }
@@ -262,12 +263,8 @@ async function checkSiteStatus(siteId) {
   const site = SITES[siteId];
   if (!site) return { loggedIn: false, error: 'Unknown site' };
 
-  if (activeBrowser) {
-    return { error: 'A browser session is active. Close it first.' };
-  }
-  if (checkInProgress) {
-    return { error: 'Another check is already in progress. Please wait.' };
-  }
+  const busy = browserBusy();
+  if (busy) return { error: `Browser profile busy — ${busy}.` };
 
   checkInProgress = true;
   console.log(`[${datetime()}] Checking session status for ${site.name} (headless)...`);
@@ -312,6 +309,21 @@ let runSource = null; // 'panel' | 'scheduler'
 
 const CLAIM_CMD = process.env.CLAIM_CMD || 'node prime-gaming.js; node epic-games.js; node gog.js; node steam.js; node microsoft.js';
 
+// Unified profile-busy check. The chromium user-data-dir only supports one
+// process at a time — three distinct code paths can hold it: session-checks
+// (checkSiteStatus), interactive login sessions (activeBrowser), and scheduled
+// or manual claim runs (runProcess). Any entry point that wants the profile
+// must check this first. Returns a human description of what's busy, or null.
+function browserBusy({ allowActiveBrowser = false } = {}) {
+  if (checkInProgress) return 'auto-checking session status';
+  if (runProcess) return `claim run in progress${runSource ? ' (' + runSource + ')' : ''}`;
+  if (!allowActiveBrowser && activeBrowser) {
+    const name = SITES[activeBrowser.siteId]?.name || activeBrowser.siteId;
+    return `interactive browser session active for ${name}`;
+  }
+  return null;
+}
+
 async function checkAllSites() {
   const results = {};
   for (const siteId of Object.keys(SITES)) {
@@ -325,8 +337,8 @@ async function checkAllSites() {
 }
 
 function runAllScripts({ source = 'panel' } = {}) {
-  if (runProcess) return { success: false, error: 'Scripts are already running.' };
-  if (activeBrowser) return { success: false, error: 'Close the active browser session first.' };
+  const busy = browserBusy();
+  if (busy) return { success: false, error: `Cannot start run — ${busy}.` };
 
   runLog = [];
   runStatus = 'running';
@@ -405,10 +417,9 @@ function computeNextWakeMs() {
 
 async function schedulerLoop() {
   while (true) {
-    if (activeBrowser) {
-      console.log(`[${datetime()}] Scheduler: skipping run — interactive browser session is active.`);
-    } else if (runProcess) {
-      console.log(`[${datetime()}] Scheduler: skipping run — a run is already in progress.`);
+    const busy = browserBusy();
+    if (busy) {
+      console.log(`[${datetime()}] Scheduler: skipping run — ${busy}.`);
     } else {
       const res = runAllScripts({ source: 'scheduler' });
       if (res.success && runDone) {
@@ -590,7 +601,7 @@ const PANEL_HTML = `<!DOCTYPE html>
           &nbsp;&nbsp;&nbsp;&nbsp;A browser will appear here. Log in manually (handle captchas, MFA, etc.).<br>
           &nbsp;&nbsp;&nbsp;&nbsp;When done, click <span class="highlight">"I\'m Logged In"</span> to verify and save the session.<br><br>
           <b>Step 3:</b> Once all sites show <span class="highlight">green</span>, click <b>Test Run All Scripts</b> to verify claiming works.<br><br>
-          <b>Step 4:</b> Stop this container, remove <span style="color: #f0c040;">LOGIN_MODE=1</span>, and restart for automated claiming.
+          <b>Step 4:</b> You're done — the scheduler (if <span style="color: #f0c040;">LOOP</span> is set) runs claims automatically. Come back to this panel when a session expires.
         </div>
       </div>
     </div>
@@ -682,13 +693,13 @@ function render() {
     banner.style.display = 'block';
     if (state.runStatus === 'success') {
       banner.className = 'status-banner all-good';
-      banner.innerHTML = 'All sessions verified and scripts ran successfully! You can now stop this container, remove LOGIN_MODE=1, and restart for automated claiming.';
+      banner.innerHTML = 'All sessions verified and scripts ran successfully! The scheduler (if enabled) will keep claiming automatically.';
     } else if (state.runStatus === 'finished') {
       banner.className = 'status-banner needs-login';
       banner.innerHTML = 'Scripts finished with errors. Check the log below for details. Some sessions may have expired.';
     } else {
       banner.className = 'status-banner all-good';
-      banner.innerHTML = 'All sessions verified! Click "Test Run All Scripts" to verify the claimers work, or stop this container, remove LOGIN_MODE=1, and restart for automated claiming.';
+      banner.innerHTML = 'All sessions verified! Click "Run Now" to trigger an immediate claim, or let the scheduler (if enabled) handle it automatically.';
     }
   } else if (isRunning) {
     banner.style.display = 'block';
