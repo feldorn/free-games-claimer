@@ -1,7 +1,7 @@
 import http from 'node:http';
 import { spawn } from 'node:child_process';
 import { chromium, devices } from 'patchright';
-import { datetime, notify } from './src/util.js';
+import { datetime, notify, jsonDb } from './src/util.js';
 import { cfg } from './src/config.js';
 
 const PANEL_PORT = Number(process.env.PANEL_PORT) || 7080;
@@ -331,10 +331,11 @@ let runSource = null; // 'panel' | 'scheduler'
 const CLAIM_CMD = process.env.CLAIM_CMD || 'node gog.js; node prime-gaming.js; node epic-games.js; node steam.js; node microsoft.js';
 
 // Unified profile-busy check. The chromium user-data-dir only supports one
-// process at a time — three distinct code paths can hold it: session-checks
-// (checkSiteStatus), interactive login sessions (activeBrowser), and scheduled
-// or manual claim runs (runProcess). Any entry point that wants the profile
-// must check this first. Returns a human description of what's busy, or null.
+// process at a time — four distinct code paths can hold it: session-checks
+// (checkSiteStatus), interactive login sessions (activeBrowser), scheduled
+// or manual claim runs (runProcess), and batch redeem (batchRedeem). Any
+// entry point that wants the profile must check this first. Returns a human
+// description of what's busy, or null.
 function browserBusy({ allowActiveBrowser = false } = {}) {
   if (checkInProgress) return 'auto-checking session status';
   if (runProcess) return `claim run in progress${runSource ? ' (' + runSource + ')' : ''}`;
@@ -342,7 +343,209 @@ function browserBusy({ allowActiveBrowser = false } = {}) {
     const name = SITES[activeBrowser.siteId]?.name || activeBrowser.siteId;
     return `interactive browser session active for ${name}`;
   }
+  if (batchRedeem && batchRedeem.phase !== 'done' && batchRedeem.phase !== 'stopped' && batchRedeem.phase !== 'error') {
+    return 'batch redeem in progress';
+  }
   return null;
+}
+
+// ----- Batch redeem -----
+// Drives the GOG /redeem page programmatically for each entry in
+// prime-gaming.json that's store=gog.com, has a code, and hasn't been
+// marked redeemed. Auto-clicks Continue → Redeem for each code. When
+// GOG demands a captcha, pauses and lets the user solve it via noVNC;
+// polls the page DOM for completion then moves on.
+let batchRedeem = null;
+
+function collectPendingGogCodes(pgDb) {
+  const pending = [];
+  for (const games of Object.values(pgDb.data || {})) {
+    if (!games || typeof games !== 'object') continue;
+    for (const [title, entry] of Object.entries(games)) {
+      if (!entry || typeof entry !== 'object') continue;
+      if (entry.store !== 'gog.com' || !entry.code) continue;
+      if (/redeemed|expired|invalid/i.test(String(entry.status || ''))) continue;
+      pending.push({ title, entry });
+    }
+  }
+  return pending;
+}
+
+async function countPendingGogCodes() {
+  try {
+    const pgDb = await jsonDb('prime-gaming.json', {});
+    return collectPendingGogCodes(pgDb).length;
+  } catch {
+    return 0;
+  }
+}
+
+async function processOneRedeemCode(page, code) {
+  await page.goto(`https://www.gog.com/redeem/${encodeURIComponent(code)}`, { waitUntil: 'domcontentloaded', timeout: 30000 });
+  await page.waitForTimeout(2000);
+  // URL-based pre-fill usually works; fall back to filling #codeInput explicitly.
+  try { await page.fill('#codeInput', code); } catch {}
+  // Click Continue — GOG fires GET /v1/bonusCodes/<code> in response.
+  const r1Promise = page.waitForResponse(
+    r => r.request().method() === 'GET' && r.url().startsWith('https://redeem.gog.com/v1/bonusCodes/'),
+    { timeout: 20000 },
+  );
+  await page.click('[type="submit"]');
+  const r1 = await r1Promise;
+  const r1t = await r1.text();
+  let r1j = {}; try { r1j = JSON.parse(r1t); } catch {}
+  const reason1 = String(r1j.reason || '').toLowerCase();
+  if (reason1 === 'code_used') return { outcome: 'used' };
+  if (reason1 === 'code_not_found') return { outcome: 'not-found' };
+  if (reason1.includes('captcha')) return { outcome: 'captcha', productTitle: null };
+  // Valid — click Redeem; GOG fires POST /v1/bonusCodes/<code>.
+  const r2Promise = page.waitForResponse(
+    r => r.request().method() === 'POST' && r.url().startsWith('https://redeem.gog.com/v1/bonusCodes/'),
+    { timeout: 20000 },
+  );
+  await page.click('[type="submit"]');
+  const r2 = await r2Promise;
+  const r2t = await r2.text();
+  let r2j = {}; try { r2j = JSON.parse(r2t); } catch {}
+  const reason2 = String(r2j.reason2 || r2j.reason || '').toLowerCase();
+  if (r2j.type === 'async_processing') {
+    await page.locator('h1:has-text("Code redeemed successfully!")').waitFor({ timeout: 15000 }).catch(() => {});
+    return { outcome: 'redeemed', productTitle: r1j.products?.[0]?.title };
+  }
+  if (reason2.includes('captcha')) return { outcome: 'captcha', productTitle: r1j.products?.[0]?.title };
+  return { outcome: 'unknown', raw: r2j };
+}
+
+async function waitForCaptchaResolution(page) {
+  // User solves captcha + clicks Redeem themselves. Poll DOM for result.
+  const deadline = Date.now() + 10 * 60 * 1000; // 10 min max per code
+  while (Date.now() < deadline) {
+    if (!batchRedeem || batchRedeem.phase === 'stopped') return 'stopped';
+    try {
+      if (await page.locator('h1:has-text("Code redeemed successfully!")').count() > 0) return 'redeemed';
+      if (await page.locator('text=/already redeemed|already used|code was used|code used/i').count() > 0) return 'used';
+      if (await page.locator('text=/not found|invalid code|doesn.t exist|incorrect/i').count() > 0) return 'not-found';
+    } catch {}
+    await new Promise(r => setTimeout(r, 2000));
+  }
+  return 'timeout';
+}
+
+async function runBatchRedeemLoop() {
+  while (batchRedeem && batchRedeem.index < batchRedeem.pending.length && batchRedeem.phase !== 'stopped') {
+    const { title, entry } = batchRedeem.pending[batchRedeem.index];
+    batchRedeem.currentTitle = title;
+    batchRedeem.currentCode = entry.code;
+    batchRedeem.message = `Processing ${title}…`;
+    batchRedeem.updatedAt = datetime();
+
+    let result;
+    try {
+      result = await processOneRedeemCode(batchRedeem.page, entry.code);
+    } catch (e) {
+      console.error(`[${datetime()}] Batch redeem: ${title} — ${e.message}`);
+      result = { outcome: 'error', error: e.message };
+    }
+
+    let finalOutcome = result.outcome;
+    if (result.outcome === 'captcha') {
+      batchRedeem.phase = 'awaiting-captcha';
+      batchRedeem.message = `Solve captcha + click Redeem for "${title}" in the browser — auto-continuing when done.`;
+      batchRedeem.updatedAt = datetime();
+      finalOutcome = await waitForCaptchaResolution(batchRedeem.page);
+      if (finalOutcome === 'stopped') break;
+      batchRedeem.phase = 'running';
+    }
+
+    if (finalOutcome === 'redeemed') {
+      entry.status = 'claimed and redeemed (batch)';
+      batchRedeem.stats.redeemed++;
+    } else if (finalOutcome === 'used') {
+      entry.status = 'claimed and redeemed (verified via GOG)';
+      batchRedeem.stats.used++;
+    } else if (finalOutcome === 'not-found') {
+      entry.status = 'claimed, code expired or invalid';
+      batchRedeem.stats.notFound++;
+    } else if (finalOutcome === 'timeout') {
+      batchRedeem.stats.timeouts++;
+      console.log(`[${datetime()}] Batch redeem: ${title} — timed out, moving on`);
+    } else if (finalOutcome === 'error') {
+      batchRedeem.stats.errors++;
+    } else {
+      batchRedeem.stats.unknown++;
+    }
+    try { await batchRedeem.pgDb.write(); } catch {}
+
+    batchRedeem.index++;
+  }
+
+  if (batchRedeem) {
+    batchRedeem.phase = batchRedeem.phase === 'stopped' ? 'stopped' : 'done';
+    const s = batchRedeem.stats;
+    batchRedeem.message = `Batch ${batchRedeem.phase} — ${s.redeemed} redeemed, ${s.used} already, ${s.notFound} invalid${s.errors ? `, ${s.errors} errors` : ''}`;
+    batchRedeem.updatedAt = datetime();
+    try { await batchRedeem.context.close(); } catch {}
+    batchRedeem.context = null;
+    batchRedeem.page = null;
+    console.log(`[${datetime()}] Batch redeem ${batchRedeem.phase}: ${batchRedeem.message}`);
+  }
+}
+
+async function startBatchRedeem() {
+  const busy = browserBusy({ allowActiveBrowser: true });
+  if (busy) throw new Error(`Cannot start batch redeem — ${busy}.`);
+  if (activeBrowser) await closeBrowser();
+
+  const pgDb = await jsonDb('prime-gaming.json', {});
+  const pending = collectPendingGogCodes(pgDb);
+  if (!pending.length) throw new Error('No pending GOG codes to redeem.');
+
+  console.log(`[${datetime()}] Starting batch redeem for ${pending.length} GOG code(s)...`);
+  const context = await chromium.launchPersistentContext(cfg.dir.browser, {
+    headless: false,
+    viewport: { width: cfg.width, height: cfg.height },
+    locale: 'en-US',
+    handleSIGINT: false,
+    args: ['--hide-crash-restore-bubble'],
+  });
+  const page = context.pages()[0] || await context.newPage();
+  try { await page.setViewportSize({ width: cfg.width, height: cfg.height }); } catch {}
+  context.setDefaultTimeout(0); // batch-redeem drives its own timeouts
+
+  batchRedeem = {
+    context, page, pgDb, pending,
+    index: 0,
+    stats: { redeemed: 0, used: 0, notFound: 0, unknown: 0, errors: 0, timeouts: 0 },
+    phase: 'running',
+    currentTitle: null, currentCode: null,
+    message: `Starting — ${pending.length} code(s) queued`,
+    startedAt: datetime(), updatedAt: datetime(),
+  };
+
+  runBatchRedeemLoop().catch(e => {
+    console.error(`[${datetime()}] Batch redeem loop crashed:`, e);
+    if (batchRedeem) {
+      batchRedeem.phase = 'error';
+      batchRedeem.message = `Error: ${e.message}`;
+    }
+  });
+
+  return { success: true, total: pending.length };
+}
+
+async function stopBatchRedeem() {
+  if (!batchRedeem) return { success: false, error: 'No batch redeem active.' };
+  batchRedeem.phase = 'stopped';
+  batchRedeem.message = 'Stopped by user';
+  batchRedeem.updatedAt = datetime();
+  try { if (batchRedeem.context) await batchRedeem.context.close(); } catch {}
+  return { success: true, stats: batchRedeem.stats };
+}
+
+function clearFinishedBatchRedeem() {
+  if (batchRedeem && (batchRedeem.phase === 'done' || batchRedeem.phase === 'stopped' || batchRedeem.phase === 'error')) {
+    batchRedeem = null;
+  }
 }
 
 async function checkAllSites() {
@@ -515,6 +718,16 @@ function getState() {
     runLogLength: runLog.length,
     nextScheduledRun: nextScheduledRun ? datetime(nextScheduledRun) : null,
     loopEnabled: LOOP_SECONDS > 0 || MS_SCHEDULE_HOURS > 0,
+    batchRedeem: batchRedeem ? {
+      phase: batchRedeem.phase,
+      message: batchRedeem.message,
+      index: batchRedeem.index,
+      total: batchRedeem.pending.length,
+      currentTitle: batchRedeem.currentTitle,
+      stats: batchRedeem.stats,
+      startedAt: batchRedeem.startedAt,
+      updatedAt: batchRedeem.updatedAt,
+    } : null,
   };
 }
 
@@ -651,6 +864,7 @@ const PANEL_HTML = `<!DOCTYPE html>
   </div>
   <div class="steps" id="steps"></div>
   <div class="site-cards" id="siteCards"></div>
+  <div id="batchRedeemInfo" style="display:none; margin-top: 10px;"></div>
   <div id="schedulerInfo" style="display:none; margin-top: 10px; font-size: 13px; color: #888;"></div>
   <div id="activeSession" style="display:none"></div>
 </div>
@@ -680,6 +894,13 @@ let busy = false;
 let showingLog = false;
 let logOffset = 0;
 let logPollTimer = null;
+let pendingGogCount = 0;
+async function refreshPendingGogCount() {
+  try {
+    const r = await api('GET', '/pending-gog-count');
+    pendingGogCount = r.count || 0;
+  } catch { pendingGogCount = 0; }
+}
 
 async function api(method, path, body) {
   const opts = { method, headers: { 'Content-Type': 'application/json' } };
@@ -710,6 +931,7 @@ function render() {
   const banner = document.getElementById('statusBanner');
   const steps = document.getElementById('steps');
   const schedulerInfo = document.getElementById('schedulerInfo');
+  const batchInfo = document.getElementById('batchRedeemInfo');
   const btnRunAll = document.getElementById('btnRunAll');
   const btnCheckAll = document.getElementById('btnCheckAll');
   const currentStep = getStep();
@@ -726,6 +948,41 @@ function render() {
     }
   } else {
     schedulerInfo.style.display = 'none';
+  }
+
+  // Batch-redeem panel: shows when there are pending GOG codes OR a batch is active.
+  const br = state.batchRedeem;
+  if (br) {
+    batchInfo.style.display = 'block';
+    const s = br.stats || {};
+    const progressBar = '<span style="color:#888">' + br.index + ' / ' + br.total + ' codes</span>';
+    const statsLine = [s.redeemed + ' redeemed', s.used + ' already', s.notFound + ' invalid', s.timeouts ? s.timeouts + ' timeouts' : null, s.errors ? s.errors + ' errors' : null].filter(Boolean).join(', ');
+    const bgColor = br.phase === 'awaiting-captcha' ? '#3a1a1e' : br.phase === 'done' ? '#1a3a2e' : br.phase === 'stopped' || br.phase === 'error' ? '#3a2a1e' : '#0f3460';
+    const borderColor = br.phase === 'awaiting-captcha' ? '#e94560' : br.phase === 'done' ? '#4ecca3' : '#555';
+    let buttonsHtml = '';
+    if (br.phase === 'running' || br.phase === 'awaiting-captcha') {
+      buttonsHtml = '<button class="btn btn-stop" onclick="stopBatchRedeem()">Stop</button>';
+    } else {
+      buttonsHtml = '<button class="btn btn-cancel" onclick="clearBatchRedeem()">Dismiss</button>';
+    }
+    batchInfo.innerHTML =
+      '<div style="background:' + bgColor + ';border:1px solid ' + borderColor + ';border-radius:8px;padding:10px 14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">' +
+      '  <div style="flex:1;min-width:240px">' +
+      '    <div style="font-weight:600;margin-bottom:2px">Batch redeem — ' + br.phase + '</div>' +
+      '    <div style="font-size:13px;margin-bottom:4px">' + br.message + '</div>' +
+      '    <div style="font-size:12px;color:#888">' + progressBar + ' · ' + (statsLine || 'no results yet') + '</div>' +
+      '  </div>' +
+      '  <div>' + buttonsHtml + '</div>' +
+      '</div>';
+  } else if (pendingGogCount > 0) {
+    batchInfo.style.display = 'block';
+    batchInfo.innerHTML =
+      '<div style="background:#0f3460;border-radius:8px;padding:10px 14px;display:flex;align-items:center;gap:12px">' +
+      '  <div style="flex:1"><b>' + pendingGogCount + ' pending GOG code' + (pendingGogCount === 1 ? '' : 's') + '</b> — solve captcha once, remaining auto-process</div>' +
+      '  <button class="btn btn-run" onclick="startBatchRedeem()">Batch Redeem</button>' +
+      '</div>';
+  } else {
+    batchInfo.style.display = 'none';
   }
 
   const stepLabels = ['Check sessions', 'Log in to sites', 'Test run', 'Done!'];
@@ -902,6 +1159,7 @@ async function refreshState() {
   try {
     state = await api('GET', '/state');
     render();
+    if (typeof updateBatchPolling === 'function') updateBatchPolling();
   } catch {}
 }
 
@@ -993,8 +1251,61 @@ async function stopRun() {
   await refreshState();
 }
 
-refreshState();
-setInterval(refreshState, 10000);
+async function startBatchRedeem() {
+  busy = true; render();
+  try {
+    const r = await api('POST', '/batch-redeem/start');
+    if (r.success) {
+      showToast('Batch redeem started — ' + r.total + ' code(s) queued. Solve captcha in the browser when prompted.', 'success');
+      showVnc();
+    } else {
+      showToast(r.error || 'Failed to start batch redeem.', 'error');
+    }
+  } catch (e) { showToast('Error: ' + e.message, 'error'); }
+  busy = false;
+  await refreshState();
+}
+
+async function stopBatchRedeem() {
+  try {
+    await api('POST', '/batch-redeem/stop');
+    showToast('Batch redeem stopped.', 'info');
+  } catch (e) { showToast('Error: ' + e.message, 'error'); }
+  await refreshState();
+}
+
+async function clearBatchRedeem() {
+  try {
+    await api('POST', '/batch-redeem/clear');
+  } catch (e) { showToast('Error: ' + e.message, 'error'); }
+  await refreshPendingGogCount();
+  await refreshState();
+}
+
+// Faster poll when batch-redeem is active so progress updates feel live.
+let batchPollTimer = null;
+function updateBatchPolling() {
+  const active = state.batchRedeem && (state.batchRedeem.phase === 'running' || state.batchRedeem.phase === 'awaiting-captcha');
+  if (active && !batchPollTimer) {
+    batchPollTimer = setInterval(refreshState, 2000);
+    showVnc();
+  } else if (!active && batchPollTimer) {
+    clearInterval(batchPollTimer);
+    batchPollTimer = null;
+  }
+}
+
+async function initialLoad() {
+  await refreshPendingGogCount();
+  await refreshState();
+  updateBatchPolling();
+}
+initialLoad();
+setInterval(async () => {
+  await refreshState();
+  if (!state.batchRedeem) await refreshPendingGogCount();
+  updateBatchPolling();
+}, 10000);
 </script>
 </body>
 </html>`;
@@ -1110,6 +1421,34 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (req.method === 'GET' && req.url === '/api/pending-gog-count') {
+      const count = await countPendingGogCodes();
+      sendJson(res, { count });
+      return;
+    }
+
+    if (req.method === 'POST' && req.url === '/api/batch-redeem/start') {
+      try {
+        const result = await startBatchRedeem();
+        sendJson(res, result);
+      } catch (e) {
+        sendJson(res, { success: false, error: e.message }, 400);
+      }
+      return;
+    }
+
+    if (req.method === 'POST' && req.url === '/api/batch-redeem/stop') {
+      const result = await stopBatchRedeem();
+      sendJson(res, result);
+      return;
+    }
+
+    if (req.method === 'POST' && req.url === '/api/batch-redeem/clear') {
+      clearFinishedBatchRedeem();
+      sendJson(res, { success: true });
+      return;
+    }
+
     res.writeHead(404);
     res.end('Not found');
   } catch (e) {
@@ -1122,6 +1461,10 @@ async function gracefulShutdown(sig) {
   console.log(`[${datetime()}] Received ${sig}, shutting down...`);
   if (runProcess) {
     try { runProcess.kill('SIGTERM'); } catch {}
+  }
+  if (batchRedeem) {
+    batchRedeem.phase = 'stopped';
+    try { if (batchRedeem.context) await batchRedeem.context.close(); } catch {}
   }
   await closeBrowser();
   server.close();
