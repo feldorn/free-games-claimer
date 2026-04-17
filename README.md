@@ -280,13 +280,27 @@ location ^~ /free-games/novnc/ {
     proxy_pass $upstream_proto://$upstream_app:$upstream_port;
     rewrite /free-games/novnc/(.*) /$1 break;
 }
+
+# noVNC hard-codes its WebSocket at /websockify (origin root), so we expose it
+# there too. Without this block the VNC viewer loads but can't connect.
+location = /websockify {
+    # auth_request /auth-1;
+    include /config/nginx/proxy.conf;
+    include /config/nginx/resolver.conf;
+    set $upstream_app free-games-claimer;
+    set $upstream_port 6080;
+    set $upstream_proto http;
+    proxy_pass $upstream_proto://$upstream_app:$upstream_port;
+}
 ```
 
 The `/novnc/` block strips the prefix via `rewrite` (not `proxy_pass` trailing
 slash — that doesn't reliably pass subpaths in this setup) so noVNC sees
-`/vnc.html`, `/app/styles/base.css`, etc. at the root path it expects. Your
-`proxy.conf` must pass `Upgrade` / `Connection` headers for the WebSocket to
-work (SWAG's default `proxy.conf` already does).
+`/vnc.html`, `/app/styles/base.css`, etc. at the root path it expects. The
+`/websockify` block handles the WebSocket upgrade — noVNC's JS hard-codes this
+path relative to the origin root, so we proxy it there rather than fighting
+the noVNC URL config. Your `proxy.conf` must pass `Upgrade` / `Connection`
+headers for the WebSocket to work (SWAG's default `proxy.conf` already does).
 
 ---
 
