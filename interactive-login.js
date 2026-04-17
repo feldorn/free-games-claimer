@@ -416,22 +416,28 @@ function computeNextWakeMs() {
 }
 
 async function schedulerLoop() {
+  // Wait for the first computed wake time BEFORE running — otherwise a mid-day
+  // container restart fires an immediate claim run, and if MS_SCHEDULE_HOURS is
+  // set microsoft.js will sleep internally for up to 20 hours keeping runProcess
+  // non-null and locking the panel. Users who want an immediate run can click
+  // "Run Now" in the panel (matches how cron, systemd timers, etc. behave).
   while (true) {
-    const busy = browserBusy();
-    if (busy) {
-      console.log(`[${datetime()}] Scheduler: skipping run — ${busy}.`);
-    } else {
-      const res = runAllScripts({ source: 'scheduler' });
-      if (res.success && runDone) {
-        try { await runDone; } catch (e) { console.error(`[${datetime()}] Scheduler run error:`, e); }
-      } else if (!res.success) {
-        console.log(`[${datetime()}] Scheduler: ${res.error}`);
-      }
-    }
     const sleepMs = computeNextWakeMs();
     nextScheduledRun = new Date(Date.now() + sleepMs);
     console.log(`[${datetime()}] Scheduler: next run at ${datetime(nextScheduledRun)}.`);
     await new Promise(r => setTimeout(r, sleepMs));
+
+    const busy = browserBusy();
+    if (busy) {
+      console.log(`[${datetime()}] Scheduler: skipping run — ${busy}.`);
+      continue;
+    }
+    const res = runAllScripts({ source: 'scheduler' });
+    if (res.success && runDone) {
+      try { await runDone; } catch (e) { console.error(`[${datetime()}] Scheduler run error:`, e); }
+    } else if (!res.success) {
+      console.log(`[${datetime()}] Scheduler: ${res.error}`);
+    }
   }
 }
 
