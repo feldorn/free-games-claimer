@@ -193,6 +193,9 @@ for (const id of Object.keys(SITES)) {
 }
 
 async function launchSite(siteId) {
+  if (runProcess) {
+    throw new Error('A claim run is in progress — wait for it to finish before opening a browser.');
+  }
   if (activeBrowser) {
     await closeBrowser();
   }
@@ -302,8 +305,12 @@ async function checkSiteStatus(siteId) {
 }
 
 let runProcess = null;
+let runDone = null; // Promise that resolves when runProcess finishes (for scheduler to await)
 let runLog = [];
 let runStatus = 'idle';
+let runSource = null; // 'panel' | 'scheduler'
+
+const CLAIM_CMD = process.env.CLAIM_CMD || 'node prime-gaming.js; node epic-games.js; node gog.js; node steam.js; node microsoft.js';
 
 async function checkAllSites() {
   const results = {};
@@ -317,15 +324,16 @@ async function checkAllSites() {
   return results;
 }
 
-function runAllScripts() {
+function runAllScripts({ source = 'panel' } = {}) {
   if (runProcess) return { success: false, error: 'Scripts are already running.' };
   if (activeBrowser) return { success: false, error: 'Close the active browser session first.' };
 
   runLog = [];
   runStatus = 'running';
-  console.log(`[${datetime()}] Starting all claiming scripts...`);
+  runSource = source;
+  console.log(`[${datetime()}] Starting all claiming scripts (${source})...`);
 
-  const child = spawn('bash', ['-c', 'node prime-gaming.js; node epic-games.js; node gog.js; node steam.js; node microsoft.js'], {
+  const child = spawn('bash', ['-c', CLAIM_CMD], {
     cwd: process.cwd(),
     env: process.env,
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -333,36 +341,87 @@ function runAllScripts() {
 
   runProcess = child;
 
-  child.stdout.on('data', data => {
-    const lines = data.toString().split('\n').filter(l => l.length);
-    lines.forEach(l => {
-      runLog.push({ type: 'stdout', text: l, time: datetime() });
-      if (runLog.length > 500) runLog.shift();
+  runDone = new Promise(resolve => {
+    child.stdout.on('data', data => {
+      process.stdout.write(data); // keep `docker logs` useful
+      const lines = data.toString().split('\n').filter(l => l.length);
+      lines.forEach(l => {
+        runLog.push({ type: 'stdout', text: l, time: datetime() });
+        if (runLog.length > 500) runLog.shift();
+      });
     });
-  });
 
-  child.stderr.on('data', data => {
-    const lines = data.toString().split('\n').filter(l => l.length);
-    lines.forEach(l => {
-      runLog.push({ type: 'stderr', text: l, time: datetime() });
-      if (runLog.length > 500) runLog.shift();
+    child.stderr.on('data', data => {
+      process.stderr.write(data);
+      const lines = data.toString().split('\n').filter(l => l.length);
+      lines.forEach(l => {
+        runLog.push({ type: 'stderr', text: l, time: datetime() });
+        if (runLog.length > 500) runLog.shift();
+      });
     });
-  });
 
-  child.on('close', code => {
-    runStatus = code === 0 ? 'success' : 'finished';
-    runLog.push({ type: 'system', text: `Scripts finished with exit code ${code}`, time: datetime() });
-    runProcess = null;
-    console.log(`[${datetime()}] All scripts finished (exit code ${code}).`);
-  });
+    child.on('close', code => {
+      runStatus = code === 0 ? 'success' : 'finished';
+      runLog.push({ type: 'system', text: `Scripts finished with exit code ${code}`, time: datetime() });
+      runProcess = null;
+      runSource = null;
+      console.log(`[${datetime()}] All scripts finished (exit code ${code}).`);
+      resolve(code);
+    });
 
-  child.on('error', (err) => {
-    runStatus = 'error';
-    runLog.push({ type: 'system', text: `Error: ${err.message}`, time: datetime() });
-    runProcess = null;
+    child.on('error', err => {
+      runStatus = 'error';
+      runLog.push({ type: 'system', text: `Error: ${err.message}`, time: datetime() });
+      runProcess = null;
+      runSource = null;
+      resolve(-1);
+    });
   });
 
   return { success: true };
+}
+
+// ----- Scheduler -----
+// Reads LOOP (seconds) and optional MS_SCHEDULE_HOURS / MS_SCHEDULE_START (hours) from env.
+// Anchor-based wake time: if MS_SCHEDULE_HOURS is set we wake 30min before the window opens
+// tomorrow, so the loop fires at ~the same clock time every day (no drift from run duration).
+// Otherwise we sleep LOOP seconds after the previous run completes.
+const LOOP_SECONDS = Number(process.env.LOOP) || 0;
+const MS_SCHEDULE_HOURS = Number(process.env.MS_SCHEDULE_HOURS) || 0;
+const MS_SCHEDULE_START = Number(process.env.MS_SCHEDULE_START) || 8;
+
+let nextScheduledRun = null; // Date | null
+
+function computeNextWakeMs() {
+  if (MS_SCHEDULE_HOURS > 0) {
+    const wakeHour = MS_SCHEDULE_START > 0 ? MS_SCHEDULE_START - 1 : 23;
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    tomorrow.setHours(wakeHour, 30, 0, 0);
+    return Math.max(tomorrow.getTime() - Date.now(), 60 * 1000);
+  }
+  return LOOP_SECONDS * 1000;
+}
+
+async function schedulerLoop() {
+  while (true) {
+    if (activeBrowser) {
+      console.log(`[${datetime()}] Scheduler: skipping run — interactive browser session is active.`);
+    } else if (runProcess) {
+      console.log(`[${datetime()}] Scheduler: skipping run — a run is already in progress.`);
+    } else {
+      const res = runAllScripts({ source: 'scheduler' });
+      if (res.success && runDone) {
+        try { await runDone; } catch (e) { console.error(`[${datetime()}] Scheduler run error:`, e); }
+      } else if (!res.success) {
+        console.log(`[${datetime()}] Scheduler: ${res.error}`);
+      }
+    }
+    const sleepMs = computeNextWakeMs();
+    nextScheduledRun = new Date(Date.now() + sleepMs);
+    console.log(`[${datetime()}] Scheduler: next run at ${datetime(nextScheduledRun)}.`);
+    await new Promise(r => setTimeout(r, sleepMs));
+  }
 }
 
 function getState() {
@@ -376,7 +435,10 @@ function getState() {
     activeBrowser: activeBrowser ? { site: activeBrowser.siteId, name: SITES[activeBrowser.siteId].name } : null,
     allLoggedIn,
     runStatus,
+    runSource,
     runLogLength: runLog.length,
+    nextScheduledRun: nextScheduledRun ? datetime(nextScheduledRun) : null,
+    loopEnabled: LOOP_SECONDS > 0 || MS_SCHEDULE_HOURS > 0,
   };
 }
 
@@ -508,11 +570,12 @@ const PANEL_HTML = `<!DOCTYPE html>
     <h1>Free Games Claimer</h1>
     <div class="header-actions">
       <button class="btn btn-check-all" onclick="checkAll()" id="btnCheckAll">Check All Sessions</button>
-      <button class="btn btn-run" onclick="runAll()" id="btnRunAll">Test Run All Scripts</button>
+      <button class="btn btn-run" onclick="runAll()" id="btnRunAll">Run Now</button>
     </div>
   </div>
   <div class="steps" id="steps"></div>
   <div class="site-cards" id="siteCards"></div>
+  <div id="schedulerInfo" style="display:none; margin-top: 10px; font-size: 13px; color: #888;"></div>
   <div id="activeSession" style="display:none"></div>
 </div>
 <div id="statusBanner" class="status-banner" style="display:none"></div>
@@ -570,9 +633,24 @@ function render() {
   const session = document.getElementById('activeSession');
   const banner = document.getElementById('statusBanner');
   const steps = document.getElementById('steps');
+  const schedulerInfo = document.getElementById('schedulerInfo');
   const btnRunAll = document.getElementById('btnRunAll');
   const btnCheckAll = document.getElementById('btnCheckAll');
   const currentStep = getStep();
+
+  if (state.loopEnabled) {
+    schedulerInfo.style.display = 'block';
+    if (state.runStatus === 'running') {
+      const src = state.runSource === 'scheduler' ? 'scheduler' : 'manual';
+      schedulerInfo.innerHTML = 'Run in progress (' + src + ')…';
+    } else if (state.nextScheduledRun) {
+      schedulerInfo.innerHTML = 'Next scheduled run: ' + state.nextScheduledRun;
+    } else {
+      schedulerInfo.innerHTML = 'Scheduler: idle';
+    }
+  } else {
+    schedulerInfo.style.display = 'none';
+  }
 
   const stepLabels = ['Check sessions', 'Log in to sites', 'Test run', 'Done!'];
   steps.innerHTML = stepLabels.map((label, i) => {
@@ -595,7 +673,7 @@ function render() {
     btnRunAll.disabled = false;
     btnRunAll.onclick = stopRun;
   } else {
-    btnRunAll.textContent = 'Test Run All Scripts';
+    btnRunAll.textContent = 'Run Now';
     btnRunAll.className = 'btn btn-run';
     btnRunAll.onclick = runAll;
   }
@@ -931,7 +1009,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'POST' && req.url === '/api/run-all') {
-      const result = runAllScripts();
+      const result = runAllScripts({ source: 'panel' });
       sendJson(res, result);
       return;
     }
@@ -964,30 +1042,41 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-process.on('SIGINT', async () => {
-  console.log(`\n[${datetime()}] Shutting down...`);
+async function gracefulShutdown(sig) {
+  console.log(`[${datetime()}] Received ${sig}, shutting down...`);
+  if (runProcess) {
+    try { runProcess.kill('SIGTERM'); } catch {}
+  }
   await closeBrowser();
   server.close();
   process.exit(0);
-});
-
-process.on('SIGTERM', async () => {
-  console.log(`[${datetime()}] Received SIGTERM, shutting down...`);
-  await closeBrowser();
-  server.close();
-  process.exit(0);
-});
+}
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 
 server.listen(PANEL_PORT, async () => {
-  console.log(`[${datetime()}] Free Games Claimer - Interactive Login Panel`);
+  console.log(`[${datetime()}] Free Games Claimer — panel + scheduler`);
   console.log(`[${datetime()}] Control panel: http://localhost:${PANEL_PORT}${BASE_PATH}`);
   if (cfg.public_url) console.log(`[${datetime()}] Public URL:    ${PUBLIC_URL}`);
   console.log(`[${datetime()}] noVNC viewer:  http://localhost:${NOVNC_PORT}${BASE_PATH ? ` (proxied at ${BASE_PATH}/novnc/)` : ''}`);
   console.log(`[${datetime()}] Password protection: ${PANEL_PASSWORD ? 'ENABLED' : 'DISABLED (set PANEL_PASSWORD or VNC_PASSWORD to enable)'}`);
-  console.log(`[${datetime()}] Open the control panel URL in your browser to start.`);
+  if (LOOP_SECONDS > 0 || MS_SCHEDULE_HOURS > 0) {
+    const desc = MS_SCHEDULE_HOURS > 0 ? `anchored to MS window start ${MS_SCHEDULE_START}:00` : `every ${LOOP_SECONDS}s`;
+    console.log(`[${datetime()}] Scheduler: enabled (${desc})`);
+  } else {
+    console.log(`[${datetime()}] Scheduler: disabled (set LOOP or MS_SCHEDULE_HOURS to enable)`);
+  }
+  console.log(`[${datetime()}] Open the control panel URL in your browser.`);
   console.log(`[${datetime()}] Auto-checking all sessions...`);
   for (const siteId of Object.keys(SITES)) {
     await checkSiteStatus(siteId);
   }
   console.log(`[${datetime()}] Auto-check complete.`);
+
+  // Kick off the scheduler after session auto-check so first run sees fresh status.
+  if (LOOP_SECONDS > 0 || MS_SCHEDULE_HOURS > 0) {
+    schedulerLoop().catch(err => {
+      console.error(`[${datetime()}] Scheduler crashed:`, err);
+    });
+  }
 });

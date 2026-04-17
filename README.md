@@ -29,25 +29,17 @@ This runs all 4 claimers (`prime-gaming`, `epic-games`, `gog`, `steam`), claims 
 
 ### First Run — Login Setup
 
-On the first run, you need to establish browser sessions for each store. The easiest way is to use the interactive login panel:
-
-```sh
-docker run --rm -it -p 6080:6080 -p 7080:7080 -v fgc:/fgc/data \
-  -e LOGIN_MODE=1 \
-  ghcr.io/feldorn/free-games-claimer
-```
-
-Then open **http://localhost:7080** in your browser. The panel lets you:
+The control panel is always available at **http://localhost:7080**. On first run, open it and:
 
 1. Click **Login** for each site to open a visible browser via noVNC
 2. Log in manually (handle captchas, MFA, phone verification as needed)
 3. Click **I'm Logged In** to verify and save the session
 4. Click **Check All Sessions** to confirm everything is green
-5. Optionally click **Test Run All Scripts** to verify claiming works
+5. Optionally click **Run Now** to claim any games that are currently available
 
-Once all sessions are established, stop the container and restart without `LOGIN_MODE=1`.
+If you set `LOOP=86400` (or similar), the panel's built-in scheduler will then claim every N seconds automatically — no need to restart the container or toggle any mode.
 
-Sessions are stored in the `fgc` Docker volume and persist across container restarts. You should not need to log in again unless a session expires (you'll get a notification if that happens).
+Sessions are stored in the `fgc` Docker volume and persist across container restarts. You should not need to log in again unless a session expires (you'll get a notification if that happens — come back to the panel and click **Login** on the affected site).
 
 ---
 
@@ -60,7 +52,7 @@ services:
     container_name: fgc
     ports:
       - "6080:6080"   # noVNC (browser-based VNC viewer)
-      - "7080:7080"   # interactive login panel (LOGIN_MODE=1)
+      - "7080:7080"   # control panel (always running)
     volumes:
       - fgc:/fgc/data
     environment:
@@ -70,8 +62,9 @@ services:
       - GOG_PASSWORD=your-gog-password
       - STEAM_PASSWORD=your-steam-password
       - NOTIFY=pover://user@token          # Pushover, Telegram, Slack, etc.
-      - LOOP=86400                          # repeat every 24 hours
-      # - LOGIN_MODE=1                      # uncomment for first-time login setup
+      - LOOP=86400                          # scheduler interval in seconds; omit to disable
+      # - BASE_PATH=/free-games             # URL prefix for reverse-proxy subfolder setups
+      # - PUBLIC_URL=https://example.com/free-games
       # - STEAM_MIN_RATING=6               # minimum review rating (default: 6 = Mostly Positive)
       # - STEAM_MIN_PRICE=10               # minimum original price in USD (default: 10)
     restart: unless-stopped
@@ -117,7 +110,8 @@ Options are set via environment variables. You can pass them directly, use `--en
 | `NOTIFY` | | Notification URL(s) for [apprise](https://github.com/caronc/apprise) (Pushover, Telegram, Slack, etc.) |
 | `NOTIFY_TITLE` | | Optional title for notifications |
 | `LOOP` | | Repeat claiming every N seconds (e.g., `86400` = 24h). Omit to run once and exit. |
-| `LOGIN_MODE` | `0` | Set to `1` to launch the interactive login panel instead of automated claiming |
+| `LOGIN_MODE` | — | **Deprecated no-op** — the control panel is always running on port 7080. Safe to remove from your config. |
+| `CLAIM_CMD` | (all 5 scripts in sequence) | Override the shell command the scheduler runs on each cycle. Useful for claiming a subset of stores. |
 | `BASE_PATH` | | URL prefix when serving the panel under a reverse-proxy subfolder (e.g. `/free-games`). Leave empty for root or subdomain. See [Reverse-Proxy Setup](#reverse-proxy-setup) below. |
 | `PUBLIC_URL` | | Full external URL of the panel (e.g. `https://example.com/free-games`). Used in notifications so tap-targets land on the panel. |
 | `SHOW` | `1` (Docker) | Show browser GUI. Default is headless outside Docker. |
@@ -322,9 +316,9 @@ All data is stored in the `data/` directory (mounted as a Docker volume):
 
 ## Troubleshooting
 
-- **Can't see the browser?** Open http://localhost:6080 for the noVNC viewer
-- **Captcha or MFA needed?** Use `LOGIN_MODE=1` to access the interactive panel at http://localhost:7080
-- **Session expired?** You'll get a notification. Restart with `LOGIN_MODE=1` to re-authenticate.
+- **Can't see the browser?** Open http://localhost:6080 for the raw noVNC viewer, or http://localhost:7080 for the control panel with site cards and scheduler info
+- **Captcha or MFA needed?** Open the control panel at http://localhost:7080 and click **Login** on the affected site — solve the challenge in the embedded browser
+- **Session expired?** You'll get a notification. Come back to the control panel and click **Login** on the affected site
 - **Script skipping a game?** Check the console output — games are skipped for reasons like: already owned, below rating/price threshold (Steam), requires base game, region locked
 - **Debug mode:** Set `DEBUG=1` for verbose output including page text dumps and full stack traces
 

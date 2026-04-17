@@ -12,17 +12,20 @@ services:
     ports:
       # - "5900:5900" # VNC server
       - "6080:6080" # noVNC (browser-based VNC client)
-      - "7080:7080" # interactive login panel (LOGIN_MODE=1)
+      - "7080:7080" # control panel (always running)
     volumes:
       - fgc:/fgc/data
-    # command: bash -c "node epic-games; node gog; node steam"
+    # command: bash -c "node epic-games; node gog; node steam"  # override CLAIM_CMD below instead
     environment:
       # - EMAIL=foo@bar.org
       # - NOTIFY='tgram://...'
-      # - LOGIN_MODE=1 # launch interactive login panel on port 7080 instead of automated claiming
-      # - LOOP=28800 # repeat claiming every N seconds (e.g., 28800 = 8 hours); omit to run once and exit
+      # - LOOP=28800 # scheduler interval in seconds (e.g., 28800 = 8 hours); omit to disable scheduler
+      # - BASE_PATH=/free-games # URL prefix if the panel is proxied under a subfolder
+      # - PUBLIC_URL=https://example.com/free-games # full external URL used in notifications
+      # - CLAIM_CMD='node prime-gaming.js; node epic-games.js; node gog.js; node steam.js; node microsoft.js' # override the scheduled claim command
       # - STEAM_MIN_RATING=6 # minimum review rating 1-9 (6 = Mostly Positive)
       # - STEAM_MIN_PRICE=10 # minimum original price in USD
       # - MS_EMAIL=your@email.com # Microsoft account for Bing Rewards (defaults to EMAIL)
       # - MS_PASSWORD=yourpassword # Microsoft account password (defaults to PASSWORD)
       # - MS_OTPKEY=yourotpsecret # Microsoft 2FA TOTP secret (optional)
+      # Note: LOGIN_MODE is deprecated — the panel is always running on port 7080.
