@@ -22,7 +22,8 @@ services:
       # - LOOP=28800 # scheduler interval in seconds (e.g., 28800 = 8 hours); omit to disable scheduler
       # - BASE_PATH=/free-games # URL prefix if the panel is proxied under a subfolder
       # - PUBLIC_URL=https://example.com/free-games # full external URL used in notifications
-      # - CLAIM_CMD='node prime-gaming.js; node epic-games.js; node gog.js; node steam.js; node microsoft.js' # override the scheduled claim command
+      # - CLAIM_CMD='node gog.js; node prime-gaming.js; node epic-games.js; node steam.js; node microsoft.js' # full scheduled claim command (default includes all)
+      # - CLAIM_CMD_MANUAL='node gog.js; node prime-gaming.js; node epic-games.js; node steam.js' # "Run Now" button command (default skips microsoft.js since it sleeps internally until MS_SCHEDULE_START)
       # - STEAM_MIN_RATING=6 # minimum review rating 1-9 (6 = Mostly Positive)
       # - STEAM_MIN_PRICE=10 # minimum original price in USD
       # - MS_EMAIL=your@email.com # Microsoft account for Bing Rewards (defaults to EMAIL)

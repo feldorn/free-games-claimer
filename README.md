@@ -111,7 +111,8 @@ Options are set via environment variables. You can pass them directly, use `--en
 | `NOTIFY_TITLE` | | Optional title for notifications |
 | `LOOP` | | Repeat claiming every N seconds (e.g., `86400` = 24h). Omit to run once and exit. |
 | `LOGIN_MODE` | — | **Deprecated no-op** — the control panel is always running on port 7080. Safe to remove from your config. |
-| `CLAIM_CMD` | (all 5 scripts in sequence) | Override the shell command the scheduler runs on each cycle. Useful for claiming a subset of stores. |
+| `CLAIM_CMD` | (all 5 scripts in sequence) | Shell command the scheduler runs at its anchored wake. Includes microsoft.js, which sleeps internally until `MS_SCHEDULE_START`. |
+| `CLAIM_CMD_MANUAL` | (4 scripts, microsoft.js excluded) | Shell command the "Run Now" button runs. Excludes microsoft.js by default so a manual run actually finishes in a few minutes instead of hanging overnight. |
 | `BASE_PATH` | | URL prefix when serving the panel under a reverse-proxy subfolder (e.g. `/free-games`). Leave empty for root or subdomain. See [Reverse-Proxy Setup](#reverse-proxy-setup) below. |
 | `PUBLIC_URL` | | Full external URL of the panel (e.g. `https://example.com/free-games`). Used in notifications so tap-targets land on the panel. |
 | `SHOW` | `1` (Docker) | Show browser GUI. Default is headless outside Docker. |

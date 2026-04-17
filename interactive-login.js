@@ -331,7 +331,14 @@ let startupAutoCheck = null; // { current, total, siteName } while auto-check is
 // gog.js runs first so its Prime-Gaming-code reconcile (library + redeem-endpoint
 // probe) updates prime-gaming.json BEFORE prime-gaming.js fires its pending-redeem
 // notification. Otherwise the notification goes out with a stale pending count.
+// Two command sets so "Run Now" finishes in ~5 min instead of hanging until the
+// next morning: microsoft.js has an internal MS_SCHEDULE_HOURS sleep that can
+// hold the subprocess open for up to 20 hours, which is correct for the
+// scheduled-daily path but wrong for interactive "run these now".
+//   CLAIM_CMD         — full set, used by the scheduler at its anchored wake.
+//   CLAIM_CMD_MANUAL  — subset (no microsoft.js), used by the "Run Now" button.
 const CLAIM_CMD = process.env.CLAIM_CMD || 'node gog.js; node prime-gaming.js; node epic-games.js; node steam.js; node microsoft.js';
+const CLAIM_CMD_MANUAL = process.env.CLAIM_CMD_MANUAL || 'node gog.js; node prime-gaming.js; node epic-games.js; node steam.js';
 
 // Unified profile-busy check. The chromium user-data-dir only supports one
 // process at a time — four distinct code paths can hold it: session-checks
@@ -622,7 +629,10 @@ function runAllScripts({ source = 'panel' } = {}) {
     ? { ...process.env, NOWAIT: '1' }
     : process.env;
 
-  const child = spawn('bash', ['-c', CLAIM_CMD], {
+  // Manual "Run Now" uses the subset without microsoft.js so it actually ends.
+  const cmd = source === 'scheduler' ? CLAIM_CMD : CLAIM_CMD_MANUAL;
+
+  const child = spawn('bash', ['-c', cmd], {
     cwd: process.cwd(),
     env: childEnv,
     stdio: ['ignore', 'pipe', 'pipe'],
