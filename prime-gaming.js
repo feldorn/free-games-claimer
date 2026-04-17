@@ -1,6 +1,6 @@
 import { chromium } from 'patchright';
 import { authenticator } from 'otplib';
-import { resolve, jsonDb, datetime, filenamify, prompt, confirm, notify, html_game_list, handleSIGINT, log } from './src/util.js';
+import { resolve, jsonDb, datetime, filenamify, prompt, confirm, notify, html_game_list, handleSIGINT, log, checkGogCode, delay } from './src/util.js';
 import { cfg } from './src/config.js';
 
 const screenshot = (...a) => resolve(cfg.dir.screenshots, 'prime-gaming', ...a);
@@ -104,29 +104,54 @@ try {
   // Surface codes that were claimed on Prime but never confirmed redeemed on the key-store.
   // Prime won't show these again (code already delivered), so the only way to keep them
   // visible is to re-include them in every run's notification until status flips to redeemed.
+  // db.status only reflects what the script *thinks* happened; we probe GOG's redeem
+  // endpoint to verify actual state (code_used / code_not_found / still pending).
   const keyStores = new Set(['gog.com', 'microsoft store', 'xbox']);
   const redeemBaseUrls = {
     'gog.com': 'https://www.gog.com/redeem',
     'microsoft store': 'https://account.microsoft.com/billing/redeem',
     xbox: 'https://account.microsoft.com/billing/redeem',
   };
+  const terminalRx = /redeemed|expired|invalid/i;
   const pending = [];
   for (const [dbTitle, entry] of Object.entries(db.data[user])) {
     if (!entry || typeof entry !== 'object') continue;
     if (!entry.code) continue;
     if (!keyStores.has(entry.store)) continue;
-    if (String(entry.status || '').toLowerCase().includes('redeemed')) continue;
+    if (terminalRx.test(String(entry.status || ''))) continue;
     pending.push({ dbTitle, entry });
   }
-  if (pending.length) {
-    log.status('Pending manual redeem', `${pending.length} code(s)`);
-    for (const { dbTitle, entry } of pending) {
+
+  // Pre-check GOG pending codes against the redeem endpoint. code_used / code_not_found
+  // are returned before the captcha gate, so we can cheaply verify without user action.
+  const gogPending = pending.filter(p => p.entry.store === 'gog.com');
+  if (gogPending.length) {
+    log.status('Verifying GOG codes', `${gogPending.length}`);
+    let verifiedRedeemed = 0, invalid = 0;
+    for (const p of gogPending) {
+      const result = await checkGogCode(p.entry.code);
+      if (result.state === 'used') {
+        p.entry.status = 'claimed and redeemed (verified via GOG)';
+        verifiedRedeemed++;
+      } else if (result.state === 'not_found') {
+        p.entry.status = 'claimed, code expired or invalid';
+        invalid++;
+      }
+      // 'captcha' / 'valid' / 'unknown' / 'error' → still pending
+      await delay(500); // gentle pacing
+    }
+    if (verifiedRedeemed) log.ok(`${verifiedRedeemed} already redeemed — removed from pending list`);
+    if (invalid) log.warn(`${invalid} code(s) expired or invalid — removed from pending list`);
+  }
+
+  // Rebuild notify_pending from entries that are still actually pending.
+  const stillPending = pending.filter(({ entry }) => !terminalRx.test(String(entry.status || '')));
+  if (stillPending.length) {
+    log.status('Pending manual redeem', `${stillPending.length} code(s)`);
+    for (const { dbTitle, entry } of stillPending) {
       const base = redeemBaseUrls[entry.store];
       const redeem_url = entry.store === 'gog.com' ? `${base}/${entry.code}` : base;
       log.warn(`${dbTitle} — pending manual redeem on ${entry.store}`);
-      // Pushover strips HTML tags before rendering, so we can't rely on <a href>.
-      // We build bare-URL plain-text lines below in the chunked sender so the mobile
-      // OS auto-linkifies the full redeem URL (not just the domain).
       notify_pending.push({ title: dbTitle, url: redeem_url });
     }
   }

@@ -77,6 +77,28 @@ export const notify = html => new Promise((resolve, reject) => {
 
 export const escapeHtml = unsafe => unsafe.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll('\'', '&#039;');
 
+// Probe GOG's redeem endpoint for the status of a code WITHOUT solving captcha.
+// The GET returns code_used / code_not_found immediately; only an otherwise-valid
+// code gets gated behind {"reason":"Invalid or no captcha"}.
+// Returns: { state: 'used' | 'not_found' | 'captcha' | 'valid' | 'unknown' | 'error', ... }
+export const checkGogCode = async code => {
+  try {
+    const res = await fetch(`https://redeem.gog.com/v1/bonusCodes/${encodeURIComponent(code)}?language=en-US`, {
+      headers: { 'User-Agent': 'Mozilla/5.0', Accept: 'application/json' },
+    });
+    const text = await res.text();
+    let j;
+    try { j = JSON.parse(text); } catch { return { state: 'unknown', raw: text }; }
+    if (j.reason === 'code_used') return { state: 'used' };
+    if (j.reason === 'code_not_found') return { state: 'not_found' };
+    if (typeof j.reason === 'string' && j.reason.toLowerCase().includes('captcha')) return { state: 'captcha' };
+    if (Array.isArray(j.products) && j.products.length) return { state: 'valid', products: j.products };
+    return { state: 'unknown', raw: j };
+  } catch (e) {
+    return { state: 'error', error: e.message };
+  }
+};
+
 export const html_game_list = games => games.map(g => {
   if (g.status === 'action') return `<b><a href="${g.url}">${escapeHtml(g.title)}</a></b>`;
   let line = `- <a href="${g.url}">${escapeHtml(g.title)}</a> (${g.status})`;
