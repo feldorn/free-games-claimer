@@ -291,9 +291,18 @@ try {
                 notFound++;
                 log.warn(`${title} — code not found on GOG, marked invalid`);
               } else if (reason === 'code_used') {
-                entry.status = 'claimed and redeemed (verified via GOG)';
-                used++;
-                log.ok(`${title} — already redeemed on GOG, marked redeemed`);
+                // GOG's code_used response is the same whether the code added
+                // the game to the library or was consumed without crediting.
+                // Cross-check the library to distinguish.
+                if (libraryTitles.has(normalizeTitle(title))) {
+                  entry.status = 'claimed and redeemed (verified via GOG)';
+                  used++;
+                  log.ok(`${title} — already redeemed on GOG (in library), marked redeemed`);
+                } else {
+                  entry.status = 'claimed, code consumed but not in library (likely expired)';
+                  notFound++;
+                  log.warn(`${title} — GOG says code_used but title not in library, marked expired`);
+                }
               } else if (reason.includes('captcha')) {
                 captcha++;
                 log.warn(`${title} — captcha required, stopping probe (${stillPending.length - probed} remaining)`);

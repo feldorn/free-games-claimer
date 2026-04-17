@@ -1,7 +1,7 @@
 import http from 'node:http';
 import { spawn } from 'node:child_process';
 import { chromium, devices } from 'patchright';
-import { datetime, notify, jsonDb } from './src/util.js';
+import { datetime, notify, jsonDb, normalizeTitle } from './src/util.js';
 import { cfg } from './src/config.js';
 
 const PANEL_PORT = Number(process.env.PANEL_PORT) || 7080;
@@ -431,7 +431,41 @@ async function waitForCaptchaResolution(page) {
   return 'timeout';
 }
 
+async function fetchGogLibraryTitles(page) {
+  const titles = new Set();
+  let pageNum = 1, totalPages = 1;
+  do {
+    const body = await page.evaluate(async p => {
+      const r = await fetch(`https://www.gog.com/account/getFilteredProducts?mediaType=1&page=${p}&sortBy=title`, { credentials: 'include' });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return r.text();
+    }, pageNum);
+    const j = JSON.parse(body);
+    totalPages = j.totalPages || 1;
+    for (const product of j.products || []) {
+      if (product?.title) titles.add(normalizeTitle(product.title));
+    }
+    pageNum++;
+  } while (pageNum <= totalPages && pageNum <= 30);
+  return titles;
+}
+
 async function runBatchRedeemLoop() {
+  // Load library once up front. When GOG returns code_used, we cross-check
+  // against the library — "code_used" at GOG is the same response whether
+  // the code actually added the game to your account or was consumed without
+  // crediting (expired / old-account / GOG weirdness). The library is the
+  // ground truth for whether you actually own it.
+  let libraryTitles = new Set();
+  try {
+    batchRedeem.message = 'Loading GOG library…';
+    batchRedeem.updatedAt = datetime();
+    libraryTitles = await fetchGogLibraryTitles(batchRedeem.page);
+    console.log(`[${datetime()}] Batch redeem: library has ${libraryTitles.size} titles`);
+  } catch (e) {
+    console.log(`[${datetime()}] Batch redeem: library fetch failed, can't verify code_used against ownership — ${e.message}`);
+  }
+
   while (batchRedeem && batchRedeem.index < batchRedeem.pending.length && batchRedeem.phase !== 'stopped') {
     const { title, entry } = batchRedeem.pending[batchRedeem.index];
     batchRedeem.currentTitle = title;
@@ -461,8 +495,16 @@ async function runBatchRedeemLoop() {
       entry.status = 'claimed and redeemed (batch)';
       batchRedeem.stats.redeemed++;
     } else if (finalOutcome === 'used') {
-      entry.status = 'claimed and redeemed (verified via GOG)';
-      batchRedeem.stats.used++;
+      // GOG says the code is consumed. Cross-check the library to distinguish
+      // truly-redeemed (game in library) from consumed-but-lost (expired).
+      if (libraryTitles.size > 0 && libraryTitles.has(normalizeTitle(title))) {
+        entry.status = 'claimed and redeemed (verified via GOG)';
+        batchRedeem.stats.used++;
+      } else {
+        entry.status = 'claimed, code consumed but not in library (likely expired)';
+        batchRedeem.stats.notFound++; // count under "invalid" since it's not redeemable
+        console.log(`[${datetime()}] Batch redeem: ${title} — GOG says code_used but title not in library; marking as expired`);
+      }
     } else if (finalOutcome === 'not-found') {
       entry.status = 'claimed, code expired or invalid';
       batchRedeem.stats.notFound++;
