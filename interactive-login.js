@@ -1442,6 +1442,11 @@ const PANEL_HTML = `<!DOCTYPE html>
   .sched-value.muted { color: #8aa0c2; font-style: italic; }
   .sched-count { font-size: 13px; color: #4ecca3; }
   .sched-note { margin-top: 28px; padding-top: 16px; border-top: 1px solid #233454; color: #8aa0c2; font-size: 13px; line-height: 1.6; }
+  .sched-services { list-style: none; margin: 0; padding: 0; font-size: 13px; color: #c8d0dc; line-height: 1.75; }
+  .sched-services li { position: relative; padding-left: 16px; }
+  .sched-services li::before { content: '•'; position: absolute; left: 0; color: #4ecca3; font-weight: 700; }
+  .sched-services b { color: #ffffff; font-weight: 600; }
+  .sched-services .muted { color: #8aa0c2; font-weight: 400; font-size: 12px; }
 
   .logs-header { padding: 10px 20px; border-bottom: 1px solid #0f3460; font-size: 13px; color: #8aa0c2; flex-shrink: 0; display: flex; align-items: center; gap: 12px; }
   .logs-header .logs-count { margin-left: auto; font-size: 12px; }
@@ -2390,19 +2395,56 @@ function renderScheduleTab() {
     const txt = state.loopEnabled ? 'Calculating…' : 'Scheduler disabled';
     parts.push('<div class="sched-row"><div class="sched-label">Next run</div><div class="sched-value muted">' + txt + '</div></div>');
   }
+  // Interval row: pure LOOP description. MS-window info moved into the
+  // Services row below so the two schedules show side-by-side.
   let intervalText;
-  if (state.msScheduleHours > 0) {
-    const start = state.msScheduleStart != null ? state.msScheduleStart : 8;
-    intervalText = 'Daily, anchored to MS window start ' + String(start).padStart(2, '0') + ':00 local time';
-  } else if (state.loopSeconds > 0) {
+  if (state.loopSeconds > 0) {
     const hrs = state.loopSeconds / 3600;
     if (hrs >= 1 && Number.isInteger(hrs)) intervalText = 'Every ' + hrs + ' hour' + (hrs === 1 ? '' : 's');
     else if (state.loopSeconds >= 60) intervalText = 'Every ' + Math.round(state.loopSeconds / 60) + ' minutes';
     else intervalText = 'Every ' + state.loopSeconds + ' seconds';
+  } else if (state.msScheduleHours > 0) {
+    intervalText = 'Anchored to Microsoft Rewards window (see Services below)';
   } else {
-    intervalText = 'Not scheduled — set LOOP or MS_SCHEDULE_HOURS to enable';
+    intervalText = 'Not scheduled — set LOOP or enable Microsoft Rewards';
   }
   parts.push('<div class="sched-row"><div class="sched-label">Interval</div><div class="sched-value">' + intervalText + '</div></div>');
+
+  // Services row: enumerate each active service and the behaviour it'll
+  // exhibit on the next scheduled fire. Inactive services don't appear —
+  // users deactivate to have them stop, so the schedule reflects reality.
+  // microsoft-mobile is linked to microsoft in the UI, so we skip it here.
+  const GAME_IDS = new Set(['prime-gaming', 'epic-games', 'gog', 'steam']);
+  const sites = state.sites || [];
+  const activeGames = sites.filter(s => s.active && GAME_IDS.has(s.id));
+  const hasAE = sites.some(s => s.active && s.id === 'aliexpress');
+  const hasMS = sites.some(s => s.active && s.id === 'microsoft');
+  const activeCount = activeGames.length + (hasAE ? 1 : 0) + (hasMS ? 1 : 0);
+
+  const svcLines = [];
+  if (activeGames.length) {
+    svcLines.push('<b>' + activeGames.map(s => escapeHtml(s.name)).join(', ') + '</b> — claim any available games');
+  }
+  if (hasAE) {
+    svcLines.push('<b>AliExpress</b> — collect daily check-in coins <span class="muted">(no specific window; runs on each scheduled fire)</span>');
+  }
+  if (hasMS) {
+    const w = state.msScheduleHours || 0;
+    const s = state.msScheduleStart || 0;
+    if (w > 0) {
+      const fmt = h => String(h).padStart(2, '0') + ':00';
+      svcLines.push('<b>Microsoft Rewards</b> — waits for <b>' + fmt(s) + ' → ' + fmt((Number(s) + Number(w)) % 24) + '</b> window each run, then searches');
+    } else {
+      svcLines.push('<b>Microsoft Rewards</b> — runs searches immediately (no window)');
+    }
+  }
+  if (svcLines.length) {
+    parts.push('<div class="sched-row"><div class="sched-label">Services (' + activeCount + ' active)</div>' +
+      '<ul class="sched-services">' + svcLines.map(l => '<li>' + l + '</li>').join('') + '</ul></div>');
+  } else {
+    parts.push('<div class="sched-row"><div class="sched-label">Services</div><div class="sched-value muted">None active — enable services in Settings → Services.</div></div>');
+  }
+
   if (state.lastRun) {
     const dur = state.lastRun.durationSec != null ? Math.round(state.lastRun.durationSec / 60) + 'm' : '';
     const statusCol = state.lastRun.status === 'success' ? '#4ecca3' : state.lastRun.status === 'error' ? '#e94560' : '#f0c040';
