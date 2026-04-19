@@ -1611,7 +1611,7 @@ async function pollLogsTab() {
       r.lines.forEach(l => {
         const div = document.createElement('div');
         div.className = 'line ' + l.type;
-        const t = (l.time && l.time.split(' ')[1]) || '';
+        const t = (l.time && String(l.time).slice(11, 19)) || '';
         div.innerHTML = '<span class="time">' + t + '</span>' + escapeHtml(l.text);
         body.appendChild(div);
       });
@@ -1822,7 +1822,7 @@ function render() {
     if (s.status === 'logged_in') statusText = 'Logged in' + (s.user ? ' as ' + s.user : '');
     else if (s.status === 'not_logged_in') statusText = 'Not logged in';
     else if (s.status === 'error') statusText = 'Error checking';
-    if (s.checkedAt) statusText += ' (' + s.checkedAt.split(' ')[1] + ')';
+    if (s.checkedAt) statusText += ' (' + String(s.checkedAt).slice(11, 19) + ')';
     return '<div class="site-card">' +
       '<div class="site-card-header">' +
         '<div class="dot ' + dotClass + '"></div>' +
@@ -1916,7 +1916,7 @@ async function pollLog() {
       r.lines.forEach(l => {
         const div = document.createElement('div');
         div.className = 'line ' + l.type;
-        const timeSpan = '<span class="time">' + (l.time?.split(' ')[1] || '') + '</span>';
+        const timeSpan = '<span class="time">' + (l.time ? String(l.time).slice(11, 19) : '') + '</span>';
         div.innerHTML = timeSpan + escapeHtml(l.text);
         logEl.appendChild(div);
       });
