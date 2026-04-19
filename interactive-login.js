@@ -1336,10 +1336,14 @@ const PANEL_HTML = `<!DOCTYPE html>
   .svc-row { border-top: 1px solid #1a2a48; }
   .svc-row:first-of-type { border-top: none; }
   .svc-head { display: flex; align-items: stretch; gap: 12px; }
-  .svc-expand { flex: 1; display: grid; grid-template-columns: 14px 1fr; grid-template-rows: auto auto; column-gap: 12px; row-gap: 2px; padding: 10px 12px; cursor: pointer; background: transparent; border: none; color: inherit; font-family: inherit; text-align: left; }
-  .svc-expand:hover { background: rgba(255, 255, 255, 0.025); }
+  .svc-expand { flex: 1; display: grid; grid-template-columns: 14px 1fr; grid-template-rows: auto auto; column-gap: 12px; row-gap: 2px; padding: 12px 12px; cursor: pointer; background: transparent; border: none; color: inherit; font-family: inherit; text-align: left; transition: background 0.12s, box-shadow 0.12s; }
+  .svc-row.expandable .svc-expand:hover { background: rgba(78, 204, 163, 0.05); box-shadow: inset 3px 0 0 #4ecca3; }
+  .svc-expand[disabled] { cursor: default; }
   .svc-expand .svc-caret { grid-row: 1 / 3; grid-column: 1; align-self: center; color: #8aa0c2; font-size: 13px; }
-  .svc-expand .svc-name { grid-row: 1; grid-column: 2; font-size: 15px; font-weight: 600; color: #ffffff; letter-spacing: 0.01em; }
+  .svc-expand .svc-name-line { grid-row: 1; grid-column: 2; display: flex; align-items: baseline; gap: 10px; }
+  .svc-expand .svc-name { font-size: 15px; font-weight: 600; color: #ffffff; letter-spacing: 0.01em; }
+  .svc-expand .svc-count { font-size: 11px; color: #6a7e9e; font-weight: 400; letter-spacing: 0.02em; padding: 2px 7px; border: 1px solid #233454; border-radius: 10px; line-height: 1; }
+  .svc-row.expandable .svc-expand:hover .svc-count { color: #4ecca3; border-color: #2a4a3e; }
   .svc-expand .svc-summary { grid-row: 2; grid-column: 2; font-size: 12.5px; color: #8aa0c2; line-height: 1.4; }
   .svc-row.inactive .svc-name { color: #c0c8d8; font-weight: 500; }
   .svc-row.inactive .svc-summary { color: #6a7e9e; }
@@ -1347,6 +1351,7 @@ const PANEL_HTML = `<!DOCTYPE html>
   .svc-active input { width: 14px; height: 14px; cursor: pointer; }
   .svc-body { padding: 6px 16px 16px 38px; display: none; }
   .svc-body.open { display: block; }
+  .svc-body .svc-subtitle { font-size: 12px; color: #8aa0c2; margin: 0 0 12px; font-style: italic; }
   .setting { display: grid; grid-template-columns: minmax(180px, 220px) 1fr auto; gap: 16px; align-items: start; padding: 12px 0; border-bottom: 1px solid #1a2a48; }
   .setting:last-child { border-bottom: none; }
   .setting-label { font-size: 13px; color: #e0e0e0; padding-top: 7px; line-height: 1.4; }
@@ -1681,13 +1686,25 @@ function toggleAvailableDrawer() {
 
 async function enableService(id) {
   localStorage.setItem('drawerSeen', '1');
+  // Honour service → underlying-sites linking (Microsoft desktop + mobile
+  // share a setting). The inverse lookup: if the clicked card is one of a
+  // linked group, enable all siblings too.
+  const sites = new Set([id]);
+  for (const [primary, linked] of Object.entries(LINKED_ACTIVE)) {
+    if (linked.includes(id)) linked.forEach(x => sites.add(x));
+    if (primary === id)       linked.forEach(x => sites.add(x));
+  }
+  const patch = {};
+  for (const s of sites) patch['services.' + s + '.active'] = true;
   try {
-    await api('PUT', '/config', { ['services.' + id + '.active']: true });
+    await api('PUT', '/config', patch);
     showToast('Enabled — checking session…', 'success');
     await refreshState();
-    // Kick off a session probe for the freshly-enabled card so the status
+    // Kick off a session probe for each freshly-enabled card so the status
     // dot flips from gray to red/green without waiting for the next tick.
-    api('POST', '/check', { site: id }).then(refreshState).catch(() => {});
+    for (const s of sites) {
+      api('POST', '/check', { site: s }).then(refreshState).catch(() => {});
+    }
   } catch (e) {
     showToast('Failed to enable: ' + (e && e.message || 'unknown'), 'error');
   }
@@ -1854,14 +1871,35 @@ function serviceSummary(id) {
       return 'Newsletter ' + (v('keepNewsletter') ? 'keep' : 'unsubscribe');
     case 'steam':
       return 'Min rating ' + v('minRating') + ' · Min price $' + v('minPrice');
-    case 'microsoft':
-    case 'microsoft-mobile':
+    case 'microsoft': {
+      const w = draftValue('scheduler.msScheduleHours') || 0;
+      const s = draftValue('scheduler.msScheduleStart') || 0;
+      if (!w) return 'Runs immediately · desktop + mobile sessions';
+      const fmt = h => String(h).padStart(2, '0') + ':00';
+      return 'Window ' + fmt(s) + ' → ' + fmt((Number(s) + Number(w)) % 24) + ' · desktop + mobile';
+    }
     case 'aliexpress':
-      return 'No per-service flags';
+      return 'Daily check-in coins · mobile site';
     default:
       return '';
   }
 }
+
+// Services whose Active toggle controls more than one underlying site.
+// Microsoft desktop + mobile share everything — settings, credentials, claim
+// script (microsoft.js runs both sessions internally). We present them as a
+// single service in the Settings UI but keep two session cards in the
+// Sessions tab for per-session login-state visibility.
+const LINKED_ACTIVE = {
+  'microsoft': ['microsoft', 'microsoft-mobile'],
+};
+
+// Hours dropdown reused by multiple fields.
+const HOURS_OF_DAY = (() => {
+  const out = [];
+  for (let h = 0; h < 24; h++) out.push({ value: h, label: String(h).padStart(2, '0') + ':00' });
+  return out;
+})();
 
 // Settings-tab fields grouped per service so the accordion code can iterate.
 const SERVICE_ROWS = [
@@ -1884,28 +1922,42 @@ const SERVICE_ROWS = [
     ['services.steam.minPrice', 'Minimum original price', { prefix: '$',
       hint: 'Filters out shovelware that was free or near-free before the giveaway.' }],
   ]},
-  { id: 'microsoft',        title: 'Microsoft Rewards',          fields: [] },
-  { id: 'microsoft-mobile', title: 'Microsoft Rewards (Mobile)', fields: [] },
-  { id: 'aliexpress',       title: 'AliExpress',                 fields: [] },
+  // Microsoft Rewards: one row controls both desktop and mobile sessions.
+  // MS_SCHEDULE_* fields moved here from the Scheduler section because they
+  // only affect the Microsoft Rewards run, not the global loop.
+  { id: 'microsoft', title: 'Microsoft Rewards', subtitle: 'Runs both desktop and mobile sessions in one script.', fields: [
+    ['scheduler.msScheduleHours', 'Schedule window width (hours)',
+      { hint: 'Width of the daily Microsoft Rewards window, anchored to the start time. 0 runs immediately without anchoring.' }],
+    ['scheduler.msScheduleStart', 'Schedule window start (local time)',
+      { options: HOURS_OF_DAY }],
+  ]},
+  { id: 'aliexpress', title: 'AliExpress', fields: [] },
 ];
 
 function serviceRow(entry) {
   const active = isServiceActiveForUI(entry.id);
-  const open = active && openServices.has(entry.id) && entry.fields.length > 0;
+  const hasFields = entry.fields.length > 0;
+  const open = active && openServices.has(entry.id) && hasFields;
   const caret = open ? '▾' : '▸';
-  const body = open
-    ? '<div class="svc-body open">' + entry.fields.map(f => fieldRow(f[0], f[1], f[2])).join('') + '</div>'
+  const subtitleHtml = (open && entry.subtitle)
+    ? '<div class="svc-subtitle">' + escapeHtml(entry.subtitle) + '</div>'
     : '';
-  const expandDisabled = (!active || entry.fields.length === 0);
-  // When there are no sub-flags OR the service is inactive, the expand button
-  // still renders but clicking does nothing (cursor:default via a data-attr
-  // the CSS could pick up; simpler: just skip the onclick).
-  const onclick = expandDisabled ? '' : 'onclick="toggleServiceBody(\\'' + entry.id + '\\')"';
-  return '<div class="svc-row' + (active ? '' : ' inactive') + '">' +
+  const body = open
+    ? '<div class="svc-body open">' + subtitleHtml + entry.fields.map(f => fieldRow(f[0], f[1], f[2])).join('') + '</div>'
+    : '';
+  const expandable = active && hasFields;
+  const onclick = expandable ? 'onclick="toggleServiceBody(\\'' + entry.id + '\\')"' : '';
+  const countLabel = hasFields
+    ? '<span class="svc-count">' + entry.fields.length + ' setting' + (entry.fields.length === 1 ? '' : 's') + ' ' + (open ? '▾' : '▸') + '</span>'
+    : '';
+  return '<div class="svc-row' + (active ? '' : ' inactive') + (expandable ? ' expandable' : '') + '">' +
     '<div class="svc-head">' +
-      '<button type="button" class="svc-expand" ' + onclick + '>' +
-        '<span class="svc-caret">' + (expandDisabled ? '·' : caret) + '</span>' +
-        '<span class="svc-name">' + escapeHtml(entry.title) + '</span>' +
+      '<button type="button" class="svc-expand" ' + onclick + (expandable ? '' : ' disabled') + '>' +
+        '<span class="svc-caret">' + (expandable ? caret : '·') + '</span>' +
+        '<span class="svc-name-line">' +
+          '<span class="svc-name">' + escapeHtml(entry.title) + '</span>' +
+          (expandable ? countLabel : '') +
+        '</span>' +
         '<span class="svc-summary">' + escapeHtml(serviceSummary(entry.id)) + '</span>' +
       '</button>' +
       '<label class="svc-active">' +
@@ -1920,19 +1972,6 @@ function serviceRow(entry) {
 function paintSettings() {
   const view = document.getElementById('settingsView');
   if (!view || !settingsData) return;
-
-  const hours = [];
-  for (let h = 0; h < 24; h++) hours.push({ value: h, label: String(h).padStart(2, '0') + ':00' });
-
-  // Computed MS window range hint shown under the scheduler fields.
-  let msRangeHint = '';
-  const msWidth = draftValue('scheduler.msScheduleHours') || 0;
-  const msStart = draftValue('scheduler.msScheduleStart') || 0;
-  if (msWidth > 0) {
-    const end = (Number(msStart) + Number(msWidth)) % 24;
-    const fmt = h => String(h).padStart(2, '0') + ':00';
-    msRangeHint = '<div class="setting-hint" style="margin:8px 0 0 4px">Window resolves to <b>' + fmt(msStart) + ' → ' + fmt(end) + ' local time</b>.</div>';
-  }
 
   let html = '';
   if (currentSettingsSection === 'scheduler') {
@@ -1950,12 +1989,9 @@ function paintSettings() {
     }
     html =
       '<div class="settings-pane-title">Scheduler</div>' +
-      fieldRow('scheduler.loopSeconds',     'Loop interval (seconds)', { hint: 'Time between scheduled runs. 0 disables the loop.' }) +
-      loopHuman +
-      fieldRow('scheduler.msScheduleHours', 'MS window width (hours)',
-        { hint: 'Width of the daily Microsoft Rewards window, anchored to the start time. 0 runs immediately without anchoring.' }) +
-      fieldRow('scheduler.msScheduleStart', 'MS window start (local time)', { options: hours }) +
-      msRangeHint;
+      fieldRow('scheduler.loopSeconds', 'Loop interval (seconds)',
+        { hint: 'Time between scheduled runs. 0 disables the loop. Microsoft Rewards has its own window — set it under Services → Microsoft Rewards.' }) +
+      loopHuman;
   } else if (currentSettingsSection === 'notifications') {
     html =
       '<div class="settings-pane-title">Notifications' +
@@ -2072,25 +2108,28 @@ function setSettingValue(path, value) {
 }
 
 async function setActiveService(id, nextActive) {
-  const path = 'services.' + id + '.active';
+  const sites = LINKED_ACTIVE[id] || [id];
   if (!nextActive) {
-    // Confirm deactivation only when the service has claim history to lose.
+    // Confirm deactivation only when ANY linked site has history to lose.
     let hasHistory = false;
     try {
       const byService = await api('GET', '/stats/by-service');
-      const row = byService.find(r => r.id === id);
-      if (row && ((typeof row.allTime === 'number' && row.allTime > 0) || row.lastClaimAt)) hasHistory = true;
+      hasHistory = sites.some(sid => {
+        const row = byService.find(r => r.id === sid);
+        return row && ((typeof row.allTime === 'number' && row.allTime > 0) || row.lastClaimAt);
+      });
     } catch {}
     if (hasHistory) {
       const label = ({
         'prime-gaming': 'Prime Gaming', 'epic-games': 'Epic Games', 'gog': 'GOG', 'steam': 'Steam',
-        'microsoft': 'Microsoft Rewards', 'microsoft-mobile': 'Microsoft Rewards (Mobile)', 'aliexpress': 'AliExpress',
+        'microsoft': 'Microsoft Rewards', 'aliexpress': 'AliExpress',
       })[id] || id;
       const ok = confirm('Deactivate ' + label + '?\\n\\nClaim history already on record will be preserved, but scheduled runs will skip this service until you reactivate it.');
-      if (!ok) { paintSettings(); return; } // repaint restores the checkbox
+      if (!ok) { paintSettings(); return; }
     }
   }
-  setSettingValue(path, nextActive);
+  for (const siteId of sites) setSettingValue('services.' + siteId + '.active', nextActive);
+  paintSettings();
 }
 
 function revertSettingValue(path) {
