@@ -1202,6 +1202,10 @@ const PANEL_HTML = `<!DOCTYPE html>
   .env-table th { color: #8aa0c2; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 500; font-size: 10px; }
   .env-table tr.cat-row td { padding-top: 14px; padding-bottom: 4px; border-bottom: none; color: #8aa0c2; font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; }
   .env-table tr.cat-row:first-child td { padding-top: 4px; }
+  .env-table tr.group-row td { padding: 8px 8px 3px; border-bottom: none; color: #c0c8d8; font-size: 11px; font-weight: 600; padding-left: 20px; }
+  .env-table tr.data-row td { padding-left: 8px; }
+  .env-table tr.data-row.grouped td:first-child { padding-left: 28px; }
+  .env-note { font-size: 10px; color: #8aa0c2; font-style: italic; margin-top: 3px; line-height: 1.45; max-width: 420px; }
   .env-name { font-family: 'Menlo', 'Consolas', monospace; color: #c0c8d8; white-space: nowrap; }
   .env-value { font-family: 'Menlo', 'Consolas', monospace; color: #4ecca3; word-break: break-all; }
   .env-masked { font-family: 'Menlo', 'Consolas', monospace; color: #f0c040; }
@@ -1620,7 +1624,12 @@ async function loadEnvTable(reveal) {
     const rows = [];
     for (const cat of catOrder) {
       rows.push('<tr class="cat-row"><td colspan="3">' + escapeHtml(catLabel[cat] || cat) + '</td></tr>');
+      let lastGroup = null;
       for (const e of byCat[cat]) {
+        if (e.group && e.group !== lastGroup) {
+          rows.push('<tr class="group-row"><td colspan="3">' + escapeHtml(e.group) + '</td></tr>');
+          lastGroup = e.group;
+        }
         const name = '<span class="env-name">' + escapeHtml(e.env) + '</span>';
         let valueCell;
         if (!e.set) {
@@ -1632,7 +1641,10 @@ async function loadEnvTable(reveal) {
         } else {
           valueCell = '<span class="env-value">' + escapeHtml(e.value || '') + '</span>';
         }
-        rows.push('<tr><td>' + name + '</td><td>' + escapeHtml(e.label) + '</td><td>' + valueCell + '</td></tr>');
+        const labelCell = escapeHtml(e.label) +
+          (e.note ? '<div class="env-note">' + escapeHtml(e.note) + '</div>' : '');
+        const rowClass = 'data-row' + (e.group ? ' grouped' : '');
+        rows.push('<tr class="' + rowClass + '"><td>' + name + '</td><td>' + labelCell + '</td><td>' + valueCell + '</td></tr>');
       }
     }
     mount.innerHTML = '<table class="env-table">' +

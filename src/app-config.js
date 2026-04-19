@@ -169,24 +169,25 @@ export const ENV_DISPLAY = [
   // data paths
   { env: 'BROWSER_DIR',     category: 'paths', label: 'Browser profile dir' },
   { env: 'SCREENSHOTS_DIR', category: 'paths', label: 'Screenshots dir' },
-  // credentials — env-only by design
-  { env: 'EMAIL',          category: 'credentials', label: 'Default email' },
-  { env: 'PASSWORD',       category: 'credentials', label: 'Default password' },
-  { env: 'EG_EMAIL',       category: 'credentials', label: 'Epic Games email' },
-  { env: 'EG_PASSWORD',    category: 'credentials', label: 'Epic Games password' },
-  { env: 'EG_OTPKEY',      category: 'credentials', label: 'Epic Games OTP key' },
-  { env: 'EG_PARENTALPIN', category: 'credentials', label: 'Epic Games parental PIN' },
-  { env: 'PG_EMAIL',       category: 'credentials', label: 'Prime Gaming email' },
-  { env: 'PG_PASSWORD',    category: 'credentials', label: 'Prime Gaming password' },
-  { env: 'PG_OTPKEY',      category: 'credentials', label: 'Prime Gaming OTP key' },
-  { env: 'GOG_EMAIL',      category: 'credentials', label: 'GOG email' },
-  { env: 'GOG_PASSWORD',   category: 'credentials', label: 'GOG password' },
-  { env: 'STEAM_EMAIL',    category: 'credentials', label: 'Steam email' },
-  { env: 'STEAM_PASSWORD', category: 'credentials', label: 'Steam password' },
-  { env: 'MS_EMAIL',       category: 'credentials', label: 'Microsoft email' },
-  { env: 'MS_PASSWORD',    category: 'credentials', label: 'Microsoft password' },
-  { env: 'MS_OTPKEY',      category: 'credentials', label: 'Microsoft OTP key' },
-  { env: 'LG_EMAIL',       category: 'credentials', label: 'Legacy Games email' },
+  // credentials — env-only by design, grouped by service for readability
+  { env: 'EMAIL',          category: 'credentials', group: 'Shared fallbacks', label: 'Default email' },
+  { env: 'PASSWORD',       category: 'credentials', group: 'Shared fallbacks', label: 'Default password' },
+  { env: 'EG_EMAIL',       category: 'credentials', group: 'Epic Games',       label: 'Email' },
+  { env: 'EG_PASSWORD',    category: 'credentials', group: 'Epic Games',       label: 'Password' },
+  { env: 'EG_OTPKEY',      category: 'credentials', group: 'Epic Games',       label: 'OTP key' },
+  { env: 'EG_PARENTALPIN', category: 'credentials', group: 'Epic Games',       label: 'Parental PIN' },
+  { env: 'PG_EMAIL',       category: 'credentials', group: 'Prime Gaming',     label: 'Email' },
+  { env: 'PG_PASSWORD',    category: 'credentials', group: 'Prime Gaming',     label: 'Password' },
+  { env: 'PG_OTPKEY',      category: 'credentials', group: 'Prime Gaming',     label: 'OTP key' },
+  { env: 'GOG_EMAIL',      category: 'credentials', group: 'GOG',              label: 'Email' },
+  { env: 'GOG_PASSWORD',   category: 'credentials', group: 'GOG',              label: 'Password' },
+  { env: 'STEAM_EMAIL',    category: 'credentials', group: 'Steam',            label: 'Email' },
+  { env: 'STEAM_PASSWORD', category: 'credentials', group: 'Steam',            label: 'Password' },
+  { env: 'MS_EMAIL',       category: 'credentials', group: 'Microsoft Rewards',label: 'Email' },
+  { env: 'MS_PASSWORD',    category: 'credentials', group: 'Microsoft Rewards',label: 'Password' },
+  { env: 'MS_OTPKEY',      category: 'credentials', group: 'Microsoft Rewards',label: 'OTP key' },
+  { env: 'LG_EMAIL',       category: 'credentials', group: 'Legacy Games',     label: 'Email',
+    note: 'Only used when PG_REDEEM is enabled and a Prime Gaming code lands on the Legacy Games store. Falls back to PG_EMAIL then EMAIL.' },
   // runtime/debug flags
   { env: 'DEBUG',         category: 'debug', label: 'DEBUG' },
   { env: 'DEBUG_NETWORK', category: 'debug', label: 'DEBUG_NETWORK' },
@@ -232,7 +233,7 @@ export function describeEnv({ reveal = false } = {}) {
       if (!sensitive) value = raw;
       else if (reveal) value = maskLast4(raw);
     }
-    return { env: e.env, label: e.label, category: e.category, set, sensitive, value };
+    return { env: e.env, label: e.label, category: e.category, group: e.group || null, note: e.note || null, set, sensitive, value };
   });
 }
 
