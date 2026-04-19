@@ -1134,8 +1134,7 @@ const PANEL_HTML = `<!DOCTYPE html>
   .chart-y-axis { display: flex; flex-direction: column-reverse; justify-content: space-between; font-size: 10px; color: #8aa0c2; padding-bottom: 20px; min-width: 18px; text-align: right; font-variant-numeric: tabular-nums; }
   .chart-area { flex: 1; min-width: 0; }
   .chart-bars { display: flex; align-items: flex-end; gap: 2px; height: 120px; border-bottom: 1px solid #233454; }
-  .chart-bars .bar-col { flex: 1; display: flex; align-items: flex-end; justify-content: stretch; min-width: 0; }
-  .chart-bars .bar { width: 100%; background: #4ecca3; min-height: 2px; border-radius: 2px 2px 0 0; }
+  .chart-bars .bar { flex: 1; min-width: 0; background: #4ecca3; min-height: 2px; border-radius: 2px 2px 0 0; }
   .chart-bars .bar.zero { background: #4a5a8a; }
   .chart-x-axis { display: flex; gap: 2px; font-size: 10px; color: #8aa0c2; margin-top: 4px; font-variant-numeric: tabular-nums; }
   .chart-x-axis .xtick { flex: 1; text-align: center; white-space: nowrap; min-width: 0; }
@@ -1418,7 +1417,7 @@ function renderDailyChart(daily) {
   const bars = daily.map(d => {
     const pct = (d.count / yMax) * 100;
     const cls = d.count === 0 ? ' zero' : '';
-    return '<div class="bar-col"><div class="bar' + cls + '" style="height:' + pct + '%" title="' + d.date + ': ' + d.count + '"></div></div>';
+    return '<div class="bar' + cls + '" style="height:' + pct + '%" title="' + d.date + ': ' + d.count + '"></div>';
   }).join('');
   // Weekly ticks anchored at today's right edge. Empty xtick slots keep each
   // bar column aligned with its flex cell (preserving 1:1 bar<->label mapping).
