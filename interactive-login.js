@@ -65,35 +65,30 @@ async function login() {
 // dapi/me endpoint. page.request inherits the browser context's cookies, so a
 // valid session authenticates automatically. Returns null on any failure so
 // callers can fall back to a generic label without invalidating the session.
+// Read the signed-in user's display name from Microsoft's ME Control — the
+// account widget rendered across every authenticated MS property. The primary
+// span holds the display name ("Chris Orr"), the secondary span holds the
+// email. Caller has already navigated to rewards.bing.com, so the widget is
+// populated (or will be shortly).
+//
+// (The dapi/me and getuserinfo APIs were tried first — dapi/me 401s without
+// extra auth headers, and getuserinfo is a dashboard blob that doesn't carry
+// user identity. The ME widget has been in place for years across MS, so the
+// DOM path is actually the more stable choice here.)
 async function readMicrosoftRewardsUser(page) {
-  const endpoints = [
-    'https://prod.rewardsplatform.microsoft.com/dapi/me?channel=Rewards&options=600%2C700%2C888',
-    'https://rewards.bing.com/api/getuserinfo',
-    'https://account.microsoft.com/profile/ProfileApi/GetBasicProfileInfo',
-  ];
-  for (const url of endpoints) {
-    try {
-      const res = await page.request.get(url, { timeout: 10000 });
-      const status = res.status();
-      if (!res.ok()) {
-        console.log(`[ms] source=api status=${status} url=${url} value=null`);
-        continue;
-      }
-      const rawText = await res.text();
-      let data = null;
-      try { data = JSON.parse(rawText); }
-      catch { console.log(`[ms] source=api status=${status} url=${url} parse=failed body_snippet=${rawText.slice(0, 200)}`); continue; }
-      const attrs = data && data.response && data.response.userProfile && data.response.userProfile.attributes;
-      const name = (attrs && (attrs.displayName || attrs.email))
-        || (data && (data.displayName || data.firstName || data.DisplayName || data.email || data.Email));
-      console.log(`[ms] source=api status=${status} url=${url} value=${JSON.stringify(name)}`);
-      if (!name) console.log(`[ms] dapi body: ${rawText.slice(0, 500)}`);
-      if (name) return String(name).trim();
-    } catch (e) {
-      console.log(`[ms] source=api url=${url} threw=${e.message}`);
-    }
+  try {
+    await page.waitForSelector('#mectrl_currentAccount_primary', { timeout: 8000 });
+    const name = await page.evaluate(() => {
+      const primary = document.getElementById('mectrl_currentAccount_primary');
+      const secondary = document.getElementById('mectrl_currentAccount_secondary');
+      const p = primary && primary.textContent && primary.textContent.trim();
+      const s = secondary && secondary.textContent && secondary.textContent.trim();
+      return p || s || null;
+    });
+    if (name) return name;
+  } catch (e) {
+    console.log(`[ms] readUser: ${e.message}`);
   }
-  console.log('[ms] source=fallback status=N/A value=null (all endpoints failed)');
   return null;
 }
 
@@ -1117,7 +1112,7 @@ const PANEL_HTML = `<!DOCTYPE html>
   .stats-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 24px; }
   .kpi { background: #16233c; border: 1px solid #233454; border-radius: 8px; padding: 14px 16px; }
   .kpi .kpi-label { font-size: 11px; color: #8aa0c2; text-transform: uppercase; letter-spacing: 0.06em; }
-  .kpi .kpi-value { font-size: 28px; font-weight: 700; color: #fff; margin-top: 6px; line-height: 1.15; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+  .kpi .kpi-value { font-size: 28px; font-weight: 500; color: #fff; margin-top: 6px; line-height: 1.15; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; font-synthesis: none; }
   .kpi .kpi-hint { font-size: 12px; color: #8aa0c2; margin-top: 6px; line-height: 1.4; }
 
   .stats-section { margin-top: 24px; }
@@ -2158,7 +2153,7 @@ const server = http.createServer(async (req, res) => {
 
     if (!isAuthenticated(req)) {
       if (req.method === 'GET' && (req.url === '/' || req.url === '/index.html')) {
-        res.writeHead(200, { 'Content-Type': 'text/html' });
+        res.writeHead(200, { 'Content-Type': 'text/html', 'Cache-Control': 'no-store' });
         res.end(LOGIN_HTML);
         return;
       }
@@ -2167,7 +2162,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'GET' && (req.url === '/' || req.url === '/index.html')) {
-      res.writeHead(200, { 'Content-Type': 'text/html' });
+      res.writeHead(200, { 'Content-Type': 'text/html', 'Cache-Control': 'no-store' });
       res.end(PANEL_HTML);
       return;
     }
