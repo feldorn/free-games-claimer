@@ -262,7 +262,7 @@ Running once daily (`86400`) is recommended.
 ## Control Panel
 
 The control panel at **`http://localhost:7080`** is always running and
-organises everything under five tabs. The header compresses to ~70px once
+organises everything under six tabs. The header compresses to ~70px once
 setup is complete, so the main area is free for whichever tool you're in.
 
 ### Sessions tab (default)
@@ -335,9 +335,20 @@ noVNC visible on Sessions while a run's log streams here.
 
 ### Settings tab
 
-Full in-app configuration. Every field listed in `CONFIG_SCHEMA` (see
-[Settings](#settings-in-app-configuration)) is editable here. Docker env is
-the initial default; in-app saves take priority.
+Full in-app configuration. Four sections (Scheduler, Notifications, Services,
+Advanced) accessible via a left rail so changing a single field takes one
+click, not a scroll past every other section. Every field listed in
+`CONFIG_SCHEMA` is editable here. Docker env is the initial default; in-app
+saves take priority. See [Settings](#settings-in-app-configuration) for how
+precedence, progressive disclosure, and hot-reload work.
+
+### Environment tab
+
+Read-only diagnostic view of every environment variable the app reads,
+grouped by category (Panel infrastructure / Data paths / Credentials /
+Debug). Credentials are hidden behind an explicit "Reveal credentials" click
+with last-4-char masking. Separated from Settings so 40+ rows of
+env reference don't compete with the settings controls.
 
 ### Notification deep-links
 
@@ -367,11 +378,11 @@ relevant action:
 ## Settings (in-app configuration)
 
 The Settings tab ships a single **sticky save footer** (`N unsaved changes ·
-[Discard] · [Save]`) that replaces per-section buttons. All dirty fields
-commit together in one PUT. Each field shows the environment variable it
-overrides in a muted monospace label so you can see the docker-env mapping
-at a glance, and a green dot when the app config is the authoritative
-source.
+[Discard] · [Save]`) that appears only when the form is dirty. All dirty
+fields commit together in one PUT. Each field has an **ⓘ info button** that
+reveals the help text and env-var name on demand, plus a green dot when the
+app config is the authoritative source — no permanent per-row chrome. Revert
+only renders on rows that actually have an override to revert.
 
 ### Precedence
 
@@ -394,18 +405,18 @@ the file directly.
 - **Notifications** — `NOTIFY`, `NOTIFY_TITLE`, `PUBLIC_URL`. A
   **Send test** button fires apprise with the *current* effective config,
   so you can tweak the URL and test without a restart.
-- **Per-service** — grouped sub-headings: Prime Gaming (`PG_REDEEM`,
-  `PG_CLAIMDLC`, `PG_TIMELEFT`), Epic Games (`EG_MOBILE`), GOG
-  (`GOG_NEWSLETTER`), Steam (`STEAM_MIN_RATING`, `STEAM_MIN_PRICE`),
-  AliExpress (`AE_ENABLED` — opt-in daily coin collection; disabled by
-  default).
+- **Services** — one accordion row per service (Prime, Epic, GOG, Steam,
+  Microsoft, Microsoft Mobile, AliExpress). Each row shows the service name,
+  a summary like `Redeem on · DLC off · Timeleft none`, and an Active
+  checkbox. Click the row to expand and edit per-service flags (Prime's
+  `PG_REDEEM` / `PG_CLAIMDLC` / `PG_TIMELEFT`, Epic's `EG_MOBILE`, GOG's
+  `GOG_NEWSLETTER`, Steam's `STEAM_MIN_RATING` / `STEAM_MIN_PRICE`).
+  Deactivating hides the service from the Sessions grid and skips it in
+  claim runs; reactivating requires one click.
 - **Advanced** — `DRYRUN`, `RECORD`, `TIMEOUT`, `LOGIN_TIMEOUT`, `WIDTH`,
   `HEIGHT`.
-- **Environment (read-only)** — every env var the app reads, grouped by
-  Panel / Data paths / Credentials (sub-grouped by service) / Debug. Non-
-  sensitive values render in full; credentials show as `set (hidden)` by
-  default and require an explicit `[Reveal credentials]` click (with
-  confirmation) to show last-4-masked values like `••••••2bM!`.
+(The read-only environment view has moved to its own top-level
+[Environment tab](#environment-tab).)
 
 ### What stays env-only
 
