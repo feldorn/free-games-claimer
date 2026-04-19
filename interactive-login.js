@@ -475,30 +475,36 @@ function activeServices() {
   }).filter(isActive));
 }
 
-// Build the shell command for a claim run from the current active set.
+// Build the shell command for a claim run.
 //   opts.manual=true → drop microsoft.js (it has an internal wait-until-window
 //                      that a "Run Now" press shouldn't trigger).
-// If no services are active, returns null so the caller can report it.
-function buildClaimCommand({ manual = false } = {}) {
-  const active = activeServices();
+//   opts.sites=[...] → explicit list of service IDs to run, bypasses the
+//                      active-set filter and the manual=true MS exclusion.
+//                      Used by per-card "Run" buttons for single-service
+//                      test runs.
+// If nothing matches, returns null so the caller can report it.
+function buildClaimCommand({ manual = false, sites = null } = {}) {
+  const targetSet = sites ? new Set(sites) : activeServices();
   const parts = [];
   for (const entry of CLAIM_SCRIPT_ORDER) {
-    if (manual && entry.id === 'microsoft') continue;
-    // For scripts that cover multiple sites (microsoft → desktop + mobile),
-    // include the script if ANY linked site is active.
+    if (!sites && manual && entry.id === 'microsoft') continue;
+    // microsoft.js covers both desktop + mobile — invoke once if either ID
+    // is in the target set.
     const ids = [entry.id].concat(entry.linkedWith ? [entry.linkedWith] : []);
-    if (ids.some(id => active.has(id))) parts.push('node ' + entry.script);
+    if (ids.some(id => targetSet.has(id))) parts.push('node ' + entry.script);
   }
   return parts.length ? parts.join('; ') : null;
 }
 
 // Env overrides let people keep the original hard-coded pipelines if they
-// want (e.g. adding a custom pre/post step). When set, the env var wins and
-// the active-set filter is bypassed.
-function resolveClaimCommand({ manual }) {
-  const envKey = manual ? 'CLAIM_CMD_MANUAL' : 'CLAIM_CMD';
-  if (process.env[envKey]) return process.env[envKey];
-  return buildClaimCommand({ manual });
+// want (e.g. adding a custom pre/post step). Bypassed when sites is set —
+// per-card Run runs exactly the requested service.
+function resolveClaimCommand({ manual, sites = null }) {
+  if (!sites) {
+    const envKey = manual ? 'CLAIM_CMD_MANUAL' : 'CLAIM_CMD';
+    if (process.env[envKey]) return process.env[envKey];
+  }
+  return buildClaimCommand({ manual, sites });
 }
 
 // Unified profile-busy check. The chromium user-data-dir only supports one
@@ -775,31 +781,39 @@ async function checkAllSites() {
   return results;
 }
 
-function runAllScripts({ source = 'panel' } = {}) {
+function runAllScripts({ source = 'panel', sites = null } = {}) {
   const busy = browserBusy();
   if (busy) return { success: false, error: `Cannot start run — ${busy}.` };
 
   runLog = [];
   runStatus = 'running';
-  runSource = source;
+  runSource = sites ? source + ':' + sites.join('+') : source;
   runStartedAt = Date.now();
-  console.log(`[${datetime()}] Starting all claiming scripts (${source})...`);
+  const label = sites ? sites.join('+') : 'all';
+  console.log(`[${datetime()}] Starting claim scripts (${source}/${label})...`);
 
   // For scheduled runs, set NOWAIT=1 so scripts exit fast on stale sessions
   // instead of waiting for interactive login. We follow up with a session
   // re-check to notify the user about any sites that now need manual action.
   const childEnv = source === 'scheduler'
     ? { ...process.env, NOWAIT: '1' }
-    : process.env;
+    : { ...process.env };
+  // Single-service / explicit Run bypasses the MS internal window so a test
+  // click at 3 PM doesn't sleep 17 hours until the 8 AM window opens.
+  if (sites && (sites.includes('microsoft') || sites.includes('microsoft-mobile'))) {
+    childEnv.MS_SCHEDULE_HOURS = '0';
+  }
 
   // Manual "Run Now" uses the subset without microsoft.js so it actually ends.
   // Both paths build dynamically from the current active-service set so
   // deactivating a site takes effect on the next run without a restart.
-  const cmd = resolveClaimCommand({ manual: source !== 'scheduler' });
+  const cmd = resolveClaimCommand({ manual: source !== 'scheduler', sites });
   if (!cmd) {
-    console.log(`[${datetime()}] Run (${source}): no active services — skipping.`);
+    console.log(`[${datetime()}] Run (${source}): no matching services — skipping.`);
     runStatus = 'idle';
-    return { success: false, error: 'No active services configured. Enable at least one in Settings → Per-service.' };
+    return { success: false, error: sites
+      ? 'Service "' + sites.join(', ') + '" not recognized or inactive.'
+      : 'No active services configured. Enable at least one in Settings → Services.' };
   }
 
   const child = spawn('bash', ['-c', cmd], {
@@ -1515,6 +1529,8 @@ const PANEL_HTML = `<!DOCTYPE html>
   .btn-check:hover:not(:disabled) { background: #4a4a6c; }
   .btn-check-all { background: #3a3a5c; color: #ccc; }
   .btn-check-all:hover:not(:disabled) { background: #4a4a6c; }
+  .btn-run-single { background: #2a4a3e; color: #4ecca3; }
+  .btn-run-single:hover:not(:disabled) { background: #3a5a4e; color: #5edcb3; }
   .btn-run { background: #4ecca3; color: #1a1a2e; font-weight: 600; }
   .btn-run:hover:not(:disabled) { background: #3dbb92; }
   .btn-stop { background: #e94560; color: white; }
@@ -2733,6 +2749,7 @@ function render() {
       '<div class="card-actions">' +
         '<button class="btn btn-login" onclick="launchSite(\\'' + s.id + '\\')" ' + (disabled ? 'disabled' : '') + '>Login</button>' +
         '<button class="btn btn-check" onclick="checkSite(\\'' + s.id + '\\')" ' + (disabled ? 'disabled' : '') + '>Check</button>' +
+        '<button class="btn btn-run-single" onclick="runSite(\\'' + s.id + '\\')" ' + (disabled ? 'disabled' : '') + ' title="Run this service now">Run</button>' +
       '</div>' +
     '</div>';
   }).join('');
@@ -2938,6 +2955,21 @@ async function checkAll() {
   showToast('Checking all sessions...', 'info', 3000);
   try {
     await api('POST', '/check-all');
+  } catch (e) { showToast('Error: ' + e.message, 'error'); }
+  busy = false;
+  await refreshState();
+}
+
+async function runSite(siteId) {
+  const siteName = state.sites.find(s => s.id === siteId)?.name || siteId;
+  busy = true; render();
+  try {
+    const r = await api('POST', '/run-service', { site: siteId });
+    if (r && r.success === false) {
+      showToast(r.error || 'Run failed', 'error', 5000);
+    } else {
+      showToast('Started ' + siteName + ' — open the Logs tab to watch output.', 'success', 4000);
+    }
   } catch (e) { showToast('Error: ' + e.message, 'error'); }
   busy = false;
   await refreshState();
@@ -3153,6 +3185,24 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && req.url === '/api/run-all') {
       const result = runAllScripts({ source: 'panel' });
       sendJson(res, result);
+      return;
+    }
+
+    if (req.method === 'POST' && req.url === '/api/run-service') {
+      try {
+        const body = await parseBody(req);
+        const site = body && body.site;
+        if (!site || typeof site !== 'string') {
+          sendJson(res, { success: false, error: 'site required (e.g. {"site": "microsoft"})' }, 400);
+          return;
+        }
+        // microsoft and microsoft-mobile are both served by microsoft.js;
+        // passing either ID runs the shared script once.
+        const result = runAllScripts({ source: 'panel', sites: [site] });
+        sendJson(res, result);
+      } catch (e) {
+        sendJson(res, { success: false, error: e.message }, 400);
+      }
       return;
     }
 
