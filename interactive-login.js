@@ -1368,10 +1368,10 @@ const PANEL_HTML = `<!DOCTYPE html>
   </div>
   <div class="tab-panel" data-panel="settings">
     <div class="settings-view" id="settingsView">Loading…</div>
-    <div class="settings-footer" id="settingsFooter" style="display:none">
-      <span class="dirty-count" id="dirtyCount">0 unsaved changes</span>
-      <button class="btn btn-cancel" onclick="discardSettings()">Discard</button>
-      <button class="btn btn-run" onclick="saveSettings()" id="btnSaveSettings">Save</button>
+    <div class="settings-footer" id="settingsFooter">
+      <span class="dirty-count" id="dirtyCount">No changes</span>
+      <button class="btn btn-cancel" onclick="discardSettings()" id="btnDiscardSettings" disabled>Discard</button>
+      <button class="btn btn-run" onclick="saveSettings()" id="btnSaveSettings" disabled>Save</button>
     </div>
   </div>
 </div>
@@ -1466,11 +1466,11 @@ function paintSettings() {
       inputHtml = '<select onchange="setSettingValue(\\'' + path + '\\', ' + cast + ')">' + options + '</select>';
     } else if (f.type === 'number') {
       const v = value == null ? '' : value;
-      inputHtml = '<input type="number" value="' + v + '" onchange="setSettingValue(\\'' + path + '\\', this.value === \\'\\' ? null : Number(this.value))">';
+      inputHtml = '<input type="number" value="' + v + '" oninput="setSettingValue(\\'' + path + '\\', this.value === \\'\\' ? null : Number(this.value))">';
     } else if (extra.multiline) {
-      inputHtml = '<textarea onchange="setSettingValue(\\'' + path + '\\', this.value)">' + escapeHtml(value || '') + '</textarea>';
+      inputHtml = '<textarea oninput="setSettingValue(\\'' + path + '\\', this.value)">' + escapeHtml(value || '') + '</textarea>';
     } else {
-      inputHtml = '<input type="text" value="' + escapeHtml(value || '') + '" onchange="setSettingValue(\\'' + path + '\\', this.value)">';
+      inputHtml = '<input type="text" value="' + escapeHtml(value || '') + '" oninput="setSettingValue(\\'' + path + '\\', this.value)">';
     }
 
     return '<div class="setting" data-path="' + path + '">' +
@@ -1532,15 +1532,21 @@ function revertSettingValue(path) {
 }
 
 function updateSettingsFooter() {
-  const footer = document.getElementById('settingsFooter');
   const counter = document.getElementById('dirtyCount');
-  if (!footer || !counter) return;
+  const saveBtn = document.getElementById('btnSaveSettings');
+  const discardBtn = document.getElementById('btnDiscardSettings');
+  if (!counter || !saveBtn || !discardBtn) return;
   const n = Object.keys(settingsDirty).length;
   if (n === 0) {
-    footer.style.display = 'none';
+    counter.textContent = 'No changes';
+    counter.style.color = '#8aa0c2';
+    saveBtn.disabled = true;
+    discardBtn.disabled = true;
   } else {
-    footer.style.display = 'flex';
     counter.textContent = n + ' unsaved change' + (n === 1 ? '' : 's');
+    counter.style.color = '#f0c040';
+    saveBtn.disabled = false;
+    discardBtn.disabled = false;
   }
 }
 
