@@ -3,7 +3,7 @@ import { spawn, execFile } from 'node:child_process';
 import { chromium, devices } from 'patchright';
 import { datetime, notify, jsonDb, normalizeTitle } from './src/util.js';
 import { cfg } from './src/config.js';
-import { describeConfig, patchConfig } from './src/app-config.js';
+import { describeConfig, patchConfig, describeEnv } from './src/app-config.js';
 
 const PANEL_PORT = Number(process.env.PANEL_PORT) || 7080;
 const NOVNC_PORT = process.env.NOVNC_PORT || 6080;
@@ -1143,6 +1143,20 @@ const PANEL_HTML = `<!DOCTYPE html>
 
   .settings-footer { background: #16233c; border-top: 1px solid #233454; padding: 12px 32px; display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
   .settings-footer .dirty-count { color: #f0c040; font-size: 13px; margin-right: auto; font-weight: 500; }
+
+  .settings-subhead { font-size: 12px; color: #c0c8d8; font-weight: 600; margin: 14px 0 4px; padding-top: 10px; border-top: 1px solid #1a2a48; }
+  .settings-subhead:first-of-type { border-top: none; padding-top: 0; margin-top: 0; }
+
+  .env-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 6px; }
+  .env-table th, .env-table td { padding: 5px 8px; text-align: left; border-bottom: 1px solid #1a2a48; vertical-align: top; }
+  .env-table th { color: #8aa0c2; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 500; font-size: 10px; }
+  .env-table tr.cat-row td { padding-top: 14px; padding-bottom: 4px; border-bottom: none; color: #8aa0c2; font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; }
+  .env-table tr.cat-row:first-child td { padding-top: 4px; }
+  .env-name { font-family: 'Menlo', 'Consolas', monospace; color: #c0c8d8; white-space: nowrap; }
+  .env-value { font-family: 'Menlo', 'Consolas', monospace; color: #4ecca3; word-break: break-all; }
+  .env-masked { font-family: 'Menlo', 'Consolas', monospace; color: #f0c040; }
+  .env-unset { color: #666; font-style: italic; }
+  .env-set-badge { color: #4ecca3; font-size: 11px; font-style: italic; }
   body:not([data-tab="sessions"]) .sessions-only { display: none !important; }
 
   .stats-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 24px; }
@@ -1500,9 +1514,98 @@ function paintSettings() {
       fieldRow('notifications.notify', 'Apprise URL(s)', { multiline: true, hint: 'Comma-separate multiple URLs (e.g. pover://token@user,tgram://botid/chatid).' }) +
       fieldRow('notifications.notifyTitle', 'Title prefix') +
       fieldRow('panel.publicUrl', 'Public URL', { hint: 'External URL used in notifications so you can tap straight to the panel.' }) +
+    '</div>' +
+    '<div class="settings-section">' +
+      '<div class="settings-section-head">Per-service</div>' +
+      '<div class="settings-subhead">Prime Gaming</div>' +
+      fieldRow('services.prime-gaming.redeem',       'Redeem keys on external stores') +
+      fieldRow('services.prime-gaming.claimDlc',     'Claim in-game DLC content') +
+      fieldRow('services.prime-gaming.timeLeftDays', 'Skip if more than N days remain to claim', { hint: 'Leave blank to claim everything regardless of how long is left.' }) +
+      '<div class="settings-subhead">Epic Games</div>' +
+      fieldRow('services.epic-games.claimMobile',    'Claim mobile games') +
+      '<div class="settings-subhead">GOG</div>' +
+      fieldRow('services.gog.keepNewsletter',        'Keep newsletter subscription after claiming') +
+      '<div class="settings-subhead">Steam</div>' +
+      fieldRow('services.steam.minRating',           'Minimum review rating (1–9)', { hint: '6 = Mostly Positive; 7 = Very Positive; 8 = Overwhelmingly Positive.' }) +
+      fieldRow('services.steam.minPrice',            'Minimum original price (USD)', { hint: 'Filters out shovelware that was free or near-free before the giveaway.' }) +
+    '</div>' +
+    '<div class="settings-section">' +
+      '<div class="settings-section-head">Advanced</div>' +
+      fieldRow('advanced.dryrun',          'Dry run — skip actual claiming') +
+      fieldRow('advanced.record',          'Record HAR + video for debugging') +
+      fieldRow('advanced.timeoutSec',      'Default timeout (seconds)') +
+      fieldRow('advanced.loginTimeoutSec', 'Login timeout (seconds)') +
+      fieldRow('advanced.width',           'Browser viewport width') +
+      fieldRow('advanced.height',          'Browser viewport height') +
+    '</div>' +
+    '<div class="settings-section">' +
+      '<div class="settings-section-head">Environment (read-only)' +
+        '<span class="spacer"></span>' +
+        '<button class="btn btn-check-all" id="btnRevealCreds" onclick="toggleRevealEnv()">Reveal credentials</button>' +
+      '</div>' +
+      '<div id="envView">Loading…</div>' +
     '</div>';
 
   updateSettingsFooter();
+  loadEnvTable(envRevealed);
+}
+
+// Environment (read-only) table. Credentials are hidden by default and need
+// an explicit reveal click, which shows only the last 4 chars.
+let envRevealed = false;
+async function loadEnvTable(reveal) {
+  const mount = document.getElementById('envView');
+  if (!mount) return;
+  try {
+    const r = await api('GET', '/env' + (reveal ? '?reveal=1' : ''));
+    const entries = (r && r.env) || [];
+    // Group by category, preserving declaration order within each category.
+    const catOrder = [];
+    const byCat = {};
+    for (const e of entries) {
+      if (!byCat[e.category]) { byCat[e.category] = []; catOrder.push(e.category); }
+      byCat[e.category].push(e);
+    }
+    const catLabel = { panel: 'Panel infrastructure', paths: 'Data paths', credentials: 'Credentials', debug: 'Debug / runtime' };
+    const rows = [];
+    for (const cat of catOrder) {
+      rows.push('<tr class="cat-row"><td colspan="3">' + escapeHtml(catLabel[cat] || cat) + '</td></tr>');
+      for (const e of byCat[cat]) {
+        const name = '<span class="env-name">' + escapeHtml(e.env) + '</span>';
+        let valueCell;
+        if (!e.set) {
+          valueCell = '<span class="env-unset">unset</span>';
+        } else if (e.sensitive && !reveal) {
+          valueCell = '<span class="env-set-badge">set (hidden)</span>';
+        } else if (e.sensitive && reveal) {
+          valueCell = '<span class="env-masked">' + escapeHtml(e.value || '') + '</span>';
+        } else {
+          valueCell = '<span class="env-value">' + escapeHtml(e.value || '') + '</span>';
+        }
+        rows.push('<tr><td>' + name + '</td><td>' + escapeHtml(e.label) + '</td><td>' + valueCell + '</td></tr>');
+      }
+    }
+    mount.innerHTML = '<table class="env-table">' +
+      '<thead><tr><th>Variable</th><th>Purpose</th><th>Value</th></tr></thead>' +
+      '<tbody>' + rows.join('') + '</tbody>' +
+    '</table>';
+  } catch (e) {
+    mount.innerHTML = '<div class="stats-empty">Failed to load env: ' + escapeHtml(e.message) + '</div>';
+  }
+}
+
+async function toggleRevealEnv() {
+  const btn = document.getElementById('btnRevealCreds');
+  if (!envRevealed) {
+    const ok = confirm('Reveal credentials? Values will display as ••••••XXXX with the last 4 characters visible. Avoid doing this on a shared screen.');
+    if (!ok) return;
+    envRevealed = true;
+    if (btn) btn.textContent = 'Hide credentials';
+  } else {
+    envRevealed = false;
+    if (btn) btn.textContent = 'Reveal credentials';
+  }
+  await loadEnvTable(envRevealed);
 }
 
 function setSettingValue(path, value) {
@@ -2486,6 +2589,12 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === 'GET' && req.url === '/api/config') {
       sendJson(res, describeConfig());
+      return;
+    }
+    if (req.method === 'GET' && req.url.startsWith('/api/env')) {
+      const url = new URL(req.url, `http://${req.headers.host}`);
+      const reveal = url.searchParams.get('reveal') === '1';
+      sendJson(res, { env: describeEnv({ reveal }) });
       return;
     }
     if (req.method === 'PUT' && req.url === '/api/config') {

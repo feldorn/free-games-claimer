@@ -153,6 +153,75 @@ export function describeConfig() {
 }
 
 // Apply { path: value } patches. value === null deletes the override.
+// Every env var the app reads that isn't already exposed as a writable
+// setting in CONFIG_SCHEMA. Shown read-only in the Environment section of
+// the Settings tab so the user can see what docker is handing the app
+// without logging into the container. Anything whose name matches
+// SENSITIVE_PATTERN gets credential-masked treatment (hidden by default,
+// last-4 chars only when explicitly revealed).
+export const ENV_DISPLAY = [
+  // panel infrastructure (env-only — changing any of these needs a restart)
+  { env: 'PANEL_PORT',     category: 'panel',  label: 'Panel port' },
+  { env: 'NOVNC_PORT',     category: 'panel',  label: 'noVNC port' },
+  { env: 'BASE_PATH',      category: 'panel',  label: 'Base path (reverse-proxy subfolder)' },
+  { env: 'PANEL_PASSWORD', category: 'panel',  label: 'Panel password' },
+  { env: 'VNC_PASSWORD',   category: 'panel',  label: 'VNC password' },
+  // data paths
+  { env: 'BROWSER_DIR',     category: 'paths', label: 'Browser profile dir' },
+  { env: 'SCREENSHOTS_DIR', category: 'paths', label: 'Screenshots dir' },
+  // credentials — env-only by design
+  { env: 'EMAIL',          category: 'credentials', label: 'Default email' },
+  { env: 'PASSWORD',       category: 'credentials', label: 'Default password' },
+  { env: 'EG_EMAIL',       category: 'credentials', label: 'Epic Games email' },
+  { env: 'EG_PASSWORD',    category: 'credentials', label: 'Epic Games password' },
+  { env: 'EG_OTPKEY',      category: 'credentials', label: 'Epic Games OTP key' },
+  { env: 'EG_PARENTALPIN', category: 'credentials', label: 'Epic Games parental PIN' },
+  { env: 'PG_EMAIL',       category: 'credentials', label: 'Prime Gaming email' },
+  { env: 'PG_PASSWORD',    category: 'credentials', label: 'Prime Gaming password' },
+  { env: 'PG_OTPKEY',      category: 'credentials', label: 'Prime Gaming OTP key' },
+  { env: 'GOG_EMAIL',      category: 'credentials', label: 'GOG email' },
+  { env: 'GOG_PASSWORD',   category: 'credentials', label: 'GOG password' },
+  { env: 'STEAM_EMAIL',    category: 'credentials', label: 'Steam email' },
+  { env: 'STEAM_PASSWORD', category: 'credentials', label: 'Steam password' },
+  { env: 'MS_EMAIL',       category: 'credentials', label: 'Microsoft email' },
+  { env: 'MS_PASSWORD',    category: 'credentials', label: 'Microsoft password' },
+  { env: 'MS_OTPKEY',      category: 'credentials', label: 'Microsoft OTP key' },
+  { env: 'LG_EMAIL',       category: 'credentials', label: 'Legacy Games email' },
+  // runtime/debug flags
+  { env: 'DEBUG',         category: 'debug', label: 'DEBUG' },
+  { env: 'DEBUG_NETWORK', category: 'debug', label: 'DEBUG_NETWORK' },
+  { env: 'TIME',          category: 'debug', label: 'TIME' },
+  { env: 'INTERACTIVE',   category: 'debug', label: 'INTERACTIVE' },
+  { env: 'NOWAIT',        category: 'debug', label: 'NOWAIT' },
+  { env: 'SHOW',          category: 'debug', label: 'SHOW' },
+  { env: 'LOGIN_MODE',    category: 'debug', label: 'LOGIN_MODE (panel-only)' },
+];
+
+const SENSITIVE_PATTERN = /password|otpkey|token|secret|key$/i;
+
+function maskLast4(s) {
+  if (typeof s !== 'string' || !s) return '';
+  if (s.length <= 4) return '•'.repeat(s.length);
+  return '••••••' + s.slice(-4);
+}
+
+// Produce the list shown in the Environment section. `reveal=true` returns
+// last-4-masked values for sensitive vars; otherwise only `{set: true|false}`
+// is exposed for sensitive ones.
+export function describeEnv({ reveal = false } = {}) {
+  return ENV_DISPLAY.map(e => {
+    const raw = process.env[e.env];
+    const set = raw !== undefined && raw !== '';
+    const sensitive = SENSITIVE_PATTERN.test(e.env);
+    let value = null;
+    if (set) {
+      if (!sensitive) value = raw;
+      else if (reveal) value = maskLast4(raw);
+    }
+    return { env: e.env, label: e.label, category: e.category, set, sensitive, value };
+  });
+}
+
 export function patchConfig(patches) {
   const app = readConfigFile();
   const errors = [];
