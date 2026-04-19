@@ -797,6 +797,9 @@ function getState() {
     runLogLength: runLog.length,
     nextScheduledRun: nextScheduledRun ? datetime(nextScheduledRun) : null,
     loopEnabled: LOOP_SECONDS > 0 || MS_SCHEDULE_HOURS > 0,
+    loopSeconds: LOOP_SECONDS,
+    msScheduleHours: MS_SCHEDULE_HOURS,
+    msScheduleStart: MS_SCHEDULE_START,
     batchRedeem: batchRedeem ? {
       phase: batchRedeem.phase,
       message: batchRedeem.message,
@@ -853,10 +856,28 @@ const PANEL_HTML = `<!DOCTYPE html>
   .tab-panel.stub h2 { color: #e0e0e0; margin-bottom: 10px; font-size: 18px; }
   .tab-panel.stub p { font-size: 14px; max-width: 480px; margin: 0 auto; }
   body[data-tab="sessions"] .tab-panel[data-panel="sessions"] { display: flex; flex: 1; flex-direction: column; }
-  body[data-tab="stats"] .tab-panel[data-panel="stats"],
-  body[data-tab="schedule"] .tab-panel[data-panel="schedule"],
-  body[data-tab="logs"] .tab-panel[data-panel="logs"] { display: block; }
+  body[data-tab="stats"] .tab-panel[data-panel="stats"] { display: block; }
+  body[data-tab="schedule"] .tab-panel[data-panel="schedule"] { display: block; overflow-y: auto; padding: 28px 32px; }
+  body[data-tab="logs"] .tab-panel[data-panel="logs"] { display: flex; flex: 1; flex-direction: column; }
   body:not([data-tab="sessions"]) .sessions-only { display: none !important; }
+
+  .sched-row { display: flex; gap: 24px; margin-bottom: 22px; align-items: baseline; }
+  .sched-label { font-size: 11px; color: #8aa0c2; text-transform: uppercase; letter-spacing: 0.06em; min-width: 110px; flex-shrink: 0; padding-top: 4px; }
+  .sched-value { font-size: 15px; color: #e0e0e0; line-height: 1.5; }
+  .sched-value.big { font-size: 26px; font-weight: 600; color: #fff; display: block; margin-bottom: 2px; }
+  .sched-value.muted { color: #8aa0c2; font-style: italic; }
+  .sched-count { font-size: 13px; color: #4ecca3; }
+  .sched-note { margin-top: 28px; padding-top: 16px; border-top: 1px solid #233454; color: #8aa0c2; font-size: 13px; line-height: 1.6; }
+
+  .logs-header { padding: 10px 20px; border-bottom: 1px solid #0f3460; font-size: 13px; color: #8aa0c2; flex-shrink: 0; display: flex; align-items: center; gap: 12px; }
+  .logs-header .logs-count { margin-left: auto; font-size: 12px; }
+  .logs-body { flex: 1; background: #0d0d1a; font-family: 'Menlo', 'Consolas', monospace; font-size: 13px; padding: 12px 16px; overflow-y: auto; white-space: pre-wrap; word-break: break-word; }
+  .logs-body .line { padding: 1px 0; }
+  .logs-body .line.stderr { color: #e94560; }
+  .logs-body .line.stdout { color: #c0c0d0; }
+  .logs-body .line.system { color: #f0c040; font-weight: 600; }
+  .logs-body .time { color: #555; margin-right: 8px; }
+  .logs-empty { color: #8aa0c2; font-style: italic; padding: 40px; text-align: center; }
 
   .steps { display: flex; gap: 4px; align-items: center; font-size: 12px; color: #888; margin-bottom: 10px; flex-wrap: wrap; }
   .step { padding: 4px 10px; border-radius: 12px; background: #0f3460; white-space: nowrap; }
@@ -996,13 +1017,17 @@ const PANEL_HTML = `<!DOCTYPE html>
     <h2>Stats</h2>
     <p>Games claimed this week and all-time, MS Rewards balance and points claimable today, per-service breakdown, 30-day chart — coming soon.</p>
   </div>
-  <div class="tab-panel stub" data-panel="schedule">
-    <h2>Schedule</h2>
-    <p>Next run countdown, cron schedule, pause/resume, and the last 10 runs — coming soon.</p>
+  <div class="tab-panel" data-panel="schedule">
+    <div id="schedView"></div>
   </div>
-  <div class="tab-panel stub" data-panel="logs">
-    <h2>Logs</h2>
-    <p>Recent claim activity and errors, filterable by service — coming soon.</p>
+  <div class="tab-panel" data-panel="logs">
+    <div class="logs-header">
+      <span>Run output from claim scripts</span>
+      <span class="logs-count" id="logsCount"></span>
+    </div>
+    <div class="logs-body" id="logsBody">
+      <div class="logs-empty">No run activity yet. The log will populate during a manual Run Now or scheduled run.</div>
+    </div>
   </div>
 </div>
 <script>
@@ -1024,6 +1049,113 @@ function switchTab(tab) {
   document.querySelectorAll('.tab-nav .tab').forEach(t => {
     t.classList.toggle('active', t.dataset.tab === tab);
   });
+  if (tab === 'logs') startLogsTabPoll();
+  else stopLogsTabPoll();
+  if (tab === 'schedule') renderScheduleTab();
+}
+
+function renderScheduleTab() {
+  const view = document.getElementById('schedView');
+  if (!view) return;
+  const parts = [];
+  if (state.nextScheduledRun) {
+    parts.push(
+      '<div class="sched-row">' +
+        '<div class="sched-label">Next run</div>' +
+        '<div><span class="sched-value big">' + state.nextScheduledRun + '</span>' +
+        '<span class="sched-count" id="schedCountdown"></span></div>' +
+      '</div>'
+    );
+  } else {
+    const txt = state.loopEnabled ? 'Calculating…' : 'Scheduler disabled';
+    parts.push('<div class="sched-row"><div class="sched-label">Next run</div><div class="sched-value muted">' + txt + '</div></div>');
+  }
+  let intervalText;
+  if (state.msScheduleHours > 0) {
+    const start = state.msScheduleStart != null ? state.msScheduleStart : 8;
+    intervalText = 'Daily, anchored to MS window start ' + String(start).padStart(2, '0') + ':00 local time';
+  } else if (state.loopSeconds > 0) {
+    const hrs = state.loopSeconds / 3600;
+    if (hrs >= 1 && Number.isInteger(hrs)) intervalText = 'Every ' + hrs + ' hour' + (hrs === 1 ? '' : 's');
+    else if (state.loopSeconds >= 60) intervalText = 'Every ' + Math.round(state.loopSeconds / 60) + ' minutes';
+    else intervalText = 'Every ' + state.loopSeconds + ' seconds';
+  } else {
+    intervalText = 'Not scheduled — set LOOP or MS_SCHEDULE_HOURS to enable';
+  }
+  parts.push('<div class="sched-row"><div class="sched-label">Interval</div><div class="sched-value">' + intervalText + '</div></div>');
+  if (state.lastRun) {
+    const dur = state.lastRun.durationSec != null ? Math.round(state.lastRun.durationSec / 60) + 'm' : '';
+    const statusCol = state.lastRun.status === 'success' ? '#4ecca3' : state.lastRun.status === 'error' ? '#e94560' : '#f0c040';
+    parts.push(
+      '<div class="sched-row"><div class="sched-label">Last run</div>' +
+      '<div class="sched-value">' + state.lastRun.at + ' (' + state.lastRun.source + ') — ' +
+        '<span style="color:' + statusCol + '">' + state.lastRun.status + '</span>' +
+        (dur ? ' · ' + dur : '') +
+      '</div></div>'
+    );
+  } else {
+    parts.push('<div class="sched-row"><div class="sched-label">Last run</div><div class="sched-value muted">None yet</div></div>');
+  }
+  parts.push('<div class="sched-note">Pause/resume toggle and per-run history are on the way. Trigger an immediate claim from the Sessions tab via <b>Run Now</b>.</div>');
+  view.innerHTML = parts.join('');
+  updateScheduleCountdown();
+}
+
+function updateScheduleCountdown() {
+  const el = document.getElementById('schedCountdown');
+  if (!el || !state.nextScheduledRun) return;
+  const target = new Date(state.nextScheduledRun.replace(' ', 'T')).getTime();
+  if (!Number.isFinite(target)) return;
+  const delta = target - Date.now();
+  if (delta <= 0) { el.textContent = ' · due now'; return; }
+  const mins = Math.floor(delta / 60000);
+  const hrs = Math.floor(mins / 60);
+  const days = Math.floor(hrs / 24);
+  let txt;
+  if (days > 0) txt = 'in ' + days + 'd ' + (hrs % 24) + 'h';
+  else if (hrs > 0) txt = 'in ' + hrs + 'h ' + (mins % 60) + 'm';
+  else txt = 'in ' + Math.max(mins, 1) + 'm';
+  el.textContent = ' · ' + txt;
+}
+setInterval(updateScheduleCountdown, 30000);
+
+let logsTabOffset = 0;
+let logsTabPollTimer = null;
+function startLogsTabPoll() {
+  if (logsTabPollTimer) return;
+  logsTabOffset = 0;
+  const body = document.getElementById('logsBody');
+  if (body) body.innerHTML = '<div class="logs-empty">Loading…</div>';
+  pollLogsTab();
+}
+function stopLogsTabPoll() {
+  if (logsTabPollTimer) { clearTimeout(logsTabPollTimer); logsTabPollTimer = null; }
+}
+async function pollLogsTab() {
+  if (document.body.dataset.tab !== 'logs') { stopLogsTabPoll(); return; }
+  let interval = 3000;
+  try {
+    const r = await api('GET', '/run-log?since=' + logsTabOffset);
+    const body = document.getElementById('logsBody');
+    const count = document.getElementById('logsCount');
+    if (body && r.lines && r.lines.length) {
+      if (logsTabOffset === 0) body.innerHTML = '';
+      r.lines.forEach(l => {
+        const div = document.createElement('div');
+        div.className = 'line ' + l.type;
+        const t = (l.time && l.time.split(' ')[1]) || '';
+        div.innerHTML = '<span class="time">' + t + '</span>' + escapeHtml(l.text);
+        body.appendChild(div);
+      });
+      body.scrollTop = body.scrollHeight;
+    } else if (body && logsTabOffset === 0 && (!r.lines || !r.lines.length)) {
+      body.innerHTML = '<div class="logs-empty">No run activity yet. The log will populate during a manual Run Now or scheduled run.</div>';
+    }
+    if (typeof r.total === 'number') logsTabOffset = r.total;
+    if (count) count.textContent = logsTabOffset + ' line' + (logsTabOffset === 1 ? '' : 's');
+    if (r && r.status === 'running') interval = 1000;
+  } catch {}
+  logsTabPollTimer = setTimeout(pollLogsTab, interval);
 }
 
 async function refreshPendingGogCount() {
@@ -1069,6 +1201,8 @@ function render() {
   const btnRunAll = document.getElementById('btnRunAll');
   const btnCheckAll = document.getElementById('btnCheckAll');
   const currentStep = getStep();
+
+  if (document.body.dataset.tab === 'schedule') renderScheduleTab();
 
   // Batch-redeem panel: shows when there are pending GOG codes OR a batch is active.
   const br = state.batchRedeem;
