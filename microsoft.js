@@ -16,7 +16,15 @@ log.section('Microsoft Rewards');
 log.status('Time', datetime());
 log.status('MS email', cfg.ms_email || '(none — will use EMAIL or prompt)');
 
-if (cfg.ms_schedule_hours > 0) {
+// MS_SKIP_WINDOW=1 bypasses the internal wait-until-window sleep regardless
+// of the merged cfg value. The panel's per-card "Run" button sets this so a
+// manual test click doesn't have to wait 18 hours for the next MS window.
+const skipWindow = process.env.MS_SKIP_WINDOW === '1';
+if (cfg.ms_schedule_hours > 0 && skipWindow) {
+  log.status('Schedule window', 'skipped (MS_SKIP_WINDOW=1) — running now');
+}
+
+if (cfg.ms_schedule_hours > 0 && !skipWindow) {
   // Intentionally delay BEFORE fetching search terms — we want current trending
   // queries at actual run time, not stale ones from when the loop fired hours earlier.
   //

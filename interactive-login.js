@@ -800,8 +800,12 @@ function runAllScripts({ source = 'panel', sites = null } = {}) {
     : { ...process.env };
   // Single-service / explicit Run bypasses the MS internal window so a test
   // click at 3 PM doesn't sleep 17 hours until the 8 AM window opens.
+  // Can't just set MS_SCHEDULE_HOURS=0 here — the in-app config layer
+  // (data/config.json) overrides env, so if the user has saved a value via
+  // Settings the env change is ignored. MS_SKIP_WINDOW is read by
+  // microsoft.js directly, outside the cfg-merge path, so it always wins.
   if (sites && (sites.includes('microsoft') || sites.includes('microsoft-mobile'))) {
-    childEnv.MS_SCHEDULE_HOURS = '0';
+    childEnv.MS_SKIP_WINDOW = '1';
   }
 
   // Manual "Run Now" uses the subset without microsoft.js so it actually ends.
