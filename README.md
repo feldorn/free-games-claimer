@@ -36,6 +36,10 @@ Major refactor of the control panel and configuration story.
 
 Existing users: pull the new image, open the **Settings** tab, and everything you had set via docker env is already there as a fallback. Edit anything you want to change at runtime — the docker-compose file only needs to change for things that stay env-only (ports, `PANEL_PASSWORD`, paths, credentials).
 
+### Added in 2.0.1
+
+- **AliExpress** restored as an opt-in service (previously deleted in the fork's 2026-03-25 cleanup). Disabled by default; enable in **Settings → Per-service → AliExpress**. Collects the daily check-in coins via mobile-site emulation and surfaces a per-service row in the Stats tab with its coin history. Needs `AE_EMAIL`/`AE_PASSWORD` only if you want unattended re-login — otherwise click Login on the AliExpress card and cookies persist.
+
 ---
 
 ## Quick Start (Docker)
@@ -264,8 +268,8 @@ setup is complete, so the main area is free for whichever tool you're in.
 ### Sessions tab (default)
 
 Responsive grid of cards — one per site (Prime, Epic, GOG, Steam, MS Rewards,
-MS Mobile). Grid layout auto-adapts between 1/2/3/4 columns depending on
-viewport width.
+MS Mobile, AliExpress). Grid layout auto-adapts between 1/2/3/4 columns
+depending on viewport width.
 
 - **Status dot** (green / red / gray) backed by real URL-based auth checks
   (`/account` redirects, ME Control DOM presence, etc.), not cached UI.
@@ -392,7 +396,9 @@ the file directly.
   so you can tweak the URL and test without a restart.
 - **Per-service** — grouped sub-headings: Prime Gaming (`PG_REDEEM`,
   `PG_CLAIMDLC`, `PG_TIMELEFT`), Epic Games (`EG_MOBILE`), GOG
-  (`GOG_NEWSLETTER`), Steam (`STEAM_MIN_RATING`, `STEAM_MIN_PRICE`).
+  (`GOG_NEWSLETTER`), Steam (`STEAM_MIN_RATING`, `STEAM_MIN_PRICE`),
+  AliExpress (`AE_ENABLED` — opt-in daily coin collection; disabled by
+  default).
 - **Advanced** — `DRYRUN`, `RECORD`, `TIMEOUT`, `LOGIN_TIMEOUT`, `WIDTH`,
   `HEIGHT`.
 - **Environment (read-only)** — every env var the app reads, grouped by
