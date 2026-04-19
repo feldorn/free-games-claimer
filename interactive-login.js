@@ -61,6 +61,29 @@ async function login() {
 }
 </script></body></html>`;
 
+// Read the signed-in Microsoft Rewards user via the Rewards dashboard's own
+// dapi/me endpoint. page.request inherits the browser context's cookies, so a
+// valid session authenticates automatically. Returns null on any failure so
+// callers can fall back to a generic label without invalidating the session.
+async function readMicrosoftRewardsUser(page) {
+  const endpoints = [
+    'https://prod.rewardsplatform.microsoft.com/dapi/me?channel=Rewards&options=600%2C700%2C888',
+    'https://account.microsoft.com/profile/ProfileApi/GetBasicProfileInfo',
+  ];
+  for (const url of endpoints) {
+    try {
+      const res = await page.request.get(url, { timeout: 10000 });
+      if (!res.ok()) continue;
+      const data = await res.json();
+      const attrs = data && data.response && data.response.userProfile && data.response.userProfile.attributes;
+      const name = (attrs && (attrs.displayName || attrs.email))
+        || (data && (data.displayName || data.firstName || data.DisplayName || data.email || data.Email));
+      if (name) return String(name).trim();
+    } catch { /* try next endpoint */ }
+  }
+  return null;
+}
+
 const SITES = {
   'prime-gaming': {
     name: 'Prime Gaming',
@@ -219,7 +242,8 @@ const SITES = {
         if (url.includes('login.live.com') || url.includes('login.microsoftonline.com') || url.includes('account.microsoft.com') || url.includes('/welcome')) {
           return { loggedIn: false };
         }
-        return { loggedIn: true, user: 'Microsoft account' };
+        const user = await readMicrosoftRewardsUser(page);
+        return { loggedIn: true, user: user || 'Microsoft account' };
       } catch {
         return { loggedIn: false };
       }
@@ -238,7 +262,10 @@ const SITES = {
         if (url.includes('login.live.com') || url.includes('login.microsoftonline.com') || url.includes('account.microsoft.com') || url.includes('/welcome')) {
           return { loggedIn: false };
         }
-        return { loggedIn: true, user: 'Microsoft account (mobile)' };
+        // Same account as the desktop entry; the card title already says "(Mobile)",
+        // so don't append it here too.
+        const user = await readMicrosoftRewardsUser(page);
+        return { loggedIn: true, user: user || 'Microsoft account' };
       } catch {
         return { loggedIn: false };
       }
@@ -1077,7 +1104,7 @@ const PANEL_HTML = `<!DOCTYPE html>
   .stats-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 24px; }
   .kpi { background: #16233c; border: 1px solid #233454; border-radius: 8px; padding: 14px 16px; }
   .kpi .kpi-label { font-size: 11px; color: #8aa0c2; text-transform: uppercase; letter-spacing: 0.06em; }
-  .kpi .kpi-value { font-size: 28px; font-weight: 600; color: #fff; margin-top: 6px; line-height: 1.15; }
+  .kpi .kpi-value { font-size: 28px; font-weight: 700; color: #fff; margin-top: 6px; line-height: 1.15; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
   .kpi .kpi-hint { font-size: 12px; color: #8aa0c2; margin-top: 6px; line-height: 1.4; }
 
   .stats-section { margin-top: 24px; }
@@ -1318,17 +1345,31 @@ function relativeTime(dtStr) {
   const d = new Date(String(dtStr).replace(' ', 'T'));
   if (!Number.isFinite(d.getTime())) return dtStr;
   const diff = Date.now() - d.getTime();
-  if (diff < 0) return 'just now';
-  const mins = Math.floor(diff / 60000);
+  const abs = Math.abs(diff);
+  const mins = Math.floor(abs / 60000);
   if (mins < 1) return 'just now';
-  if (mins < 60) return mins + 'm ago';
+  const prefix = diff < 0 ? 'in ' : '';
+  const suffix = diff < 0 ? ''   : ' ago';
+  if (mins < 60) {
+    if (prefix && mins >= 2) {
+      // "in 1h 15m" reads better than "in 75m" — combine hours + minutes for near-future.
+      return prefix + mins + 'm' + suffix;
+    }
+    return prefix + mins + 'm' + suffix;
+  }
   const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return hrs + 'h ago';
+  if (hrs < 24) {
+    if (prefix) {
+      const rem = mins - hrs * 60;
+      return prefix + hrs + 'h' + (rem ? ' ' + rem + 'm' : '') + suffix;
+    }
+    return hrs + 'h ago';
+  }
   const days = Math.floor(hrs / 24);
-  if (days < 30) return days + 'd ago';
+  if (days < 30) return prefix + days + 'd' + suffix;
   const months = Math.floor(days / 30);
-  if (months < 12) return months + 'mo ago';
-  return Math.floor(months / 12) + 'y ago';
+  if (months < 12) return prefix + months + 'mo' + suffix;
+  return prefix + Math.floor(months / 12) + 'y' + suffix;
 }
 
 // Unified timestamp formatter.
@@ -1720,10 +1761,10 @@ function render() {
   // Status strip — one line that rolls up the old green banner + "Next run" line.
   const totalCount = state.sites.length;
   const secondaryParts = [];
-  if (!isRunning && state.nextScheduledRun) secondaryParts.push('Next run: ' + state.nextScheduledRun);
+  if (!isRunning && state.nextScheduledRun) secondaryParts.push('Next run ' + formatTimestamp(state.nextScheduledRun, 'relative'));
   if (state.lastRun) {
     const dur = state.lastRun.durationSec != null ? Math.round(state.lastRun.durationSec / 60) + 'm' : '';
-    secondaryParts.push('Last run: ' + state.lastRun.at + ' (' + state.lastRun.source + ', ' + state.lastRun.status + (dur ? ', ' + dur : '') + ')');
+    secondaryParts.push('Last run ' + formatTimestamp(state.lastRun.at, 'relative') + ' (' + state.lastRun.status + (dur ? ', ' + dur : '') + ')');
   }
   let stripSecondary = secondaryParts.join(' · ');
   let stripKind = 'info';
