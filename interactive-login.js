@@ -1130,7 +1130,15 @@ const PANEL_HTML = `<!DOCTYPE html>
   .stats-table .muted { color: #8aa0c2; font-style: italic; }
 
   .stats-chart-wrap { background: #0d1830; border-radius: 6px; padding: 10px 12px; }
-  .stats-chart-wrap svg { display: block; width: 100%; height: auto; }
+  .chart-plot { display: flex; gap: 8px; }
+  .chart-y-axis { display: flex; flex-direction: column-reverse; justify-content: space-between; font-size: 10px; color: #8aa0c2; padding-bottom: 20px; min-width: 18px; text-align: right; font-variant-numeric: tabular-nums; }
+  .chart-area { flex: 1; min-width: 0; }
+  .chart-bars { display: flex; align-items: flex-end; gap: 2px; height: 120px; border-bottom: 1px solid #233454; }
+  .chart-bars .bar-col { flex: 1; display: flex; align-items: flex-end; justify-content: stretch; min-width: 0; }
+  .chart-bars .bar { width: 100%; background: #4ecca3; min-height: 2px; border-radius: 2px 2px 0 0; }
+  .chart-bars .bar.zero { background: #4a5a8a; }
+  .chart-x-axis { display: flex; gap: 2px; font-size: 10px; color: #8aa0c2; margin-top: 4px; font-variant-numeric: tabular-nums; }
+  .chart-x-axis .xtick { flex: 1; text-align: center; white-space: nowrap; min-width: 0; }
 
   .stats-activity { display: flex; flex-direction: column; gap: 4px; }
   .stats-activity .act { display: grid; grid-template-columns: 110px 160px 1fr; gap: 12px; padding: 8px 10px; background: #16233c; border-radius: 6px; font-size: 13px; align-items: center; }
@@ -1395,48 +1403,38 @@ function formatTimestamp(ts, style) {
   return m ? m[1] : s;
 }
 
-// SVG 30-day bar chart with a y-axis scale, horizontal gridlines, and weekly
-// x-axis labels. Returns an SVG string ready to drop into a container. Uses
-// plain string concatenation — inner backtick template literals would close
-// the outer PANEL_HTML template literal and break parsing.
+// HTML+CSS 30-day bar chart. An earlier SVG version used
+// preserveAspectRatio="none" to stretch bars to fill the container width,
+// which also stretched the axis text glyphs horizontally — the bug the user
+// reported as "font stretching". Pure HTML sidesteps that entirely: bars flex
+// to fit, labels render at natural font metrics.
 function renderDailyChart(daily) {
   if (!daily.length) return '<div class="stats-empty">No data yet.</div>';
-  const W = 600, H = 180;
-  const padL = 28, padR = 8, padT = 10, padB = 26;
-  const plotW = W - padL - padR;
-  const plotH = H - padT - padB;
   const rawMax = Math.max.apply(null, daily.map(d => d.count).concat(0));
   const step = rawMax <= 4 ? 1 : rawMax <= 10 ? 2 : rawMax <= 20 ? 5 : rawMax <= 50 ? 10 : 20;
   const yMax = Math.max(step, Math.ceil(rawMax / step) * step);
-  const barW = plotW / daily.length;
-  const grid = [];
-  for (let v = 0; v <= yMax; v += step) {
-    const y = padT + plotH - (v / yMax) * plotH;
-    grid.push('<line x1="' + padL + '" x2="' + (padL + plotW) + '" y1="' + y + '" y2="' + y + '" stroke="#233454" stroke-width="0.6"/>');
-    grid.push('<text x="' + (padL - 6) + '" y="' + (y + 3) + '" fill="#8aa0c2" font-size="10" text-anchor="end">' + v + '</text>');
-  }
-  const bars = daily.map((d, i) => {
-    const h = (d.count / yMax) * plotH;
-    const x = padL + i * barW + 0.5;
-    const w = Math.max(barW - 1, 1);
-    const y = padT + plotH - h;
-    const fill = d.count === 0 ? '#4a5a8a' : '#4ecca3';
-    const minH = 2;
-    const barY = d.count === 0 ? padT + plotH - minH : y;
-    const barH = d.count === 0 ? minH : Math.max(h, 1);
-    return '<rect x="' + x + '" y="' + barY + '" width="' + w + '" height="' + barH + '" fill="' + fill + '" rx="1"><title>' + d.date + ': ' + d.count + '</title></rect>';
+  const yTicks = [];
+  for (let v = 0; v <= yMax; v += step) yTicks.push('<span>' + v + '</span>');
+  const bars = daily.map(d => {
+    const pct = (d.count / yMax) * 100;
+    const cls = d.count === 0 ? ' zero' : '';
+    return '<div class="bar-col"><div class="bar' + cls + '" style="height:' + pct + '%" title="' + d.date + ': ' + d.count + '"></div></div>';
   }).join('');
-  // Weekly ticks anchored at the right edge (today), walking backwards
-  // every 7 days. Avoids crowding the last tick against its neighbour and
-  // gives clear 1-week buckets.
+  // Weekly ticks anchored at today's right edge. Empty xtick slots keep each
+  // bar column aligned with its flex cell (preserving 1:1 bar<->label mapping).
   const labelIdx = new Set();
   for (let i = daily.length - 1; i >= 0; i -= 7) labelIdx.add(i);
-  const xLabels = Array.from(labelIdx).sort((a, b) => a - b).map(i => {
-    const x = padL + i * barW + barW / 2;
-    const md = daily[i].date.slice(5);
-    return '<text x="' + x + '" y="' + (H - 8) + '" fill="#8aa0c2" font-size="10" text-anchor="middle">' + md + '</text>';
+  const xLabels = daily.map((_, i) => {
+    const md = labelIdx.has(i) ? daily[i].date.slice(5) : '';
+    return '<span class="xtick">' + md + '</span>';
   }).join('');
-  return '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" style="height:180px">' + grid.join('') + bars + xLabels + '</svg>';
+  return '<div class="chart-plot">' +
+    '<div class="chart-y-axis">' + yTicks.join('') + '</div>' +
+    '<div class="chart-area">' +
+      '<div class="chart-bars">' + bars + '</div>' +
+      '<div class="chart-x-axis">' + xLabels + '</div>' +
+    '</div>' +
+  '</div>';
 }
 
 async function renderStatsTab() {
