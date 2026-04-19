@@ -865,10 +865,13 @@ const PANEL_HTML = `<!DOCTYPE html>
   .step.waiting { background: #2a2a4e; color: #f0c040; }
   .step-arrow { color: #555; }
 
-  .status-banner { padding: 10px 20px; font-size: 14px; font-weight: 500; flex-shrink: 0; }
-  .status-banner.all-good { background: #1a3a2e; border-bottom: 1px solid #4ecca3; color: #4ecca3; }
-  .status-banner.needs-login { background: #3a1a1e; border-bottom: 1px solid #e94560; color: #e94560; }
-  .status-banner.running { background: #2a2a1e; border-bottom: 1px solid #f0c040; color: #f0c040; }
+  .status-strip { display: none; align-items: center; gap: 10px; padding: 6px 12px; font-size: 13px; line-height: 1.35; border-radius: 6px; margin-bottom: 8px; }
+  .status-strip.ok   { background: #0e2a1f; color: #4ecca3; }
+  .status-strip.warn { background: #2a2a1e; color: #f0c040; }
+  .status-strip.err  { background: #2a1a1e; color: #e94560; }
+  .status-strip.info { background: #12203a; color: #a0b4d4; }
+  .status-strip .strip-primary   { font-weight: 500; }
+  .status-strip .strip-secondary { margin-left: auto; opacity: 0.72; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
   .site-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
   .site-card { background: #0f3460; border-radius: 8px; padding: 10px 14px; display: flex; flex-direction: column; gap: 6px; min-height: 110px; }
@@ -966,12 +969,11 @@ const PANEL_HTML = `<!DOCTYPE html>
     </div>
   </div>
   <div class="steps sessions-only" id="steps"></div>
+  <div class="status-strip sessions-only" id="statusStrip"></div>
   <div class="site-cards sessions-only" id="siteCards"></div>
   <div class="sessions-only" id="batchRedeemInfo" style="display:none; margin-top: 10px;"></div>
-  <div class="sessions-only" id="schedulerInfo" style="display:none; margin-top: 10px; font-size: 13px; color: #888;"></div>
   <div class="sessions-only" id="activeSession" style="display:none"></div>
 </div>
-<div id="statusBanner" class="status-banner sessions-only" style="display:none"></div>
 <div class="main-area" id="mainArea">
   <div class="tab-panel" data-panel="sessions">
     <div class="vnc-container" id="vncContainer">
@@ -1057,40 +1059,12 @@ function getStep() {
 function render() {
   const cards = document.getElementById('siteCards');
   const session = document.getElementById('activeSession');
-  const banner = document.getElementById('statusBanner');
+  const strip = document.getElementById('statusStrip');
   const steps = document.getElementById('steps');
-  const schedulerInfo = document.getElementById('schedulerInfo');
   const batchInfo = document.getElementById('batchRedeemInfo');
   const btnRunAll = document.getElementById('btnRunAll');
   const btnCheckAll = document.getElementById('btnCheckAll');
   const currentStep = getStep();
-
-  // Scheduler + last-run info, promoted into a single prominent row under the
-  // step bar. During the container's startup auto-check, replace it with a
-  // progress banner so the user knows why Login buttons are briefly disabled.
-  if (state.startupAutoCheck) {
-    schedulerInfo.style.display = 'block';
-    schedulerInfo.style.color = '#f0c040';
-    schedulerInfo.innerHTML = '⏳ Startup: checking sessions (' + state.startupAutoCheck.current + '/' + state.startupAutoCheck.total + ') — ' + state.startupAutoCheck.siteName + '…';
-  } else if (state.loopEnabled || state.lastRun) {
-    schedulerInfo.style.display = 'block';
-    schedulerInfo.style.color = '#888';
-    const parts = [];
-    if (state.runStatus === 'running') {
-      const src = state.runSource === 'scheduler' ? 'scheduler' : 'manual';
-      parts.push('<span style="color:#f0c040">● Run in progress (' + src + ')…</span>');
-    } else if (state.nextScheduledRun) {
-      parts.push('Next run: ' + state.nextScheduledRun);
-    }
-    if (state.lastRun) {
-      const statusColor = state.lastRun.status === 'success' ? '#4ecca3' : state.lastRun.status === 'error' ? '#e94560' : '#f0c040';
-      const dur = state.lastRun.durationSec != null ? Math.round(state.lastRun.durationSec / 60) + 'm' : '';
-      parts.push('Last run: ' + state.lastRun.at + ' (' + state.lastRun.source + ') — <span style="color:' + statusColor + '">' + state.lastRun.status + '</span>' + (dur ? ' · ' + dur : ''));
-    }
-    schedulerInfo.innerHTML = parts.join(' · ');
-  } else {
-    schedulerInfo.style.display = 'none';
-  }
 
   // Batch-redeem panel: shows when there are pending GOG codes OR a batch is active.
   const br = state.batchRedeem;
@@ -1142,6 +1116,10 @@ function render() {
     return (i > 0 ? '<span class="step-arrow">&rarr;</span>' : '') + '<span class="' + cls + '">' + num + '. ' + label + '</span>';
   }).join('');
 
+  // Once all sessions are OK the stepper is no longer actionable — the strip
+  // below communicates current state more compactly.
+  steps.style.display = state.allLoggedIn ? 'none' : 'flex';
+
   const isRunning = state.runStatus === 'running';
   const disabled = busy || !!state.activeBrowser || isRunning;
   btnCheckAll.disabled = disabled;
@@ -1165,29 +1143,53 @@ function render() {
     placeholder.style.display = state.allLoggedIn ? 'none' : 'flex';
   }
 
-  if (state.allLoggedIn && !state.activeBrowser && state.runStatus !== 'running') {
-    banner.style.display = 'block';
-    if (state.runStatus === 'success') {
-      banner.className = 'status-banner all-good';
-      banner.innerHTML = 'All sessions verified and scripts ran successfully! The scheduler (if enabled) will keep claiming automatically.';
-    } else if (state.runStatus === 'finished') {
-      banner.className = 'status-banner needs-login';
-      banner.innerHTML = 'Scripts finished with errors. Check the log below for details. Some sessions may have expired.';
-    } else {
-      banner.className = 'status-banner all-good';
-      banner.innerHTML = 'All sessions verified! Click "Run Now" to trigger an immediate claim, or let the scheduler (if enabled) handle it automatically.';
-    }
+  // Status strip — one line that rolls up the old green banner + "Next run" line.
+  const totalCount = state.sites.length;
+  const secondaryParts = [];
+  if (!isRunning && state.nextScheduledRun) secondaryParts.push('Next run: ' + state.nextScheduledRun);
+  if (state.lastRun) {
+    const dur = state.lastRun.durationSec != null ? Math.round(state.lastRun.durationSec / 60) + 'm' : '';
+    secondaryParts.push('Last run: ' + state.lastRun.at + ' (' + state.lastRun.source + ', ' + state.lastRun.status + (dur ? ', ' + dur : '') + ')');
+  }
+  let stripSecondary = secondaryParts.join(' · ');
+  let stripKind = 'info';
+  let stripText = null;
+  if (state.startupAutoCheck) {
+    stripKind = 'warn';
+    stripText = '⏳ Startup: checking sessions (' + state.startupAutoCheck.current + '/' + state.startupAutoCheck.total + ') — ' + state.startupAutoCheck.siteName + '…';
+    stripSecondary = '';
+  } else if (state.activeBrowser) {
+    stripText = null; // activeSession row owns this state
   } else if (isRunning) {
-    banner.style.display = 'block';
-    banner.className = 'status-banner running';
-    banner.innerHTML = 'Scripts are running... Watch the output below.';
+    stripKind = 'warn';
+    const src = state.runSource === 'scheduler' ? 'scheduler' : 'manual';
+    stripText = '● Run in progress (' + src + ')…';
   } else if (state.sites.some(s => s.status === 'not_logged_in')) {
-    banner.style.display = 'block';
-    banner.className = 'status-banner needs-login';
+    stripKind = 'err';
     const missing = state.sites.filter(s => s.status === 'not_logged_in').map(s => s.name).join(', ');
-    banner.innerHTML = 'Login needed for: ' + missing + '. Click Login on each site, complete the login in the browser below, then click "I\\'m Logged In".';
+    stripText = '● Login needed for: ' + missing;
+  } else if (state.allLoggedIn) {
+    const label = totalCount === 1 ? 'session' : 'sessions';
+    if (state.runStatus === 'finished') {
+      stripKind = 'warn';
+      stripText = '● All ' + totalCount + ' ' + label + ' OK · last run had errors — check Logs';
+    } else {
+      stripKind = 'ok';
+      stripText = '● All ' + totalCount + ' ' + label + ' OK';
+    }
+  } else if (totalCount > 0) {
+    stripKind = 'info';
+    stripText = 'Click "Check All Sessions" to get started';
+  }
+
+  if (stripText) {
+    strip.style.display = 'flex';
+    strip.className = 'status-strip sessions-only ' + stripKind;
+    strip.innerHTML =
+      '<span class="strip-primary">' + stripText + '</span>' +
+      (stripSecondary ? '<span class="strip-secondary">' + stripSecondary + '</span>' : '');
   } else {
-    banner.style.display = 'none';
+    strip.style.display = 'none';
   }
 
   cards.innerHTML = state.sites.map(s => {
