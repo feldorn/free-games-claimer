@@ -1287,22 +1287,24 @@ function relativeTime(dtStr) {
 }
 
 // SVG 30-day bar chart with a y-axis scale, horizontal gridlines, and weekly
-// x-axis labels. Returns an SVG string ready to drop into a container.
+// x-axis labels. Returns an SVG string ready to drop into a container. Uses
+// plain string concatenation — inner backtick template literals would close
+// the outer PANEL_HTML template literal and break parsing.
 function renderDailyChart(daily) {
   if (!daily.length) return '<div class="stats-empty">No data yet.</div>';
   const W = 600, H = 180;
   const padL = 28, padR = 8, padT = 10, padB = 26;
   const plotW = W - padL - padR;
   const plotH = H - padT - padB;
-  const rawMax = Math.max(...daily.map(d => d.count), 0);
+  const rawMax = Math.max.apply(null, daily.map(d => d.count).concat(0));
   const step = rawMax <= 4 ? 1 : rawMax <= 10 ? 2 : rawMax <= 20 ? 5 : rawMax <= 50 ? 10 : 20;
   const yMax = Math.max(step, Math.ceil(rawMax / step) * step);
   const barW = plotW / daily.length;
   const grid = [];
   for (let v = 0; v <= yMax; v += step) {
     const y = padT + plotH - (v / yMax) * plotH;
-    grid.push(`<line x1="${padL}" x2="${padL + plotW}" y1="${y}" y2="${y}" stroke="#233454" stroke-width="0.6"/>`);
-    grid.push(`<text x="${padL - 6}" y="${y + 3}" fill="#8aa0c2" font-size="10" text-anchor="end">${v}</text>`);
+    grid.push('<line x1="' + padL + '" x2="' + (padL + plotW) + '" y1="' + y + '" y2="' + y + '" stroke="#233454" stroke-width="0.6"/>');
+    grid.push('<text x="' + (padL - 6) + '" y="' + (y + 3) + '" fill="#8aa0c2" font-size="10" text-anchor="end">' + v + '</text>');
   }
   const bars = daily.map((d, i) => {
     const h = (d.count / yMax) * plotH;
@@ -1311,17 +1313,18 @@ function renderDailyChart(daily) {
     const y = padT + plotH - h;
     const fill = d.count === 0 ? '#2a3a5a' : '#4ecca3';
     const minH = 1;
-    return `<rect x="${x}" y="${d.count === 0 ? padT + plotH - minH : y}" width="${w}" height="${d.count === 0 ? minH : Math.max(h, 1)}" fill="${fill}" rx="1"><title>${d.date}: ${d.count}</title></rect>`;
+    const barY = d.count === 0 ? padT + plotH - minH : y;
+    const barH = d.count === 0 ? minH : Math.max(h, 1);
+    return '<rect x="' + x + '" y="' + barY + '" width="' + w + '" height="' + barH + '" fill="' + fill + '" rx="1"><title>' + d.date + ': ' + d.count + '</title></rect>';
   }).join('');
-  // Weekly x-axis labels: first, every 7 days, and last (dedupe if close).
   const labelIdx = new Set([0, daily.length - 1]);
   for (let i = 6; i < daily.length - 2; i += 7) labelIdx.add(i);
-  const xLabels = [...labelIdx].sort((a, b) => a - b).map(i => {
+  const xLabels = Array.from(labelIdx).sort((a, b) => a - b).map(i => {
     const x = padL + i * barW + barW / 2;
     const md = daily[i].date.slice(5);
-    return `<text x="${x}" y="${H - 8}" fill="#8aa0c2" font-size="10" text-anchor="middle">${md}</text>`;
+    return '<text x="' + x + '" y="' + (H - 8) + '" fill="#8aa0c2" font-size="10" text-anchor="middle">' + md + '</text>';
   }).join('');
-  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="height:180px">${grid.join('')}${bars}${xLabels}</svg>`;
+  return '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" style="height:180px">' + grid.join('') + bars + xLabels + '</svg>';
 }
 
 async function renderStatsTab() {
