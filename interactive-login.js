@@ -1393,13 +1393,13 @@ function relativeTime(dtStr) {
 // Unified timestamp formatter.
 //   style 'relative' → "2d ago" (via relativeTime)
 //   style 'short'    → "YYYY-MM-DD HH:MM" (trims seconds + milliseconds)
-// Any unparseable input is returned verbatim.
+// Uses slice(0, 16) rather than a \d regex — PANEL_HTML is itself a backtick
+// template literal, and "\d" inside it is treated as an unknown escape and
+// stripped, producing /^(d{4}-...)/ which never matches.
 function formatTimestamp(ts, style) {
   if (!ts) return '';
   if (style === 'relative') return relativeTime(ts);
-  const s = String(ts).replace('T', ' ');
-  const m = s.match(/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2})/);
-  return m ? m[1] : s;
+  return String(ts).replace('T', ' ').slice(0, 16);
 }
 
 // HTML+CSS 30-day bar chart. An earlier SVG version used
