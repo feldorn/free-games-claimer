@@ -1647,7 +1647,7 @@ const PANEL_HTML = `<!DOCTYPE html>
     <div class="env-view-head">
       <div>
         <h3 class="env-view-title">Environment</h3>
-        <div class="env-view-sub">Read-only view of every environment variable the app reads. Use <b>Settings → Services</b> to change runtime behaviour.</div>
+        <div class="env-view-sub">Read-only view of every environment variable the app reads. Use <b>Settings → Services</b> to change runtime behaviour. <b>Reveal credentials</b> shows each secret as <code>••••••XXXX</code> — last 4 chars only — so don't tap it on a shared screen.</div>
       </div>
       <button class="btn btn-check-all" id="btnRevealCreds" onclick="toggleRevealEnv()">Reveal credentials</button>
     </div>
@@ -2043,16 +2043,14 @@ async function loadEnvTable(reveal) {
 }
 
 async function toggleRevealEnv() {
+  // Previously wrapped in confirm() — iPad Safari sometimes silently blocks
+  // modal confirm() dialogs fired from click handlers (especially after any
+  // browser restart), so the reveal appeared to "not work". The warning now
+  // lives inline in the Environment header sub-text; tapping the button
+  // flips state directly.
   const btn = document.getElementById('btnRevealCreds');
-  if (!envRevealed) {
-    const ok = confirm('Reveal credentials? Values will display as ••••••XXXX with the last 4 characters visible. Avoid doing this on a shared screen.');
-    if (!ok) return;
-    envRevealed = true;
-    if (btn) btn.textContent = 'Hide credentials';
-  } else {
-    envRevealed = false;
-    if (btn) btn.textContent = 'Reveal credentials';
-  }
+  envRevealed = !envRevealed;
+  if (btn) btn.textContent = envRevealed ? 'Hide credentials' : 'Reveal credentials';
   await loadEnvTable(envRevealed);
 }
 
