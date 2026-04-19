@@ -77,7 +77,10 @@ async function login() {
 // DOM path is actually the more stable choice here.)
 async function readMicrosoftRewardsUser(page) {
   try {
-    await page.waitForSelector('#mectrl_currentAccount_primary', { timeout: 8000 });
+    // state: 'attached' rather than the default 'visible' — the ME Control
+    // renders the name into hidden DOM until the widget is opened, so the
+    // default visible-wait would time out even though the text is present.
+    await page.waitForSelector('#mectrl_currentAccount_primary', { timeout: 8000, state: 'attached' });
     const name = await page.evaluate(() => {
       const primary = document.getElementById('mectrl_currentAccount_primary');
       const secondary = document.getElementById('mectrl_currentAccount_secondary');
