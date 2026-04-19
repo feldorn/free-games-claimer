@@ -1096,7 +1096,10 @@ const PANEL_HTML = `<!DOCTYPE html>
   .status-strip .strip-primary   { font-weight: 500; }
   .status-strip .strip-secondary { margin-left: auto; opacity: 0.72; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-  .site-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+  .site-cards { display: grid; grid-template-columns: repeat(1, 1fr); gap: 10px; }
+  @media (min-width: 640px)  { .site-cards { grid-template-columns: repeat(2, 1fr); } }
+  @media (min-width: 960px)  { .site-cards { grid-template-columns: repeat(3, 1fr); } }
+  @media (min-width: 1400px) { .site-cards { grid-template-columns: repeat(4, 1fr); } }
   .site-card { background: #0f3460; border-radius: 8px; padding: 10px 14px; display: flex; flex-direction: column; gap: 6px; min-height: 110px; }
   .site-card-header { display: flex; align-items: center; gap: 8px; }
   .site-card .name { font-weight: 600; font-size: 14px; }
@@ -1286,6 +1289,18 @@ function relativeTime(dtStr) {
   return Math.floor(months / 12) + 'y ago';
 }
 
+// Unified timestamp formatter.
+//   style 'relative' → "2d ago" (via relativeTime)
+//   style 'short'    → "YYYY-MM-DD HH:MM" (trims seconds + milliseconds)
+// Any unparseable input is returned verbatim.
+function formatTimestamp(ts, style) {
+  if (!ts) return '';
+  if (style === 'relative') return relativeTime(ts);
+  const s = String(ts).replace('T', ' ');
+  const m = s.match(/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2})/);
+  return m ? m[1] : s;
+}
+
 // SVG 30-day bar chart with a y-axis scale, horizontal gridlines, and weekly
 // x-axis labels. Returns an SVG string ready to drop into a container. Uses
 // plain string concatenation — inner backtick template literals would close
@@ -1311,14 +1326,17 @@ function renderDailyChart(daily) {
     const x = padL + i * barW + 0.5;
     const w = Math.max(barW - 1, 1);
     const y = padT + plotH - h;
-    const fill = d.count === 0 ? '#2a3a5a' : '#4ecca3';
-    const minH = 1;
+    const fill = d.count === 0 ? '#4a5a8a' : '#4ecca3';
+    const minH = 2;
     const barY = d.count === 0 ? padT + plotH - minH : y;
     const barH = d.count === 0 ? minH : Math.max(h, 1);
     return '<rect x="' + x + '" y="' + barY + '" width="' + w + '" height="' + barH + '" fill="' + fill + '" rx="1"><title>' + d.date + ': ' + d.count + '</title></rect>';
   }).join('');
-  const labelIdx = new Set([0, daily.length - 1]);
-  for (let i = 6; i < daily.length - 2; i += 7) labelIdx.add(i);
+  // Weekly ticks anchored at the right edge (today), walking backwards
+  // every 7 days. Avoids crowding the last tick against its neighbour and
+  // gives clear 1-week buckets.
+  const labelIdx = new Set();
+  for (let i = daily.length - 1; i >= 0; i -= 7) labelIdx.add(i);
   const xLabels = Array.from(labelIdx).sort((a, b) => a - b).map(i => {
     const x = padL + i * barW + barW / 2;
     const md = daily[i].date.slice(5);
@@ -1342,19 +1360,20 @@ async function renderStatsTab() {
       api('GET', '/activity?limit=10'),
     ]);
     const fmt = n => (n == null ? '—' : new Intl.NumberFormat().format(n));
+    const msPending = summary.msPointsBalance == null;
     const tiles = [
       { label: 'Games this week',  value: fmt(summary.gamesThisWeek) },
       { label: 'Games this month', value: fmt(summary.gamesThisMonth) },
       { label: 'Games all-time',   value: fmt(summary.gamesAllTime) },
       { label: 'Last claim',
-        value: summary.lastClaim ? relativeTime(summary.lastClaim.at) : '—',
+        value: summary.lastClaim ? formatTimestamp(summary.lastClaim.at, 'relative') : '—',
         hint:  summary.lastClaim ? summary.lastClaim.serviceName + ' · ' + summary.lastClaim.title : '' },
       { label: 'MS Rewards balance',
-        value: fmt(summary.msPointsBalance),
-        hint:  summary.msPointsBalance == null ? 'captured on next microsoft run' : 'as of ' + summary.msPointsBalanceAt },
+        value: msPending ? 'Pending' : fmt(summary.msPointsBalance),
+        hint:  msPending ? 'captured on next microsoft run' : 'as of ' + formatTimestamp(summary.msPointsBalanceAt, 'short') },
       { label: 'MS points this week',
-        value: fmt(summary.msPointsThisWeek),
-        hint:  summary.msPointsBalance == null ? '' : 'via captured runs' },
+        value: msPending ? 'Pending' : fmt(summary.msPointsThisWeek),
+        hint:  msPending ? 'captured on next microsoft run' : 'via captured runs' },
     ];
     kpis.innerHTML = tiles.map(k =>
       '<div class="kpi"><div class="kpi-label">' + k.label + '</div>' +
@@ -1365,7 +1384,9 @@ async function renderStatsTab() {
 
     const fmt2 = n => new Intl.NumberFormat().format(n);
     const rows = byService.map(r => {
-      const last = r.lastClaimAt || '<span class="muted">—</span>';
+      const last = r.lastClaimAt
+        ? '<span title="' + escapeHtml(r.lastClaimAt) + '">' + escapeHtml(formatTimestamp(r.lastClaimAt, 'relative')) + '</span>'
+        : '<span class="muted">—</span>';
       const isPts = r.unit === 'points';
       if (isPts && !r.lastClaimAt) {
         return '<tr><td>' + escapeHtml(r.name) + '</td>' +
@@ -1398,7 +1419,7 @@ async function renderStatsTab() {
           ? '<a href="' + encodeURI(a.url) + '" target="_blank" rel="noopener">' + escapeHtml(a.title) + '</a>'
           : escapeHtml(a.title);
         return '<div class="act">' +
-          '<span class="at" title="' + escapeHtml(a.at) + '">' + escapeHtml(relativeTime(a.at)) + '</span>' +
+          '<span class="at" title="' + escapeHtml(a.at) + '">' + escapeHtml(formatTimestamp(a.at, 'relative')) + '</span>' +
           '<span class="svc">' + escapeHtml(a.serviceName) + '</span>' +
           '<span class="title">' + titleHtml + '</span>' +
           '</div>';
@@ -1417,7 +1438,7 @@ function renderScheduleTab() {
     parts.push(
       '<div class="sched-row">' +
         '<div class="sched-label">Next run</div>' +
-        '<div><span class="sched-value big">' + state.nextScheduledRun + '</span>' +
+        '<div><span class="sched-value big" title="' + state.nextScheduledRun + '">' + formatTimestamp(state.nextScheduledRun, 'short') + '</span>' +
         '<span class="sched-count" id="schedCountdown"></span></div>' +
       '</div>'
     );
@@ -1443,7 +1464,8 @@ function renderScheduleTab() {
     const statusCol = state.lastRun.status === 'success' ? '#4ecca3' : state.lastRun.status === 'error' ? '#e94560' : '#f0c040';
     parts.push(
       '<div class="sched-row"><div class="sched-label">Last run</div>' +
-      '<div class="sched-value">' + state.lastRun.at + ' (' + state.lastRun.source + ') — ' +
+      '<div class="sched-value"><span title="' + state.lastRun.at + '">' + formatTimestamp(state.lastRun.at, 'short') + '</span>' +
+        ' (' + state.lastRun.source + ') — ' +
         '<span style="color:' + statusCol + '">' + state.lastRun.status + '</span>' +
         (dur ? ' · ' + dur : '') +
       '</div></div>'
@@ -1640,14 +1662,13 @@ function render() {
     placeholder.style.display = 'flex';
     const setupDone = state.allLoggedIn && state.sites.length > 0;
     if (setupDone) {
+      // Status strip in the header already communicates "all sessions OK" —
+      // don't repeat it here. Just explain what this empty space is for.
       placeholder.innerHTML =
-        '<div style="max-width:520px">' +
-        '  <div style="font-size:20px;margin-bottom:10px;color:#4ecca3;font-weight:600;">✓ All sessions verified</div>' +
-        '  <div style="font-size:14px;line-height:1.6">' +
-        '    Click <b>Run Now</b> to trigger an immediate claim, or let the scheduler (if enabled) handle it.<br><br>' +
-        '    The browser login view will appear here when you click <b>Login</b> on any session card;' +
-        '    the claim log appears here during a run.' +
-        '  </div>' +
+        '<div style="max-width:520px;font-size:14px;line-height:1.7;color:#a0b4d4">' +
+        '  Click <b style="color:#e0e0e0">Run Now</b> to trigger an immediate claim, or let the scheduler (if enabled) handle it.<br><br>' +
+        '  The browser login view will appear here when you click <b style="color:#e0e0e0">Login</b> on any session card;' +
+        '  the claim log appears here during a run.' +
         '</div>';
     } else {
       placeholder.innerHTML = DEFAULT_PLACEHOLDER_HTML;
