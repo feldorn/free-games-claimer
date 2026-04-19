@@ -68,19 +68,32 @@ async function login() {
 async function readMicrosoftRewardsUser(page) {
   const endpoints = [
     'https://prod.rewardsplatform.microsoft.com/dapi/me?channel=Rewards&options=600%2C700%2C888',
+    'https://rewards.bing.com/api/getuserinfo',
     'https://account.microsoft.com/profile/ProfileApi/GetBasicProfileInfo',
   ];
   for (const url of endpoints) {
     try {
       const res = await page.request.get(url, { timeout: 10000 });
-      if (!res.ok()) continue;
-      const data = await res.json();
+      const status = res.status();
+      if (!res.ok()) {
+        console.log(`[ms] source=api status=${status} url=${url} value=null`);
+        continue;
+      }
+      const rawText = await res.text();
+      let data = null;
+      try { data = JSON.parse(rawText); }
+      catch { console.log(`[ms] source=api status=${status} url=${url} parse=failed body_snippet=${rawText.slice(0, 200)}`); continue; }
       const attrs = data && data.response && data.response.userProfile && data.response.userProfile.attributes;
       const name = (attrs && (attrs.displayName || attrs.email))
         || (data && (data.displayName || data.firstName || data.DisplayName || data.email || data.Email));
+      console.log(`[ms] source=api status=${status} url=${url} value=${JSON.stringify(name)}`);
+      if (!name) console.log(`[ms] dapi body: ${rawText.slice(0, 500)}`);
       if (name) return String(name).trim();
-    } catch { /* try next endpoint */ }
+    } catch (e) {
+      console.log(`[ms] source=api url=${url} threw=${e.message}`);
+    }
   }
+  console.log('[ms] source=fallback status=N/A value=null (all endpoints failed)');
   return null;
 }
 
