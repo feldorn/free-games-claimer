@@ -113,49 +113,63 @@ const SITES = {
       try {
         // Navigate to /account — GOG server-side requires a valid session here;
         // stale sessions get redirected to the homepage with an #openlogin overlay.
-        // Homepage-based DOM checks get fooled by cached UI (we hit this earlier),
-        // so we use the final URL as the definitive session-validity signal.
+        // The final URL is the definitive session-validity signal.
         await page.goto('https://www.gog.com/account', { waitUntil: 'domcontentloaded', timeout: 20000 });
         await page.waitForTimeout(3000);
         const url = page.url();
         if (url.includes('openlogin') || url.includes('/login')) return { loggedIn: false };
         if (!url.includes('/account')) return { loggedIn: false };
 
-        // Session is valid. Capturing the username is cosmetic — GOG no
-        // longer renders the name in persistent chrome; it only appears
-        // inside the account dropdown that opens on hover of the avatar.
-        // Any failure here falls back to 'unknown' without invalidating
-        // the session.
+        // Primary username source: GOG's own account APIs. page.request
+        // inherits the browser context's cookies, so a valid session
+        // authenticates automatically. This sidesteps the DOM path entirely
+        // — the legacy #menuUsername element carries data-hj-suppress (PII
+        // suppression) and is frequently hidden or renamed across GOG's
+        // header redesigns.
         let user = null;
-        try {
-          await page.goto('https://www.gog.com', { waitUntil: 'domcontentloaded', timeout: 15000 });
-          const trigger = page.locator([
-            'header [class*="menu-user"]',
-            'header [class*="account"]',
-            'header button[aria-haspopup]:has(svg)',
-          ].join(', ')).first();
-          await trigger.waitFor({ state: 'visible', timeout: 8000 });
-          await trigger.hover();
-          const yourAccount = page.getByText('Your account', { exact: true });
+        const apis = [
+          'https://menu.gog.com/v1/account/basic',
+          'https://www.gog.com/userData.json',
+          'https://embed.gog.com/userData.json',
+        ];
+        for (const endpoint of apis) {
           try {
-            await yourAccount.waitFor({ state: 'visible', timeout: 3000 });
-          } catch {
-            await trigger.click();
-            await yourAccount.waitFor({ state: 'visible', timeout: 4000 });
-          }
-          const sibling = await yourAccount.locator('xpath=following-sibling::*[1]')
-            .textContent({ timeout: 2000 }).catch(() => '');
-          user = (sibling || '').trim() || null;
-          if (!user) {
-            const all = await yourAccount.locator('xpath=ancestor::*[self::div or self::ul][1]')
-              .textContent({ timeout: 2000 }).catch(() => '');
-            const m = (all || '').match(/Your account\s*([A-Za-z0-9_.\-]+)/);
-            user = m && m[1] ? m[1].trim() : null;
-          }
-          // Close the menu so later claim steps don't get their clicks intercepted.
-          await page.keyboard.press('Escape').catch(() => {});
-        } catch { /* username read failed — fall through to cookie + default */ }
+            const res = await page.request.get(endpoint, { timeout: 10000 });
+            if (!res.ok()) continue;
+            const data = await res.json();
+            const name = data && (data.username || data.userName || data.name);
+            if (name) { user = String(name).trim(); break; }
+          } catch { /* try next endpoint */ }
+        }
 
+        // DOM fallback: open the account dropdown and parse the block of text
+        // next to "Your account". Used only if all APIs fail.
+        if (!user) {
+          try {
+            await page.goto('https://www.gog.com', { waitUntil: 'domcontentloaded', timeout: 15000 });
+            const trigger = page.locator([
+              'header [class*="menu-user"]',
+              'header [class*="account"]',
+              'header button[aria-haspopup]:has(svg)',
+            ].join(', ')).first();
+            await trigger.waitFor({ state: 'visible', timeout: 8000 });
+            await trigger.hover();
+            const dropdown = page.locator('[class*="menu-user-dropdown"], [class*="account-menu"], [class*="menu-user"]')
+              .filter({ hasText: 'Your account' }).first();
+            try {
+              await dropdown.waitFor({ state: 'visible', timeout: 3000 });
+            } catch {
+              await trigger.click();
+              await dropdown.waitFor({ state: 'visible', timeout: 4000 });
+            }
+            const text = await dropdown.innerText({ timeout: 2000 }).catch(() => '');
+            const m = text.match(/Your account\s*\n?\s*([^\n]+)/);
+            if (m && m[1]) user = m[1].trim() || null;
+            await page.keyboard.press('Escape').catch(() => {});
+          } catch { /* DOM path failed — fall through */ }
+        }
+
+        // Tertiary: legacy cookie that some GOG builds still set.
         if (!user) {
           const cookieUser = await page.evaluate(() => {
             for (const c of document.cookie.split(';')) {
