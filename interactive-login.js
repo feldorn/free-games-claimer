@@ -1290,11 +1290,61 @@ const PANEL_HTML = `<!DOCTYPE html>
   body[data-tab="schedule"] .tab-panel[data-panel="schedule"] { display: block; overflow-y: auto; padding: 28px 32px; }
   body[data-tab="logs"] .tab-panel[data-panel="logs"] { display: flex; flex: 1; flex-direction: column; }
   body[data-tab="settings"] .tab-panel[data-panel="settings"] { display: flex; flex: 1; flex-direction: column; position: relative; }
+  body[data-tab="environment"] .tab-panel[data-panel="environment"] { display: flex; flex: 1; flex-direction: column; }
 
+  .settings-layout { flex: 1; display: grid; grid-template-columns: 180px 1fr; min-height: 0; }
+  .settings-rail { background: #12213a; border-right: 1px solid #233454; padding: 14px 0; overflow-y: auto; }
+  .settings-rail .rail-btn { display: block; width: 100%; text-align: left; padding: 9px 18px; background: transparent; border: none; border-left: 3px solid transparent; color: #a0b4d4; font-size: 13px; cursor: pointer; font-family: inherit; }
+  .settings-rail .rail-btn:hover { background: #1a2a48; color: #e0e0e0; }
+  .settings-rail .rail-btn.active { background: #0f3460; color: #fff; border-left-color: #4ecca3; font-weight: 500; }
+  .settings-pane { overflow-y: auto; padding: 24px 32px 24px; }
+  .settings-pane-title { font-size: 11px; color: #8aa0c2; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 16px; display: flex; align-items: center; gap: 12px; }
+  .settings-pane-title .spacer { flex: 1; }
+
+  /* Keep the old class names working for in-section rendering */
   .settings-view { flex: 1; overflow-y: auto; padding: 24px 32px 16px; }
   .settings-section { margin-bottom: 28px; }
   .settings-section-head { font-size: 11px; color: #8aa0c2; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 10px; display: flex; align-items: center; gap: 12px; }
   .settings-section-head .spacer { flex: 1; }
+
+  @media (max-width: 720px) {
+    .settings-layout { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+    .settings-rail { display: flex; overflow-x: auto; gap: 4px; padding: 8px 12px; border-right: none; border-bottom: 1px solid #233454; }
+    .settings-rail .rail-btn { width: auto; flex-shrink: 0; white-space: nowrap; border-left: none; border-bottom: 3px solid transparent; border-radius: 6px; padding: 6px 12px; }
+    .settings-rail .rail-btn.active { border-left-color: transparent; border-bottom-color: #4ecca3; }
+    .settings-pane { padding: 16px; }
+  }
+
+  .env-view-head { padding: 20px 32px 8px; display: flex; align-items: flex-start; gap: 16px; flex-shrink: 0; }
+  .env-view-head .env-view-title { font-size: 16px; color: #e0e0e0; font-weight: 600; margin: 0 0 4px; }
+  .env-view-head .env-view-sub { font-size: 12px; color: #8aa0c2; line-height: 1.45; max-width: 540px; }
+  .env-view-head > button { margin-left: auto; flex-shrink: 0; }
+  .env-view-body { flex: 1; overflow-y: auto; padding: 0 32px 24px; }
+
+  /* Field chrome */
+  .setting .setting-label { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .setting .setting-help-popover { grid-column: 1 / -1; }
+  .setting-input .input-prefix { color: #8aa0c2; padding-right: 2px; }
+  .setting-info { background: transparent; border: 1px solid #233454; color: #8aa0c2; width: 18px; height: 18px; border-radius: 50%; font-size: 11px; cursor: pointer; padding: 0; line-height: 1; margin-left: 6px; display: inline-flex; align-items: center; justify-content: center; }
+  .setting-info:hover { background: #1a2a48; color: #e0e0e0; border-color: #2a3a5a; }
+  .setting-info.open { background: #0f3460; color: #fff; border-color: #4ecca3; }
+  .setting-help-popover { margin-top: 4px; padding: 8px 10px; background: #0d1830; border: 1px solid #233454; border-radius: 6px; font-size: 12px; color: #a0b4d4; line-height: 1.5; display: none; }
+  .setting-help-popover.open { display: block; }
+  .setting-help-popover .env-tag { font-family: 'Menlo', 'Consolas', monospace; font-size: 11px; color: #8aa0c2; display: block; margin-top: 4px; }
+
+  /* Per-service accordion */
+  .svc-row { border-top: 1px solid #1a2a48; }
+  .svc-row:first-of-type { border-top: none; }
+  .svc-head { display: grid; grid-template-columns: auto auto 1fr auto; align-items: center; gap: 10px; padding: 10px 8px; cursor: pointer; background: transparent; border: none; width: 100%; color: inherit; font-family: inherit; font-size: inherit; text-align: left; }
+  .svc-head:hover { background: #12213a; }
+  .svc-head .svc-caret { width: 12px; color: #8aa0c2; }
+  .svc-head .svc-name { font-size: 14px; font-weight: 600; color: #e0e0e0; }
+  .svc-head .svc-summary { font-size: 12px; color: #8aa0c2; justify-self: start; }
+  .svc-head.inactive .svc-name { color: #8aa0c2; }
+  .svc-head .svc-active { display: inline-flex; align-items: center; gap: 6px; color: #8aa0c2; font-size: 12px; font-weight: 400; padding: 4px 8px; border-radius: 4px; cursor: pointer; }
+  .svc-head .svc-active input { width: 14px; height: 14px; cursor: pointer; }
+  .svc-body { padding: 6px 16px 16px; display: none; }
+  .svc-body.open { display: block; }
   .setting { display: grid; grid-template-columns: minmax(180px, 220px) 1fr auto; gap: 16px; align-items: start; padding: 12px 0; border-bottom: 1px solid #1a2a48; }
   .setting:last-child { border-bottom: none; }
   .setting-label { font-size: 13px; color: #e0e0e0; padding-top: 7px; line-height: 1.4; }
@@ -1516,6 +1566,7 @@ const PANEL_HTML = `<!DOCTYPE html>
       <button class="tab" data-tab="schedule" onclick="switchTab('schedule')">Schedule</button>
       <button class="tab" data-tab="logs" onclick="switchTab('logs')">Logs</button>
       <button class="tab" data-tab="settings" onclick="switchTab('settings')">Settings</button>
+      <button class="tab" data-tab="environment" onclick="switchTab('environment')">Environment</button>
     </nav>
     <div class="header-actions">
       <button class="btn btn-check-all sessions-only" onclick="checkAll()" id="btnCheckAll">Check All Sessions</button>
@@ -1575,12 +1626,30 @@ const PANEL_HTML = `<!DOCTYPE html>
     </div>
   </div>
   <div class="tab-panel" data-panel="settings">
-    <div class="settings-view" id="settingsView">Loading…</div>
-    <div class="settings-footer" id="settingsFooter">
-      <span class="dirty-count" id="dirtyCount">No changes</span>
-      <button class="btn btn-cancel" onclick="discardSettings()" id="btnDiscardSettings" disabled>Discard</button>
-      <button class="btn btn-run" onclick="saveSettings()" id="btnSaveSettings" disabled>Save</button>
+    <div class="settings-layout">
+      <nav class="settings-rail" id="settingsRail">
+        <button class="rail-btn active" data-section="scheduler"     onclick="selectSettingsSection('scheduler')">Scheduler</button>
+        <button class="rail-btn"        data-section="notifications" onclick="selectSettingsSection('notifications')">Notifications</button>
+        <button class="rail-btn"        data-section="services"      onclick="selectSettingsSection('services')">Services</button>
+        <button class="rail-btn"        data-section="advanced"      onclick="selectSettingsSection('advanced')">Advanced</button>
+      </nav>
+      <div class="settings-pane" id="settingsView">Loading…</div>
     </div>
+    <div class="settings-footer" id="settingsFooter" style="display:none">
+      <span class="dirty-count" id="dirtyCount">0 unsaved changes</span>
+      <button class="btn btn-cancel" onclick="discardSettings()" id="btnDiscardSettings">Discard</button>
+      <button class="btn btn-run" onclick="saveSettings()" id="btnSaveSettings">Save</button>
+    </div>
+  </div>
+  <div class="tab-panel" data-panel="environment">
+    <div class="env-view-head">
+      <div>
+        <h3 class="env-view-title">Environment</h3>
+        <div class="env-view-sub">Read-only view of every environment variable the app reads. Use <b>Settings → Services</b> to change runtime behaviour.</div>
+      </div>
+      <button class="btn btn-check-all" id="btnRevealCreds" onclick="toggleRevealEnv()">Reveal credentials</button>
+    </div>
+    <div class="env-view-body" id="envView">Loading…</div>
   </div>
 </div>
 <script>
@@ -1632,6 +1701,13 @@ function switchTab(tab) {
   if (tab === 'schedule') renderScheduleTab();
   if (tab === 'stats') renderStatsTab();
   if (tab === 'settings') renderSettingsTab();
+  if (tab === 'environment') renderEnvironmentTab();
+}
+
+async function renderEnvironmentTab() {
+  // Environment is read-only; reuse the same loadEnvTable used to live
+  // inside the Settings tab. No settings-config fetch needed.
+  await loadEnvTable(envRevealed);
 }
 
 // --- Settings tab ---
@@ -1652,128 +1728,248 @@ async function renderSettingsTab() {
   }
 }
 
+// Which section the Settings rail currently has selected.
+let currentSettingsSection = 'scheduler';
+// Per-field help-popover + per-service accordion state. Kept across repaints.
+const openHelp = new Set();
+const openServices = new Set();
+
+function selectSettingsSection(name) {
+  currentSettingsSection = name;
+  document.querySelectorAll('.settings-rail .rail-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.section === name);
+  });
+  paintSettings();
+}
+
+function toggleFieldHelp(path) {
+  if (openHelp.has(path)) openHelp.delete(path); else openHelp.add(path);
+  paintSettings();
+}
+
+function toggleServiceBody(id) {
+  if (openServices.has(id)) openServices.delete(id); else openServices.add(id);
+  paintSettings();
+}
+
+// Returns the value the form should show for a path, considering in-flight
+// draft edits. For pending reverts (draft === null) falls back to env/default.
+function draftValue(path) {
+  if (!settingsData) return null;
+  const f = settingsData.fields.find(x => x.path === path);
+  if (!f) return null;
+  if (Object.prototype.hasOwnProperty.call(settingsDirty, path)) {
+    const v = settingsDirty[path];
+    if (v !== null) return v;
+    if (f.envValue !== null && f.envValue !== undefined) {
+      return f.type === 'number' ? Number(f.envValue)
+           : f.type === 'boolean' ? (f.envValue === '1' || f.envValue === 'true')
+           : f.envValue;
+    }
+    return f.default;
+  }
+  return f.effective;
+}
+
+function isOverriddenInForm(path) {
+  if (!settingsData) return false;
+  const f = settingsData.fields.find(x => x.path === path);
+  if (!f) return false;
+  if (Object.prototype.hasOwnProperty.call(settingsDirty, path)) {
+    return settingsDirty[path] !== null; // revert-pending flips overridden off
+  }
+  return f.overridden;
+}
+
+function isServiceActiveForUI(id) {
+  return !!draftValue('services.' + id + '.active');
+}
+
+// Build the HTML for one settings row. Help + env-var name live inside a
+// popover opened by the ⓘ button; Revert only renders when the field is
+// overridden relative to env/default.
+function fieldRow(path, label, extra) {
+  if (!settingsData) return '';
+  const f = settingsData.fields.find(x => x.path === path);
+  if (!f) return '';
+  extra = extra || {};
+  const value = draftValue(path);
+  const overridden = isOverriddenInForm(path);
+  const dot = overridden ? '<span class="setting-dot" title="Overrides environment"></span>' : '';
+  const hasPopover = !!(extra.hint || f.envVar);
+  const helpOpen = openHelp.has(path);
+  const infoBtn = hasPopover
+    ? '<button type="button" class="setting-info' + (helpOpen ? ' open' : '') + '" onclick="toggleFieldHelp(\\'' + path + '\\')" title="Help">i</button>'
+    : '';
+  const popoverBody = (extra.hint ? escapeHtml(extra.hint) : '') +
+    (f.envVar ? '<span class="env-tag">Env: ' + escapeHtml(f.envVar) + '</span>' : '');
+  const popover = (hasPopover && helpOpen)
+    ? '<div class="setting-help-popover open">' + popoverBody + '</div>'
+    : '';
+
+  let inputHtml;
+  if (f.type === 'boolean') {
+    inputHtml = '<label class="setting-checkbox"><input type="checkbox" ' + (value ? 'checked' : '') + ' onchange="setSettingValue(\\'' + path + '\\', this.checked)"></label>';
+  } else if (extra.options) {
+    const options = extra.options.map(o => '<option value="' + o.value + '"' + (String(value) === String(o.value) ? ' selected' : '') + '>' + escapeHtml(o.label) + '</option>').join('');
+    const cast = f.type === 'number' ? 'Number(this.value)' : 'this.value';
+    inputHtml = '<select onchange="setSettingValue(\\'' + path + '\\', ' + cast + ')">' + options + '</select>';
+  } else if (f.type === 'number') {
+    const v = value == null ? '' : value;
+    const prefix = extra.prefix ? '<span class="input-prefix">' + escapeHtml(extra.prefix) + '</span>' : '';
+    inputHtml = prefix + '<input type="number" value="' + v + '" oninput="setSettingValue(\\'' + path + '\\', this.value === \\'\\' ? null : Number(this.value))">';
+  } else if (extra.multiline) {
+    inputHtml = '<textarea oninput="setSettingValue(\\'' + path + '\\', this.value)">' + escapeHtml(value || '') + '</textarea>';
+  } else {
+    inputHtml = '<input type="text" value="' + escapeHtml(value || '') + '" oninput="setSettingValue(\\'' + path + '\\', this.value)">';
+  }
+
+  const revertBtn = overridden
+    ? '<button type="button" class="setting-revert" onclick="revertSettingValue(\\'' + path + '\\')">Revert</button>'
+    : '';
+  return '<div class="setting" data-path="' + path + '">' +
+    '<div class="setting-label">' + escapeHtml(label) + dot + infoBtn + '</div>' +
+    '<div class="setting-input">' + inputHtml + '</div>' +
+    revertBtn +
+    popover +
+  '</div>';
+}
+
+// Per-service summary string shown when the accordion row is collapsed.
+function serviceSummary(id) {
+  if (!isServiceActiveForUI(id)) return 'Inactive — enable to start using this service.';
+  const v = k => draftValue('services.' + id + '.' + k);
+  switch (id) {
+    case 'prime-gaming': {
+      const t = v('timeLeftDays');
+      return 'Redeem ' + (v('redeem') ? 'on' : 'off') +
+        ' · DLC ' + (v('claimDlc') ? 'on' : 'off') +
+        ' · Timeleft ' + (t == null ? 'none' : t + ' days');
+    }
+    case 'epic-games':
+      return 'Mobile ' + (v('claimMobile') ? 'on' : 'off');
+    case 'gog':
+      return 'Newsletter ' + (v('keepNewsletter') ? 'keep' : 'unsubscribe');
+    case 'steam':
+      return 'Min rating ' + v('minRating') + ' · Min price $' + v('minPrice');
+    case 'microsoft':
+    case 'microsoft-mobile':
+    case 'aliexpress':
+      return 'No per-service flags';
+    default:
+      return '';
+  }
+}
+
+// Settings-tab fields grouped per service so the accordion code can iterate.
+const SERVICE_ROWS = [
+  { id: 'prime-gaming', title: 'Prime Gaming', fields: [
+    ['services.prime-gaming.redeem',       'Redeem keys on external stores'],
+    ['services.prime-gaming.claimDlc',     'Claim in-game DLC content',
+      { hint: 'Amazon removed the in-game content tab from Prime Gaming — this toggle is currently a no-op. The script skips cleanly when the tab is missing; will resume claiming if/when Amazon brings it back.' }],
+    ['services.prime-gaming.timeLeftDays', 'Skip if more than N days remain to claim',
+      { hint: 'Leave blank to claim everything regardless of how long is left.' }],
+  ]},
+  { id: 'epic-games', title: 'Epic Games', fields: [
+    ['services.epic-games.claimMobile', 'Claim mobile games'],
+  ]},
+  { id: 'gog', title: 'GOG', fields: [
+    ['services.gog.keepNewsletter', 'Keep newsletter subscription after claiming'],
+  ]},
+  { id: 'steam', title: 'Steam', fields: [
+    ['services.steam.minRating', 'Minimum review rating (1–9)',
+      { hint: '6 = Mostly Positive; 7 = Very Positive; 8 = Overwhelmingly Positive.' }],
+    ['services.steam.minPrice', 'Minimum original price', { prefix: '$',
+      hint: 'Filters out shovelware that was free or near-free before the giveaway.' }],
+  ]},
+  { id: 'microsoft',        title: 'Microsoft Rewards',          fields: [] },
+  { id: 'microsoft-mobile', title: 'Microsoft Rewards (Mobile)', fields: [] },
+  { id: 'aliexpress',       title: 'AliExpress',                 fields: [] },
+];
+
+function serviceRow(entry) {
+  const active = isServiceActiveForUI(entry.id);
+  const open = active && openServices.has(entry.id) && entry.fields.length > 0;
+  const caret = open ? '▾' : '▸';
+  const body = open
+    ? '<div class="svc-body open">' + entry.fields.map(f => fieldRow(f[0], f[1], f[2])).join('') + '</div>'
+    : '';
+  const expandDisabled = (!active || entry.fields.length === 0);
+  // When there are no sub-flags OR the service is inactive, the expand button
+  // still renders but clicking does nothing (cursor:default via a data-attr
+  // the CSS could pick up; simpler: just skip the onclick).
+  const onclick = expandDisabled ? '' : 'onclick="toggleServiceBody(\\'' + entry.id + '\\')"';
+  return '<div class="svc-row' + (active ? '' : ' inactive') + '">' +
+    '<div class="svc-head">' +
+      '<button type="button" class="svc-expand" ' + onclick + '>' +
+        '<span class="svc-caret">' + (expandDisabled ? '·' : caret) + '</span>' +
+        '<span class="svc-name">' + escapeHtml(entry.title) + '</span>' +
+        '<span class="svc-summary">' + escapeHtml(serviceSummary(entry.id)) + '</span>' +
+      '</button>' +
+      '<label class="svc-active">' +
+        '<input type="checkbox" ' + (active ? 'checked' : '') +
+          ' onchange="setActiveService(\\'' + entry.id + '\\', this.checked)">Active' +
+      '</label>' +
+    '</div>' +
+    body +
+  '</div>';
+}
+
 function paintSettings() {
   const view = document.getElementById('settingsView');
   if (!view || !settingsData) return;
-  const byPath = Object.fromEntries(settingsData.fields.map(f => [f.path, f]));
-
-  function fieldRow(path, label, extra) {
-    const f = byPath[path];
-    if (!f) return '';
-    extra = extra || {};
-    const hasDirty = Object.prototype.hasOwnProperty.call(settingsDirty, path);
-    const draft = hasDirty ? settingsDirty[path] : null;
-    const isRevert = hasDirty && draft === null;
-    // Effective *in the form* right now (what the user sees in the input).
-    let value;
-    if (hasDirty && !isRevert) value = draft;
-    else if (isRevert) {
-      // Show what the field would be without the override — derive from envValue or default.
-      if (f.envValue !== null && f.envValue !== undefined) {
-        value = f.type === 'number' ? Number(f.envValue) : f.type === 'boolean' ? (f.envValue === '1' || f.envValue === 'true') : f.envValue;
-      } else {
-        value = f.default;
-      }
-    } else {
-      value = f.effective;
-    }
-    const overridden = hasDirty ? !isRevert : f.overridden;
-    const dot = overridden ? '<span class="setting-dot" title="Set by app config"></span>' : '';
-    const envLabel = f.envVar ? '<span class="setting-env">' + escapeHtml(f.envVar) + '</span>' : '';
-    const revertDisabled = overridden ? '' : 'disabled';
-
-    let inputHtml;
-    if (f.type === 'boolean') {
-      const checked = value ? 'checked' : '';
-      inputHtml =
-        '<label class="setting-checkbox">' +
-          '<input type="checkbox" ' + checked + ' onchange="setSettingValue(\\'' + path + '\\', this.checked)">' +
-          (extra.onLabel || '') +
-        '</label>';
-    } else if (extra.options) {
-      const options = extra.options.map(o => {
-        const sel = String(value) === String(o.value) ? 'selected' : '';
-        return '<option value="' + o.value + '" ' + sel + '>' + escapeHtml(o.label) + '</option>';
-      }).join('');
-      const cast = f.type === 'number' ? 'Number(this.value)' : 'this.value';
-      inputHtml = '<select onchange="setSettingValue(\\'' + path + '\\', ' + cast + ')">' + options + '</select>';
-    } else if (f.type === 'number') {
-      const v = value == null ? '' : value;
-      inputHtml = '<input type="number" value="' + v + '" oninput="setSettingValue(\\'' + path + '\\', this.value === \\'\\' ? null : Number(this.value))">';
-    } else if (extra.multiline) {
-      inputHtml = '<textarea oninput="setSettingValue(\\'' + path + '\\', this.value)">' + escapeHtml(value || '') + '</textarea>';
-    } else {
-      inputHtml = '<input type="text" value="' + escapeHtml(value || '') + '" oninput="setSettingValue(\\'' + path + '\\', this.value)">';
-    }
-
-    return '<div class="setting" data-path="' + path + '">' +
-      '<div class="setting-label">' + label + envLabel + dot +
-        (extra.hint ? '<div class="setting-hint">' + extra.hint + '</div>' : '') +
-      '</div>' +
-      '<div class="setting-input">' + inputHtml + '</div>' +
-      '<button class="setting-revert" onclick="revertSettingValue(\\'' + path + '\\')" ' + revertDisabled + '>Revert</button>' +
-    '</div>';
-  }
 
   const hours = [];
   for (let h = 0; h < 24; h++) hours.push({ value: h, label: String(h).padStart(2, '0') + ':00' });
 
-  view.innerHTML =
-    '<div class="settings-section">' +
-      '<div class="settings-section-head">Schedule</div>' +
-      fieldRow('scheduler.loopSeconds', 'Loop interval (seconds)', { hint: 'Time between scheduled runs. 0 disables the loop.' }) +
-      fieldRow('scheduler.msScheduleHours', 'MS window width (hours)', { hint: 'Width of the daily Microsoft Rewards window, anchored to the start time. 0 runs immediately without anchoring.' }) +
+  // Computed MS window range hint shown under the scheduler fields.
+  let msRangeHint = '';
+  const msWidth = draftValue('scheduler.msScheduleHours') || 0;
+  const msStart = draftValue('scheduler.msScheduleStart') || 0;
+  if (msWidth > 0) {
+    const end = (Number(msStart) + Number(msWidth)) % 24;
+    const fmt = h => String(h).padStart(2, '0') + ':00';
+    msRangeHint = '<div class="setting-hint" style="margin:8px 0 0 4px">Window resolves to <b>' + fmt(msStart) + ' → ' + fmt(end) + ' local time</b>.</div>';
+  }
+
+  let html = '';
+  if (currentSettingsSection === 'scheduler') {
+    html =
+      '<div class="settings-pane-title">Scheduler</div>' +
+      fieldRow('scheduler.loopSeconds',     'Loop interval (seconds)', { hint: 'Time between scheduled runs. 0 disables the loop.' }) +
+      fieldRow('scheduler.msScheduleHours', 'MS window width (hours)',
+        { hint: 'Width of the daily Microsoft Rewards window, anchored to the start time. 0 runs immediately without anchoring.' }) +
       fieldRow('scheduler.msScheduleStart', 'MS window start (local time)', { options: hours }) +
-    '</div>' +
-    '<div class="settings-section">' +
-      '<div class="settings-section-head">Notifications' +
+      msRangeHint;
+  } else if (currentSettingsSection === 'notifications') {
+    html =
+      '<div class="settings-pane-title">Notifications' +
         '<span class="spacer"></span>' +
         '<button class="btn btn-check-all" onclick="testNotify()" id="btnTestNotify">Send test</button>' +
       '</div>' +
-      fieldRow('notifications.notify', 'Apprise URL(s)', { multiline: true, hint: 'Comma-separate multiple URLs (e.g. pover://token@user,tgram://botid/chatid).' }) +
+      fieldRow('notifications.notify', 'Apprise URL(s)',
+        { multiline: true, hint: 'One URL per line (or comma-separated). Examples: pover://token@user, tgram://botid/chatid.' }) +
       fieldRow('notifications.notifyTitle', 'Title prefix') +
-      fieldRow('panel.publicUrl', 'Public URL', { hint: 'External URL used in notifications so you can tap straight to the panel.' }) +
-    '</div>' +
-    '<div class="settings-section">' +
-      '<div class="settings-section-head">Per-service</div>' +
-      serviceSection('prime-gaming', 'Prime Gaming', [
-        fieldRow('services.prime-gaming.redeem',       'Redeem keys on external stores'),
-        fieldRow('services.prime-gaming.claimDlc',     'Claim in-game DLC content', { hint: 'Amazon removed the in-game content tab from Prime Gaming — this toggle is currently a no-op. The script skips cleanly when the tab is missing; will resume claiming if/when Amazon brings it back.' }),
-        fieldRow('services.prime-gaming.timeLeftDays', 'Skip if more than N days remain to claim', { hint: 'Leave blank to claim everything regardless of how long is left.' }),
-      ]) +
-      serviceSection('epic-games', 'Epic Games', [
-        fieldRow('services.epic-games.claimMobile',    'Claim mobile games'),
-      ]) +
-      serviceSection('gog', 'GOG', [
-        fieldRow('services.gog.keepNewsletter',        'Keep newsletter subscription after claiming'),
-      ]) +
-      serviceSection('steam', 'Steam', [
-        fieldRow('services.steam.minRating',           'Minimum review rating (1–9)', { hint: '6 = Mostly Positive; 7 = Very Positive; 8 = Overwhelmingly Positive.' }),
-        fieldRow('services.steam.minPrice',            'Minimum original price (USD)', { hint: 'Filters out shovelware that was free or near-free before the giveaway.' }),
-      ]) +
-      serviceSection('microsoft', 'Microsoft Rewards', []) +
-      serviceSection('microsoft-mobile', 'Microsoft Rewards (Mobile)', []) +
-      serviceSection('aliexpress', 'AliExpress', [], { hint: 'Collects the AliExpress daily check-in coins on each claim run (mobile site). Log in via the AliExpress card once, or set AE_EMAIL/AE_PASSWORD for unattended re-login.' }) +
-    '</div>' +
-    '<div class="settings-section">' +
-      '<div class="settings-section-head">Advanced</div>' +
-      fieldRow('advanced.dryrun',          'Dry run — skip actual claiming') +
-      fieldRow('advanced.record',          'Record HAR + video for debugging') +
-      fieldRow('advanced.timeoutSec',      'Default timeout (seconds)') +
-      fieldRow('advanced.loginTimeoutSec', 'Login timeout (seconds)') +
+      fieldRow('panel.publicUrl', 'Public URL',
+        { hint: 'External URL used in notifications so tap-targets land on the panel.' });
+  } else if (currentSettingsSection === 'services') {
+    html = '<div class="settings-pane-title">Services</div>' +
+      '<div class="svc-list">' +
+        SERVICE_ROWS.map(serviceRow).join('') +
+      '</div>';
+  } else if (currentSettingsSection === 'advanced') {
+    html =
+      '<div class="settings-pane-title">Advanced</div>' +
+      fieldRow('advanced.dryrun',          'Dry run — skip actual claiming',   { hint: 'Runs the claim pipeline without actually claiming anything. Useful for testing.' }) +
+      fieldRow('advanced.record',          'Record HAR + video for debugging', { hint: 'Writes per-run .webm + .har to data/record/. Heavier runs.' }) +
+      fieldRow('advanced.timeoutSec',      'Default timeout (seconds)',        { hint: 'Applies to Playwright page operations.' }) +
+      fieldRow('advanced.loginTimeoutSec', 'Login timeout (seconds)',          { hint: 'Separate timeout used during the login flow.' }) +
       fieldRow('advanced.width',           'Browser viewport width') +
-      fieldRow('advanced.height',          'Browser viewport height') +
-    '</div>' +
-    '<div class="settings-section">' +
-      '<div class="settings-section-head">Environment (read-only)' +
-        '<span class="spacer"></span>' +
-        '<button class="btn btn-check-all" id="btnRevealCreds" onclick="toggleRevealEnv()">Reveal credentials</button>' +
-      '</div>' +
-      '<div id="envView">Loading…</div>' +
-    '</div>';
+      fieldRow('advanced.height',          'Browser viewport height');
+  }
 
+  view.innerHTML = html;
   updateSettingsFooter();
-  loadEnvTable(envRevealed);
 }
 
 // Environment (read-only) table. Credentials are hidden by default and need
@@ -1859,33 +2055,6 @@ function setSettingValue(path, value) {
   if (/^services\\.[^.]+\\.active$/.test(path)) paintSettings();
 }
 
-function isServiceActiveForUI(id) {
-  const path = 'services.' + id + '.active';
-  if (Object.prototype.hasOwnProperty.call(settingsDirty, path)) {
-    const v = settingsDirty[path];
-    if (v !== null) return !!v;
-  }
-  const f = settingsData && settingsData.fields.find(x => x.path === path);
-  return f ? !!f.effective : true;
-}
-
-function serviceSection(id, title, childRowsHtml, extra) {
-  extra = extra || {};
-  const active = isServiceActiveForUI(id);
-  const checked = active ? 'checked' : '';
-  const head =
-    '<div class="settings-subhead">' +
-      escapeHtml(title) +
-      '<label class="settings-active-toggle">' +
-        '<input type="checkbox" ' + checked + ' onchange="setActiveService(\\'' + id + '\\', this.checked)">Active' +
-      '</label>' +
-    '</div>';
-  if (!active) return head + '<div class="settings-subflag-placeholder">Enable to configure.</div>';
-  const rows = Array.isArray(childRowsHtml) ? childRowsHtml.join('') : (childRowsHtml || '');
-  const hintRow = extra.hint ? '<div class="setting-hint" style="margin:6px 0 8px 4px">' + escapeHtml(extra.hint) + '</div>' : '';
-  return head + hintRow + rows;
-}
-
 async function setActiveService(id, nextActive) {
   const path = 'services.' + id + '.active';
   if (!nextActive) {
@@ -1922,22 +2091,16 @@ function revertSettingValue(path) {
 }
 
 function updateSettingsFooter() {
+  const footer = document.getElementById('settingsFooter');
   const counter = document.getElementById('dirtyCount');
-  const saveBtn = document.getElementById('btnSaveSettings');
-  const discardBtn = document.getElementById('btnDiscardSettings');
-  if (!counter || !saveBtn || !discardBtn) return;
+  if (!footer || !counter) return;
   const n = Object.keys(settingsDirty).length;
   if (n === 0) {
-    counter.textContent = 'No changes';
-    counter.style.color = '#8aa0c2';
-    saveBtn.disabled = true;
-    discardBtn.disabled = true;
-  } else {
-    counter.textContent = n + ' unsaved change' + (n === 1 ? '' : 's');
-    counter.style.color = '#f0c040';
-    saveBtn.disabled = false;
-    discardBtn.disabled = false;
+    footer.style.display = 'none'; // idle → footer disappears entirely
+    return;
   }
+  footer.style.display = 'flex';
+  counter.textContent = n + ' unsaved change' + (n === 1 ? '' : 's');
 }
 
 function discardSettings() {
