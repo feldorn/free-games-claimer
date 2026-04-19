@@ -815,6 +815,137 @@ function getState() {
   };
 }
 
+// ----- Stats -----
+// Aggregates claim history from per-service JSON DBs written by the claim
+// scripts. Scripts set entry.status starting with "claimed" (plain,
+// "claimed and redeemed", "claimed on gog.com", etc.) once a claim succeeds;
+// anything else (existed/failed/skipped) is excluded from game counts.
+// Microsoft Rewards is points-based and has no claim DB, so it appears in
+// the per-service table as N/A.
+
+const CLAIM_DB_FILES = {
+  'prime-gaming': 'prime-gaming.json',
+  'epic-games': 'epic-games.json',
+  'gog': 'gog.json',
+  'steam': 'steam.json',
+};
+
+function parseLocalDateTime(s) {
+  if (typeof s !== 'string' || !s) return null;
+  const d = new Date(s.replace(' ', 'T'));
+  return Number.isFinite(d.getTime()) ? d : null;
+}
+
+function localDateKey(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+async function readAllClaims() {
+  const out = [];
+  for (const [service, file] of Object.entries(CLAIM_DB_FILES)) {
+    let db;
+    try { db = await jsonDb(file, {}); }
+    catch { continue; }
+    const data = db.data || {};
+    for (const user of Object.keys(data)) {
+      const userRecords = data[user];
+      if (!userRecords || typeof userRecords !== 'object') continue;
+      for (const [gameId, entry] of Object.entries(userRecords)) {
+        if (!entry || typeof entry !== 'object') continue;
+        const status = typeof entry.status === 'string' ? entry.status : '';
+        if (!status.startsWith('claimed')) continue;
+        const at = parseLocalDateTime(entry.time);
+        if (!at) continue;
+        out.push({ service, user, gameId, title: entry.title || gameId, url: entry.url || null, at, status });
+      }
+    }
+  }
+  return out;
+}
+
+async function getStatsSummary() {
+  const claims = await readAllClaims();
+  const now = Date.now();
+  const weekAgo = now - 7 * 24 * 60 * 60 * 1000;
+  const monthAgo = now - 30 * 24 * 60 * 60 * 1000;
+  const thisWeek = claims.filter(c => c.at.getTime() >= weekAgo).length;
+  const thisMonth = claims.filter(c => c.at.getTime() >= monthAgo).length;
+  claims.sort((a, b) => b.at - a.at);
+  const latest = claims[0] || null;
+  return {
+    gamesThisWeek: thisWeek,
+    gamesThisMonth: thisMonth,
+    gamesAllTime: claims.length,
+    lastClaim: latest ? {
+      at: datetime(latest.at),
+      service: latest.service,
+      serviceName: (SITES[latest.service] && SITES[latest.service].name) || latest.service,
+      title: latest.title,
+      url: latest.url,
+    } : null,
+  };
+}
+
+async function getStatsByService() {
+  const claims = await readAllClaims();
+  const rows = {};
+  for (const svc of Object.keys(CLAIM_DB_FILES)) {
+    rows[svc] = { id: svc, thisWeek: 0, thisMonth: 0, allTime: 0, lastClaimAt: null };
+  }
+  rows['microsoft'] = { id: 'microsoft', note: 'points-based' };
+  rows['microsoft-mobile'] = { id: 'microsoft-mobile', note: 'points-based' };
+  const now = Date.now();
+  const weekAgo = now - 7 * 24 * 60 * 60 * 1000;
+  const monthAgo = now - 30 * 24 * 60 * 60 * 1000;
+  for (const c of claims) {
+    const row = rows[c.service];
+    if (!row) continue;
+    row.allTime++;
+    if (c.at.getTime() >= weekAgo) row.thisWeek++;
+    if (c.at.getTime() >= monthAgo) row.thisMonth++;
+    const ts = datetime(c.at);
+    if (!row.lastClaimAt || ts > row.lastClaimAt) row.lastClaimAt = ts;
+  }
+  return Object.values(rows).map(r => ({
+    ...r,
+    name: (SITES[r.id] && SITES[r.id].name) || r.id,
+  }));
+}
+
+async function getStatsDaily(days = 30) {
+  const claims = await readAllClaims();
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const buckets = [];
+  for (let i = days - 1; i >= 0; i--) {
+    const d = new Date(today);
+    d.setDate(d.getDate() - i);
+    buckets.push({ date: localDateKey(d), count: 0 });
+  }
+  const byDate = Object.fromEntries(buckets.map(b => [b.date, b]));
+  for (const c of claims) {
+    const key = localDateKey(c.at);
+    if (byDate[key]) byDate[key].count++;
+  }
+  return buckets;
+}
+
+async function getActivity(limit = 10) {
+  const claims = await readAllClaims();
+  claims.sort((a, b) => b.at - a.at);
+  return claims.slice(0, limit).map(c => ({
+    at: datetime(c.at),
+    service: c.service,
+    serviceName: (SITES[c.service] && SITES[c.service].name) || c.service,
+    title: c.title,
+    url: c.url,
+    status: c.status,
+  }));
+}
+
 function parseBody(req) {
   return new Promise((resolve, reject) => {
     let body = '';
@@ -856,10 +987,40 @@ const PANEL_HTML = `<!DOCTYPE html>
   .tab-panel.stub h2 { color: #e0e0e0; margin-bottom: 10px; font-size: 18px; }
   .tab-panel.stub p { font-size: 14px; max-width: 480px; margin: 0 auto; }
   body[data-tab="sessions"] .tab-panel[data-panel="sessions"] { display: flex; flex: 1; flex-direction: column; }
-  body[data-tab="stats"] .tab-panel[data-panel="stats"] { display: block; }
+  body[data-tab="stats"] .tab-panel[data-panel="stats"] { display: block; overflow-y: auto; padding: 24px 32px; }
   body[data-tab="schedule"] .tab-panel[data-panel="schedule"] { display: block; overflow-y: auto; padding: 28px 32px; }
   body[data-tab="logs"] .tab-panel[data-panel="logs"] { display: flex; flex: 1; flex-direction: column; }
   body:not([data-tab="sessions"]) .sessions-only { display: none !important; }
+
+  .stats-kpis { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; margin-bottom: 24px; }
+  .kpi { background: #16233c; border: 1px solid #233454; border-radius: 8px; padding: 14px 16px; }
+  .kpi .kpi-label { font-size: 11px; color: #8aa0c2; text-transform: uppercase; letter-spacing: 0.06em; }
+  .kpi .kpi-value { font-size: 28px; font-weight: 600; color: #fff; margin-top: 6px; line-height: 1.1; }
+  .kpi .kpi-hint { font-size: 12px; color: #8aa0c2; margin-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  .stats-section { margin-top: 24px; }
+  .stats-section-title { font-size: 11px; color: #8aa0c2; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 10px; }
+
+  .stats-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .stats-table th, .stats-table td { padding: 8px 10px; text-align: left; border-bottom: 1px solid #233454; }
+  .stats-table th { font-size: 11px; color: #8aa0c2; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 500; }
+  .stats-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .stats-table .muted { color: #8aa0c2; font-style: italic; }
+
+  .stats-chart-wrap { background: #0d1830; border-radius: 6px; padding: 8px 10px 6px; }
+  .stats-chart { display: flex; align-items: flex-end; gap: 2px; height: 120px; }
+  .stats-chart .bar { flex: 1; background: #4ecca3; min-height: 2px; border-radius: 2px 2px 0 0; }
+  .stats-chart .bar.zero { background: #223454; opacity: 0.5; }
+  .stats-chart-labels { display: flex; justify-content: space-between; color: #8aa0c2; font-size: 11px; margin-top: 6px; }
+
+  .stats-activity { display: flex; flex-direction: column; gap: 4px; }
+  .stats-activity .act { display: flex; gap: 12px; padding: 8px 10px; background: #16233c; border-radius: 6px; font-size: 13px; align-items: center; }
+  .stats-activity .act .at { color: #8aa0c2; font-size: 12px; min-width: 160px; font-variant-numeric: tabular-nums; }
+  .stats-activity .act .svc { color: #4ecca3; min-width: 120px; font-weight: 500; }
+  .stats-activity .act .title { flex: 1; color: #e0e0e0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .stats-activity .act .title a { color: inherit; text-decoration: none; }
+  .stats-activity .act .title a:hover { text-decoration: underline; }
+  .stats-empty { color: #8aa0c2; font-style: italic; padding: 20px; text-align: center; background: #16233c; border-radius: 6px; }
 
   .sched-row { display: flex; gap: 24px; margin-bottom: 22px; align-items: baseline; }
   .sched-label { font-size: 11px; color: #8aa0c2; text-transform: uppercase; letter-spacing: 0.06em; min-width: 110px; flex-shrink: 0; padding-top: 4px; }
@@ -1013,9 +1174,23 @@ const PANEL_HTML = `<!DOCTYPE html>
       </div>
     </div>
   </div>
-  <div class="tab-panel stub" data-panel="stats">
-    <h2>Stats</h2>
-    <p>Games claimed this week and all-time, MS Rewards balance and points claimable today, per-service breakdown, 30-day chart — coming soon.</p>
+  <div class="tab-panel" data-panel="stats">
+    <div class="stats-kpis" id="statsKpis"></div>
+    <div class="stats-section">
+      <div class="stats-section-title">Per service</div>
+      <table class="stats-table" id="statsTable"></table>
+    </div>
+    <div class="stats-section">
+      <div class="stats-section-title">Claims over the last 30 days</div>
+      <div class="stats-chart-wrap">
+        <div class="stats-chart" id="statsChart"></div>
+        <div class="stats-chart-labels" id="statsChartLabels"></div>
+      </div>
+    </div>
+    <div class="stats-section">
+      <div class="stats-section-title">Recent claims</div>
+      <div class="stats-activity" id="statsActivity"></div>
+    </div>
   </div>
   <div class="tab-panel" data-panel="schedule">
     <div id="schedView"></div>
@@ -1052,6 +1227,89 @@ function switchTab(tab) {
   if (tab === 'logs') startLogsTabPoll();
   else stopLogsTabPoll();
   if (tab === 'schedule') renderScheduleTab();
+  if (tab === 'stats') renderStatsTab();
+}
+
+async function renderStatsTab() {
+  const kpis = document.getElementById('statsKpis');
+  const table = document.getElementById('statsTable');
+  const chart = document.getElementById('statsChart');
+  const chartLabels = document.getElementById('statsChartLabels');
+  const activity = document.getElementById('statsActivity');
+  if (!kpis) return;
+  try {
+    const [summary, byService, daily, recent] = await Promise.all([
+      api('GET', '/stats/summary'),
+      api('GET', '/stats/by-service'),
+      api('GET', '/stats/daily?days=30'),
+      api('GET', '/activity?limit=10'),
+    ]);
+    const lastHint = summary.lastClaim ? summary.lastClaim.title : '';
+    const lastVal  = summary.lastClaim ? summary.lastClaim.serviceName : '—';
+    kpis.innerHTML = [
+      { label: 'Games this week',  value: summary.gamesThisWeek },
+      { label: 'Games this month', value: summary.gamesThisMonth },
+      { label: 'Games all-time',   value: summary.gamesAllTime },
+      { label: 'Last claim',       value: lastVal, hint: lastHint },
+    ].map(k =>
+      '<div class="kpi"><div class="kpi-label">' + k.label + '</div>' +
+      '<div class="kpi-value">' + escapeHtml(String(k.value)) + '</div>' +
+      (k.hint ? '<div class="kpi-hint" title="' + escapeHtml(k.hint) + '">' + escapeHtml(k.hint) + '</div>' : '') +
+      '</div>'
+    ).join('');
+
+    const rows = byService.map(r => {
+      if (r.note) {
+        return '<tr><td>' + escapeHtml(r.name) + '</td>' +
+          '<td colspan="4" class="muted">' + escapeHtml(r.note) + ' — see Microsoft Rewards for points</td></tr>';
+      }
+      const last = r.lastClaimAt || '<span class="muted">—</span>';
+      return '<tr><td>' + escapeHtml(r.name) + '</td>' +
+        '<td class="num">' + r.thisWeek + '</td>' +
+        '<td class="num">' + r.thisMonth + '</td>' +
+        '<td class="num">' + r.allTime + '</td>' +
+        '<td>' + last + '</td></tr>';
+    }).join('');
+    table.innerHTML = '<thead><tr>' +
+      '<th>Service</th>' +
+      '<th class="num">This week</th>' +
+      '<th class="num">This month</th>' +
+      '<th class="num">All-time</th>' +
+      '<th>Last claim</th>' +
+      '</tr></thead><tbody>' + rows + '</tbody>';
+
+    const max = Math.max(1, ...daily.map(d => d.count));
+    chart.innerHTML = daily.map(d => {
+      const pct = (d.count / max) * 100;
+      const cls = d.count === 0 ? ' zero' : '';
+      return '<div class="bar' + cls + '" style="height:' + pct + '%" title="' + d.date + ': ' + d.count + '"></div>';
+    }).join('');
+    if (daily.length) {
+      const totalInRange = daily.reduce((s, d) => s + d.count, 0);
+      chartLabels.innerHTML = '<span>' + daily[0].date + '</span>' +
+        '<span>' + totalInRange + ' in last 30 days</span>' +
+        '<span>' + daily[daily.length - 1].date + '</span>';
+    } else {
+      chartLabels.innerHTML = '';
+    }
+
+    if (!recent || !recent.length) {
+      activity.innerHTML = '<div class="stats-empty">No claims recorded yet. The activity log will populate after your first successful claim run.</div>';
+    } else {
+      activity.innerHTML = recent.map(a => {
+        const titleHtml = a.url
+          ? '<a href="' + encodeURI(a.url) + '" target="_blank" rel="noopener">' + escapeHtml(a.title) + '</a>'
+          : escapeHtml(a.title);
+        return '<div class="act">' +
+          '<span class="at">' + escapeHtml(a.at) + '</span>' +
+          '<span class="svc">' + escapeHtml(a.serviceName) + '</span>' +
+          '<span class="title">' + titleHtml + '</span>' +
+          '</div>';
+      }).join('');
+    }
+  } catch (e) {
+    kpis.innerHTML = '<div style="color:#e94560;padding:20px;background:#2a1a1e;border-radius:6px">Failed to load stats: ' + escapeHtml((e && e.message) || 'unknown error') + '</div>';
+  }
 }
 
 function renderScheduleTab() {
@@ -1759,6 +2017,27 @@ const server = http.createServer(async (req, res) => {
       const url = new URL(req.url, `http://${req.headers.host}`);
       const since = parseInt(url.searchParams.get('since') || '0', 10);
       sendJson(res, { lines: runLog.slice(since), total: runLog.length, status: runStatus });
+      return;
+    }
+
+    if (req.method === 'GET' && req.url === '/api/stats/summary') {
+      sendJson(res, await getStatsSummary());
+      return;
+    }
+    if (req.method === 'GET' && req.url === '/api/stats/by-service') {
+      sendJson(res, await getStatsByService());
+      return;
+    }
+    if (req.method === 'GET' && req.url.startsWith('/api/stats/daily')) {
+      const url = new URL(req.url, `http://${req.headers.host}`);
+      const days = Math.min(365, Math.max(1, parseInt(url.searchParams.get('days') || '30', 10)));
+      sendJson(res, await getStatsDaily(days));
+      return;
+    }
+    if (req.method === 'GET' && req.url.startsWith('/api/activity')) {
+      const url = new URL(req.url, `http://${req.headers.host}`);
+      const limit = Math.min(100, Math.max(1, parseInt(url.searchParams.get('limit') || '10', 10)));
+      sendJson(res, await getActivity(limit));
       return;
     }
 
