@@ -866,8 +866,43 @@ async function readAllClaims() {
   return out;
 }
 
+// Aggregate MS Rewards point history captured by microsoft.js. Each run
+// records { at, session, before, after, earned } in microsoft-rewards.json
+// — we can derive: latest visible balance, points earned in a window,
+// per-session counts for the stats table.
+async function getMsRewards() {
+  let db;
+  try { db = await jsonDb('microsoft-rewards.json', { runs: [] }); }
+  catch { return { latestBalance: null, latestAt: null, weekEarned: 0, monthEarned: 0, bySession: {} }; }
+  const runs = (db.data && Array.isArray(db.data.runs)) ? db.data.runs : [];
+  const now = Date.now();
+  const weekAgo = now - 7 * 24 * 60 * 60 * 1000;
+  const monthAgo = now - 30 * 24 * 60 * 60 * 1000;
+  const toMs = s => { const d = parseLocalDateTime(s); return d ? d.getTime() : 0; };
+  let weekEarned = 0, monthEarned = 0;
+  let latestBalance = null, latestAt = null, latestMs = 0;
+  const bySession = {
+    'microsoft':        { thisWeek: 0, thisMonth: 0, allTime: 0, lastClaimAt: null, unit: 'points' },
+    'microsoft-mobile': { thisWeek: 0, thisMonth: 0, allTime: 0, lastClaimAt: null, unit: 'points' },
+  };
+  for (const r of runs) {
+    const tMs = toMs(r.at);
+    const earned = Number.isFinite(r.earned) ? Math.max(0, r.earned) : 0;
+    if (tMs >= weekAgo) weekEarned += earned;
+    if (tMs >= monthAgo) monthEarned += earned;
+    if (r.after != null && tMs >= latestMs) { latestBalance = r.after; latestAt = r.at; latestMs = tMs; }
+    const sKey = r.session === 'mobile' ? 'microsoft-mobile' : 'microsoft';
+    const row = bySession[sKey];
+    row.allTime += earned;
+    if (tMs >= weekAgo) row.thisWeek += earned;
+    if (tMs >= monthAgo) row.thisMonth += earned;
+    if (!row.lastClaimAt || tMs > toMs(row.lastClaimAt)) row.lastClaimAt = r.at;
+  }
+  return { latestBalance, latestAt, weekEarned, monthEarned, bySession };
+}
+
 async function getStatsSummary() {
-  const claims = await readAllClaims();
+  const [claims, ms] = await Promise.all([readAllClaims(), getMsRewards()]);
   const now = Date.now();
   const weekAgo = now - 7 * 24 * 60 * 60 * 1000;
   const monthAgo = now - 30 * 24 * 60 * 60 * 1000;
@@ -886,23 +921,28 @@ async function getStatsSummary() {
       title: latest.title,
       url: latest.url,
     } : null,
+    msPointsBalance: ms.latestBalance,
+    msPointsBalanceAt: ms.latestAt,
+    msPointsThisWeek: ms.weekEarned,
+    msPointsThisMonth: ms.monthEarned,
   };
 }
 
 async function getStatsByService() {
-  const claims = await readAllClaims();
+  const [claims, ms] = await Promise.all([readAllClaims(), getMsRewards()]);
   const rows = {};
   for (const svc of Object.keys(CLAIM_DB_FILES)) {
-    rows[svc] = { id: svc, thisWeek: 0, thisMonth: 0, allTime: 0, lastClaimAt: null };
+    rows[svc] = { id: svc, unit: 'games', thisWeek: 0, thisMonth: 0, allTime: 0, lastClaimAt: null };
   }
-  rows['microsoft'] = { id: 'microsoft', note: 'points-based' };
-  rows['microsoft-mobile'] = { id: 'microsoft-mobile', note: 'points-based' };
+  // MS rows use real aggregates from the MS runs DB instead of the "N/A" stub.
+  rows['microsoft']        = { id: 'microsoft',        ...ms.bySession['microsoft'] };
+  rows['microsoft-mobile'] = { id: 'microsoft-mobile', ...ms.bySession['microsoft-mobile'] };
   const now = Date.now();
   const weekAgo = now - 7 * 24 * 60 * 60 * 1000;
   const monthAgo = now - 30 * 24 * 60 * 60 * 1000;
   for (const c of claims) {
     const row = rows[c.service];
-    if (!row) continue;
+    if (!row || row.unit !== 'games') continue;
     row.allTime++;
     if (c.at.getTime() >= weekAgo) row.thisWeek++;
     if (c.at.getTime() >= monthAgo) row.thisMonth++;
@@ -1246,28 +1286,40 @@ async function renderStatsTab() {
     ]);
     const lastHint = summary.lastClaim ? summary.lastClaim.title : '';
     const lastVal  = summary.lastClaim ? summary.lastClaim.serviceName : '—';
-    kpis.innerHTML = [
-      { label: 'Games this week',  value: summary.gamesThisWeek },
-      { label: 'Games this month', value: summary.gamesThisMonth },
-      { label: 'Games all-time',   value: summary.gamesAllTime },
+    const fmt = n => (n == null ? '—' : new Intl.NumberFormat().format(n));
+    const tiles = [
+      { label: 'Games this week',  value: fmt(summary.gamesThisWeek) },
+      { label: 'Games this month', value: fmt(summary.gamesThisMonth) },
+      { label: 'Games all-time',   value: fmt(summary.gamesAllTime) },
       { label: 'Last claim',       value: lastVal, hint: lastHint },
-    ].map(k =>
+      { label: 'MS Rewards balance',
+        value: fmt(summary.msPointsBalance),
+        hint: summary.msPointsBalance == null ? 'captured on next microsoft run' : 'as of ' + summary.msPointsBalanceAt },
+      { label: 'MS points this week',
+        value: fmt(summary.msPointsThisWeek),
+        hint: summary.msPointsBalance == null ? '' : 'via captured runs' },
+    ];
+    kpis.innerHTML = tiles.map(k =>
       '<div class="kpi"><div class="kpi-label">' + k.label + '</div>' +
       '<div class="kpi-value">' + escapeHtml(String(k.value)) + '</div>' +
       (k.hint ? '<div class="kpi-hint" title="' + escapeHtml(k.hint) + '">' + escapeHtml(k.hint) + '</div>' : '') +
       '</div>'
     ).join('');
 
+    const fmt2 = n => new Intl.NumberFormat().format(n);
     const rows = byService.map(r => {
-      if (r.note) {
-        return '<tr><td>' + escapeHtml(r.name) + '</td>' +
-          '<td colspan="4" class="muted">' + escapeHtml(r.note) + ' — see Microsoft Rewards for points</td></tr>';
-      }
       const last = r.lastClaimAt || '<span class="muted">—</span>';
+      const isPts = r.unit === 'points';
+      // MS row with no captured runs yet — show a hint instead of a row of zeros.
+      if (isPts && !r.lastClaimAt) {
+        return '<tr><td>' + escapeHtml(r.name) + '</td>' +
+          '<td colspan="4" class="muted">points-based — balance appears after the next microsoft run</td></tr>';
+      }
+      const suffix = isPts ? ' pts' : '';
       return '<tr><td>' + escapeHtml(r.name) + '</td>' +
-        '<td class="num">' + r.thisWeek + '</td>' +
-        '<td class="num">' + r.thisMonth + '</td>' +
-        '<td class="num">' + r.allTime + '</td>' +
+        '<td class="num">' + fmt2(r.thisWeek) + suffix + '</td>' +
+        '<td class="num">' + fmt2(r.thisMonth) + suffix + '</td>' +
+        '<td class="num">' + fmt2(r.allTime) + suffix + '</td>' +
         '<td>' + last + '</td></tr>';
     }).join('');
     table.innerHTML = '<thead><tr>' +

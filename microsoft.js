@@ -1,7 +1,7 @@
 import { chromium, devices } from 'patchright';
 import { authenticator } from 'otplib';
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
-import { delay, datetime, prompt, notify, log, dataDir } from './src/util.js';
+import { delay, datetime, prompt, notify, log, dataDir, jsonDb } from './src/util.js';
 import { cfg } from './src/config.js';
 
 const BING_REWARDS_URL = 'https://rewards.bing.com';
@@ -525,6 +525,29 @@ async function login(page) {
   if (!cfg.debug) page.context().setDefaultTimeout(cfg.timeout);
 }
 
+// Scrape the current Rewards points balance from rewards.bing.com. The
+// counter lives in the top-right of the dashboard; MS has used several
+// different IDs over the years, so try a few and take the first one that
+// yields a plausible integer. Returns null if none match (we just skip
+// recording the run instead of failing it).
+async function readPointsBalance(page) {
+  try {
+    await page.goto(BING_REWARDS_URL, { waitUntil: 'load', timeout: 30000 });
+    await delay(2500);
+    const selectors = ['#id_rc', '[data-bi-id="userCounter"]', '#getPointsCounter', '.pointsValue'];
+    for (const sel of selectors) {
+      const loc = page.locator(sel).first();
+      if (await loc.count() === 0) continue;
+      const text = await loc.innerText({ timeout: 3000 }).catch(() => '');
+      const n = parseInt(String(text).replace(/[^\d]/g, ''), 10);
+      if (Number.isFinite(n) && n > 0) return n;
+    }
+  } catch (e) {
+    log.warn(`readPointsBalance: ${e.message}`);
+  }
+  return null;
+}
+
 async function clickEveryPendingActivityCard(page) {
   log.info('Clicking pending activity cards');
   await page.goto(BING_REWARDS_URL, { waitUntil: 'load' });
@@ -603,11 +626,30 @@ const desktopSearchCount = 33 + Math.floor(Math.random() * 5); // 33–37
 const mobileSearchCount = 23 + Math.floor(Math.random() * 5);  // 23–27
 const searchTerms = await buildSearchList(desktopSearchCount + mobileSearchCount);
 
+// Per-run point balance history used by the web panel's Stats tab.
+const msDb = await jsonDb('microsoft-rewards.json', { runs: [] });
+async function recordMsRun(session, startedAt, before, after) {
+  if (before == null && after == null) return;
+  msDb.data.runs.push({
+    at: startedAt,
+    session,
+    before,
+    after,
+    earned: (before != null && after != null) ? (after - before) : null,
+  });
+  // Cap retention at 500 runs so the file can't grow unbounded.
+  if (msDb.data.runs.length > 500) msDb.data.runs = msDb.data.runs.slice(-500);
+  try { await msDb.write(); }
+  catch (e) { log.warn(`ms stats write failed: ${e.message}`); }
+}
+
 // Desktop session
 log.section('Desktop');
 {
   const { context, page } = await createContext(false);
   activeContext = context;
+  const startedAt = datetime();
+  let before = null, after = null;
   try {
     let loggedIn = await isLoggedIn(page);
     if (!loggedIn) {
@@ -616,8 +658,12 @@ log.section('Desktop');
     }
     if (loggedIn) {
       log.status('Signed in', 'yes');
+      before = await readPointsBalance(page);
+      if (before != null) log.status('Points before', before);
       await clickEveryPendingActivityCard(page);
       await executeBingSearches(page, searchTerms.slice(0, desktopSearchCount));
+      after = await readPointsBalance(page);
+      if (after != null) log.status('Points after', after + (before != null ? ` (+${after - before})` : ''));
     } else {
       log.fail('Login failed or timed out — skipping desktop session');
     }
@@ -625,6 +671,7 @@ log.section('Desktop');
     await context.close();
     activeContext = null;
   }
+  await recordMsRun('desktop', startedAt, before, after);
 }
 
 // Random gap between sessions — a human wouldn't switch devices instantly
@@ -637,6 +684,8 @@ log.section('Mobile');
 {
   const { context, page } = await createContext(true);
   activeContext = context;
+  const startedAt = datetime();
+  let before = null, after = null;
   try {
     let loggedIn = await isLoggedIn(page);
     if (!loggedIn) {
@@ -645,8 +694,12 @@ log.section('Mobile');
     }
     if (loggedIn) {
       log.status('Signed in', 'yes');
+      before = await readPointsBalance(page);
+      if (before != null) log.status('Points before', before);
       await clickEveryPendingActivityCard(page);
       await executeBingSearches(page, searchTerms.slice(-mobileSearchCount));
+      after = await readPointsBalance(page);
+      if (after != null) log.status('Points after', after + (before != null ? ` (+${after - before})` : ''));
     } else {
       log.fail('Login failed or timed out — skipping mobile session');
     }
@@ -654,6 +707,7 @@ log.section('Mobile');
     await context.close();
     activeContext = null;
   }
+  await recordMsRun('mobile', startedAt, before, after);
 }
 
 await notify('microsoft-rewards: completed desktop and mobile reward sessions.');
