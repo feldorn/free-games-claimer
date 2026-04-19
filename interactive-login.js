@@ -1121,8 +1121,10 @@ function render() {
   }).join('');
 
   // Once all sessions are OK the stepper is no longer actionable — the strip
-  // below communicates current state more compactly.
-  steps.style.display = state.allLoggedIn ? 'none' : 'flex';
+  // below communicates current state more compactly. Also hide stepper + cards
+  // during an active login so the VNC iframe has more room.
+  steps.style.display = (state.allLoggedIn || state.activeBrowser) ? 'none' : 'flex';
+  cards.style.display = state.activeBrowser ? 'none' : 'grid';
 
   const isRunning = state.runStatus === 'running';
   const disabled = busy || !!state.activeBrowser || isRunning;
