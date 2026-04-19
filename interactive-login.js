@@ -1,5 +1,5 @@
 import http from 'node:http';
-import { spawn } from 'node:child_process';
+import { spawn, execFile } from 'node:child_process';
 import { chromium, devices } from 'patchright';
 import { datetime, notify, jsonDb, normalizeTitle } from './src/util.js';
 import { cfg } from './src/config.js';
@@ -1115,6 +1115,34 @@ const PANEL_HTML = `<!DOCTYPE html>
   body[data-tab="stats"] .tab-panel[data-panel="stats"] { display: block; overflow-y: auto; padding: 24px 32px; }
   body[data-tab="schedule"] .tab-panel[data-panel="schedule"] { display: block; overflow-y: auto; padding: 28px 32px; }
   body[data-tab="logs"] .tab-panel[data-panel="logs"] { display: flex; flex: 1; flex-direction: column; }
+  body[data-tab="settings"] .tab-panel[data-panel="settings"] { display: flex; flex: 1; flex-direction: column; position: relative; }
+
+  .settings-view { flex: 1; overflow-y: auto; padding: 24px 32px 16px; }
+  .settings-section { margin-bottom: 28px; }
+  .settings-section-head { font-size: 11px; color: #8aa0c2; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 10px; display: flex; align-items: center; gap: 12px; }
+  .settings-section-head .spacer { flex: 1; }
+  .setting { display: grid; grid-template-columns: minmax(180px, 220px) 1fr auto; gap: 16px; align-items: start; padding: 12px 0; border-bottom: 1px solid #1a2a48; }
+  .setting:last-child { border-bottom: none; }
+  .setting-label { font-size: 13px; color: #e0e0e0; padding-top: 7px; line-height: 1.4; }
+  .setting-env { font-size: 11px; color: #8aa0c2; font-family: 'Menlo', 'Consolas', monospace; margin-left: 6px; }
+  .setting-dot { width: 6px; height: 6px; border-radius: 50%; background: #4ecca3; display: inline-block; margin-left: 6px; vertical-align: middle; }
+  .setting-hint { font-size: 11px; color: #8aa0c2; margin-top: 3px; line-height: 1.4; font-style: italic; }
+  .setting-input { display: flex; align-items: center; gap: 8px; }
+  .setting-input input[type="number"], .setting-input input[type="text"], .setting-input select, .setting-input textarea {
+    width: 100%; background: #0d1830; color: #e0e0e0; border: 1px solid #233454; border-radius: 4px; padding: 6px 8px; font-size: 13px; font-family: inherit;
+  }
+  .setting-input input[type="number"]:focus, .setting-input input[type="text"]:focus, .setting-input select:focus, .setting-input textarea:focus {
+    outline: none; border-color: #4ecca3;
+  }
+  .setting-input textarea { min-height: 60px; resize: vertical; font-family: 'Menlo', 'Consolas', monospace; font-size: 12px; }
+  .setting-checkbox { display: inline-flex; align-items: center; gap: 8px; color: #e0e0e0; font-size: 13px; cursor: pointer; }
+  .setting-checkbox input { width: 16px; height: 16px; cursor: pointer; }
+  .setting-revert { background: transparent; border: 1px solid #233454; border-radius: 4px; padding: 5px 10px; color: #8aa0c2; cursor: pointer; font-size: 11px; white-space: nowrap; margin-top: 3px; }
+  .setting-revert:hover:not(:disabled) { background: #1a2a48; color: #e0e0e0; border-color: #2a3a5a; }
+  .setting-revert:disabled { opacity: 0.25; cursor: not-allowed; }
+
+  .settings-footer { background: #16233c; border-top: 1px solid #233454; padding: 12px 32px; display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+  .settings-footer .dirty-count { color: #f0c040; font-size: 13px; margin-right: auto; font-weight: 500; }
   body:not([data-tab="sessions"]) .sessions-only { display: none !important; }
 
   .stats-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 24px; }
@@ -1280,6 +1308,7 @@ const PANEL_HTML = `<!DOCTYPE html>
       <button class="tab" data-tab="stats" onclick="switchTab('stats')">Stats</button>
       <button class="tab" data-tab="schedule" onclick="switchTab('schedule')">Schedule</button>
       <button class="tab" data-tab="logs" onclick="switchTab('logs')">Logs</button>
+      <button class="tab" data-tab="settings" onclick="switchTab('settings')">Settings</button>
     </nav>
     <div class="header-actions">
       <button class="btn btn-check-all sessions-only" onclick="checkAll()" id="btnCheckAll">Check All Sessions</button>
@@ -1337,6 +1366,14 @@ const PANEL_HTML = `<!DOCTYPE html>
       <div class="logs-empty">No run activity yet. The log will populate during a manual Run Now or scheduled run.</div>
     </div>
   </div>
+  <div class="tab-panel" data-panel="settings">
+    <div class="settings-view" id="settingsView">Loading…</div>
+    <div class="settings-footer" id="settingsFooter" style="display:none">
+      <span class="dirty-count" id="dirtyCount">0 unsaved changes</span>
+      <button class="btn btn-cancel" onclick="discardSettings()">Discard</button>
+      <button class="btn btn-run" onclick="saveSettings()" id="btnSaveSettings">Save</button>
+    </div>
+  </div>
 </div>
 <script>
 const NOVNC_PORT = ${NOVNC_PORT};
@@ -1361,6 +1398,196 @@ function switchTab(tab) {
   else stopLogsTabPoll();
   if (tab === 'schedule') renderScheduleTab();
   if (tab === 'stats') renderStatsTab();
+  if (tab === 'settings') renderSettingsTab();
+}
+
+// --- Settings tab ---
+// Holds the last /api/config response. Re-fetched on tab entry and after save.
+let settingsData = null;
+// path → proposed value. null means "revert this field to env/default".
+let settingsDirty = {};
+
+async function renderSettingsTab() {
+  const view = document.getElementById('settingsView');
+  if (!view) return;
+  try {
+    settingsData = await api('GET', '/config');
+    settingsDirty = {};
+    paintSettings();
+  } catch (e) {
+    view.innerHTML = '<div class="stats-empty" style="margin:24px">Failed to load config: ' + escapeHtml(e.message) + '</div>';
+  }
+}
+
+function paintSettings() {
+  const view = document.getElementById('settingsView');
+  if (!view || !settingsData) return;
+  const byPath = Object.fromEntries(settingsData.fields.map(f => [f.path, f]));
+
+  function fieldRow(path, label, extra) {
+    const f = byPath[path];
+    if (!f) return '';
+    extra = extra || {};
+    const hasDirty = Object.prototype.hasOwnProperty.call(settingsDirty, path);
+    const draft = hasDirty ? settingsDirty[path] : null;
+    const isRevert = hasDirty && draft === null;
+    // Effective *in the form* right now (what the user sees in the input).
+    let value;
+    if (hasDirty && !isRevert) value = draft;
+    else if (isRevert) {
+      // Show what the field would be without the override — derive from envValue or default.
+      if (f.envValue !== null && f.envValue !== undefined) {
+        value = f.type === 'number' ? Number(f.envValue) : f.type === 'boolean' ? (f.envValue === '1' || f.envValue === 'true') : f.envValue;
+      } else {
+        value = f.default;
+      }
+    } else {
+      value = f.effective;
+    }
+    const overridden = hasDirty ? !isRevert : f.overridden;
+    const dot = overridden ? '<span class="setting-dot" title="Set by app config"></span>' : '';
+    const envLabel = f.envVar ? '<span class="setting-env">' + escapeHtml(f.envVar) + '</span>' : '';
+    const revertDisabled = overridden ? '' : 'disabled';
+
+    let inputHtml;
+    if (f.type === 'boolean') {
+      const checked = value ? 'checked' : '';
+      inputHtml =
+        '<label class="setting-checkbox">' +
+          '<input type="checkbox" ' + checked + ' onchange="setSettingValue(\\'' + path + '\\', this.checked)">' +
+          (extra.onLabel || '') +
+        '</label>';
+    } else if (extra.options) {
+      const options = extra.options.map(o => {
+        const sel = String(value) === String(o.value) ? 'selected' : '';
+        return '<option value="' + o.value + '" ' + sel + '>' + escapeHtml(o.label) + '</option>';
+      }).join('');
+      const cast = f.type === 'number' ? 'Number(this.value)' : 'this.value';
+      inputHtml = '<select onchange="setSettingValue(\\'' + path + '\\', ' + cast + ')">' + options + '</select>';
+    } else if (f.type === 'number') {
+      const v = value == null ? '' : value;
+      inputHtml = '<input type="number" value="' + v + '" onchange="setSettingValue(\\'' + path + '\\', this.value === \\'\\' ? null : Number(this.value))">';
+    } else if (extra.multiline) {
+      inputHtml = '<textarea onchange="setSettingValue(\\'' + path + '\\', this.value)">' + escapeHtml(value || '') + '</textarea>';
+    } else {
+      inputHtml = '<input type="text" value="' + escapeHtml(value || '') + '" onchange="setSettingValue(\\'' + path + '\\', this.value)">';
+    }
+
+    return '<div class="setting" data-path="' + path + '">' +
+      '<div class="setting-label">' + label + envLabel + dot +
+        (extra.hint ? '<div class="setting-hint">' + extra.hint + '</div>' : '') +
+      '</div>' +
+      '<div class="setting-input">' + inputHtml + '</div>' +
+      '<button class="setting-revert" onclick="revertSettingValue(\\'' + path + '\\')" ' + revertDisabled + '>Revert</button>' +
+    '</div>';
+  }
+
+  const hours = [];
+  for (let h = 0; h < 24; h++) hours.push({ value: h, label: String(h).padStart(2, '0') + ':00' });
+
+  view.innerHTML =
+    '<div class="settings-section">' +
+      '<div class="settings-section-head">Schedule</div>' +
+      fieldRow('scheduler.loopSeconds', 'Loop interval (seconds)', { hint: 'Time between scheduled runs. 0 disables the loop.' }) +
+      fieldRow('scheduler.msScheduleHours', 'MS window width (hours)', { hint: 'Width of the daily Microsoft Rewards window, anchored to the start time. 0 runs immediately without anchoring.' }) +
+      fieldRow('scheduler.msScheduleStart', 'MS window start (local time)', { options: hours }) +
+    '</div>' +
+    '<div class="settings-section">' +
+      '<div class="settings-section-head">Notifications' +
+        '<span class="spacer"></span>' +
+        '<button class="btn btn-check-all" onclick="testNotify()" id="btnTestNotify">Send test</button>' +
+      '</div>' +
+      fieldRow('notifications.notify', 'Apprise URL(s)', { multiline: true, hint: 'Comma-separate multiple URLs (e.g. pover://token@user,tgram://botid/chatid).' }) +
+      fieldRow('notifications.notifyTitle', 'Title prefix') +
+      fieldRow('panel.publicUrl', 'Public URL', { hint: 'External URL used in notifications so you can tap straight to the panel.' }) +
+    '</div>';
+
+  updateSettingsFooter();
+}
+
+function setSettingValue(path, value) {
+  const f = settingsData.fields.find(x => x.path === path);
+  if (!f) return;
+  // If the draft matches what's already effective AND there's no existing
+  // app override, treat as "no change" and drop the dirty entry.
+  if (!f.overridden && value !== null && String(value) === String(f.effective)) {
+    delete settingsDirty[path];
+  } else {
+    settingsDirty[path] = value;
+  }
+  updateSettingsFooter();
+}
+
+function revertSettingValue(path) {
+  const f = settingsData.fields.find(x => x.path === path);
+  if (!f) return;
+  if (f.overridden) {
+    // Remove the on-disk override — queue a null patch.
+    settingsDirty[path] = null;
+  } else {
+    // Just drop any in-flight edit.
+    delete settingsDirty[path];
+  }
+  paintSettings();
+}
+
+function updateSettingsFooter() {
+  const footer = document.getElementById('settingsFooter');
+  const counter = document.getElementById('dirtyCount');
+  if (!footer || !counter) return;
+  const n = Object.keys(settingsDirty).length;
+  if (n === 0) {
+    footer.style.display = 'none';
+  } else {
+    footer.style.display = 'flex';
+    counter.textContent = n + ' unsaved change' + (n === 1 ? '' : 's');
+  }
+}
+
+function discardSettings() {
+  settingsDirty = {};
+  paintSettings();
+}
+
+async function saveSettings() {
+  const btn = document.getElementById('btnSaveSettings');
+  if (!btn) return;
+  btn.disabled = true;
+  btn.textContent = 'Saving…';
+  try {
+    const res = await api('PUT', '/config', settingsDirty);
+    if (res && res.errors) {
+      showToast('Some changes failed: ' + res.errors.map(e => e.path + ' (' + e.error + ')').join('; '), 'error', 6000);
+      return;
+    }
+    settingsData = res;
+    settingsDirty = {};
+    paintSettings();
+    showToast('Settings saved. Scheduler changes apply after a restart.', 'success');
+  } catch (e) {
+    showToast('Save failed: ' + (e && e.message || 'unknown error'), 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Save';
+  }
+}
+
+async function testNotify() {
+  const btn = document.getElementById('btnTestNotify');
+  if (!btn) return;
+  const orig = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Sending…';
+  try {
+    const res = await api('POST', '/notifications/test');
+    if (res && res.ok) showToast('Test notification sent', 'success');
+    else showToast('Test failed: ' + (res && res.error || 'unknown error'), 'error', 6000);
+  } catch (e) {
+    showToast('Test failed: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = orig;
+  }
 }
 
 function relativeTime(dtStr) {
@@ -2231,6 +2458,23 @@ const server = http.createServer(async (req, res) => {
       const url = new URL(req.url, `http://${req.headers.host}`);
       const since = parseInt(url.searchParams.get('since') || '0', 10);
       sendJson(res, { lines: runLog.slice(since), total: runLog.length, status: runStatus });
+      return;
+    }
+
+    if (req.method === 'POST' && req.url === '/api/notifications/test') {
+      // Use describeConfig rather than cfg.* so the test picks up whatever is
+      // currently in data/config.json — cfg was baked at process boot and
+      // won't see post-boot edits without a restart.
+      const { effective } = describeConfig();
+      const url = effective.notifications && effective.notifications.notify;
+      const title = (effective.notifications && effective.notifications.notifyTitle) || 'Free Games Claimer';
+      if (!url) { sendJson(res, { ok: false, error: 'No NOTIFY URL configured' }, 400); return; }
+      const html = '<p>Test notification from Free Games Claimer panel at ' + datetime() + '.</p>';
+      const args = [url, '-i', 'html', '-t', title + ' — test', '-b', html];
+      execFile('apprise', args, (err, stdout, stderr) => {
+        if (err) { sendJson(res, { ok: false, error: stderr || err.message }, 500); return; }
+        sendJson(res, { ok: true });
+      });
       return;
     }
 
