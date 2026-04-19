@@ -50,6 +50,7 @@ export const CONFIG_SCHEMA = [
   { path: 'services.gog.keepNewsletter',        env: 'GOG_NEWSLETTER',   type: 'boolean', default: false, coerce: toBool },
   { path: 'services.steam.minRating',           env: 'STEAM_MIN_RATING', type: 'number',  default: 6,  coerce: v => Number(v) || 6 },
   { path: 'services.steam.minPrice',            env: 'STEAM_MIN_PRICE',  type: 'number',  default: 10, coerce: v => Number(v) || 10 },
+  { path: 'services.aliexpress.enabled',        env: 'AE_ENABLED',       type: 'boolean', default: false, coerce: toBool },
 ];
 
 const schemaByPath = new Map(CONFIG_SCHEMA.map(f => [f.path, f]));
@@ -188,6 +189,9 @@ export const ENV_DISPLAY = [
   { env: 'MS_OTPKEY',      category: 'credentials', group: 'Microsoft Rewards',label: 'OTP key' },
   { env: 'LG_EMAIL',       category: 'credentials', group: 'Legacy Games',     label: 'Email',
     note: 'Only used when PG_REDEEM is enabled and a Prime Gaming code lands on the Legacy Games store. Falls back to PG_EMAIL then EMAIL.' },
+  { env: 'AE_EMAIL',       category: 'credentials', group: 'AliExpress',       label: 'Email',
+    note: 'Only used when AliExpress is enabled. Only needed for automated re-login — you can also log in manually via the Sessions card and cookies persist.' },
+  { env: 'AE_PASSWORD',    category: 'credentials', group: 'AliExpress',       label: 'Password' },
   // runtime/debug flags
   { env: 'DEBUG',         category: 'debug', label: 'DEBUG' },
   { env: 'DEBUG_NETWORK', category: 'debug', label: 'DEBUG_NETWORK' },

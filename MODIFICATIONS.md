@@ -9,7 +9,7 @@ The upstream dev branch already included the switch from `playwright-firefox` to
 ## Dead Code Cleanup
 
 ### Scripts removed
-- `aliexpress.js` — AliExpress coin collector (experimental, unused)
+- ~~`aliexpress.js` — AliExpress coin collector (experimental, unused)~~ — **restored in v2.0.1** as an opt-in service after a community request confirmed it still works; disabled by default, toggle in Settings → Per-service → AliExpress.
 - `steam-games.js` — Steam games library scraper (not a game claimer)
 - `unrealengine.js` — Unreal Engine asset claimer (duplicate of epic-games.js logic, WIP)
 - `src/migrate.js` — One-time data migration script (no longer needed)
@@ -369,7 +369,7 @@ All used terms are tracked in `data/ms-used-terms.json` with a 30-day rolling de
 | `docker-entrypoint.sh` | Modified | LOGIN_MODE check, tini -s flag, startup banner, stale VNC cleanup on restart |
 | `package.json` | Modified | patchright dep, docker port 7080 |
 | `.github/workflows/docker-publish.yml` | **New** | Auto-build and push Docker image to ghcr.io |
-| `aliexpress.js` | **Deleted** | Unused AliExpress script |
+| `aliexpress.js` | **Restored in v2.0.1** | Opt-in AliExpress daily coin collector; disabled by default. Stats + Sessions card + Settings toggle wired in. |
 | `steam-games.js` | **Deleted** | Unused Steam library scraper |
 | `unrealengine.js` | **Deleted** | Unused Unreal Engine script |
 | `src/migrate.js` | **Deleted** | One-time migration script |

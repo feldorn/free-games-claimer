@@ -1,6 +1,6 @@
 {
   "name": "free-games-claimer",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Automatically claims free games on Prime Gaming, Epic Games, GOG, and Steam, plus Microsoft Rewards daily points. Ships a five-tab control panel with stats, scheduling, logs, and in-app settings.",
   "homepage": "https://github.com/vogler/free-games-claimer",
   "repository": {
@@ -25,6 +25,8 @@
     "chalk": "^5.4.1",
     "dotenv": "^17.2.0",
     "enquirer": "^2.4.1",
+    "fingerprint-generator": "^2.1.57",
+    "fingerprint-injector": "^2.1.57",
     "lowdb": "^7.0.1",
     "otplib": "^12.0.1",
     "patchright": "^1.58.2"

@@ -244,6 +244,34 @@ const SITES = {
       }
     },
   },
+  'aliexpress': {
+    name: 'AliExpress',
+    // AliExpress's coin collector only works on the mobile site; desktop just
+    // says "install the app". Use a dedicated browser profile so its
+    // fingerprint-injected session doesn't collide with the desktop services'
+    // profiles.
+    loginUrl: 'https://m.aliexpress.com/p/coin-index/index.html',
+    browserDir: cfg.dir.browser + '-aliexpress',
+    contextOptions: devices['Pixel 7'],
+    async checkLogin(page) {
+      try {
+        await page.goto('https://m.aliexpress.com/p/coin-index/index.html', { waitUntil: 'domcontentloaded', timeout: 20000 });
+        await page.waitForTimeout(3500);
+        const loginBtn = page.locator('button:has-text("Log in")');
+        const streak = page.locator('h3:text-is("day streak")');
+        // Race the two diagnostic elements; whichever resolves first tells us
+        // the state. Short timeout: the page typically settles within 3-5s.
+        await Promise.race([
+          loginBtn.waitFor({ state: 'visible', timeout: 8000 }).catch(() => null),
+          streak.waitFor({ state: 'visible', timeout: 8000 }).catch(() => null),
+        ]);
+        if (await streak.count() > 0) return { loggedIn: true, user: 'member' };
+        return { loggedIn: false };
+      } catch {
+        return { loggedIn: false };
+      }
+    },
+  },
   'microsoft': {
     name: 'Microsoft Rewards',
     loginUrl: 'https://rewards.bing.com',
@@ -420,8 +448,11 @@ let startupAutoCheck = null; // { current, total, siteName } while auto-check is
 // scheduled-daily path but wrong for interactive "run these now".
 //   CLAIM_CMD         — full set, used by the scheduler at its anchored wake.
 //   CLAIM_CMD_MANUAL  — subset (no microsoft.js), used by the "Run Now" button.
-const CLAIM_CMD = process.env.CLAIM_CMD || 'node gog.js; node prime-gaming.js; node epic-games.js; node steam.js; node microsoft.js';
-const CLAIM_CMD_MANUAL = process.env.CLAIM_CMD_MANUAL || 'node gog.js; node prime-gaming.js; node epic-games.js; node steam.js';
+// aliexpress.js exits early when services.aliexpress.enabled is false, so it's
+// safe to include in both commands unconditionally — the short-circuit costs
+// ~100ms when disabled.
+const CLAIM_CMD = process.env.CLAIM_CMD || 'node gog.js; node prime-gaming.js; node epic-games.js; node steam.js; node aliexpress.js; node microsoft.js';
+const CLAIM_CMD_MANUAL = process.env.CLAIM_CMD_MANUAL || 'node gog.js; node prime-gaming.js; node epic-games.js; node steam.js; node aliexpress.js';
 
 // Unified profile-busy check. The chromium user-data-dir only supports one
 // process at a time — four distinct code paths can hold it: session-checks
@@ -1036,6 +1067,34 @@ async function getMsRewards() {
   return { latestBalance, latestAt, weekEarned, monthEarned, bySession };
 }
 
+// AliExpress tracks a daily coin balance in data/aliexpress.json (written by
+// aliexpress.js). Similar shape to MS Rewards — we surface the latest balance
+// and per-window "earned" totals in the Stats tab.
+async function getAliexpressData() {
+  let db;
+  try { db = await jsonDb('aliexpress.json', { runs: [] }); }
+  catch { return { latestBalance: null, latestAt: null, weekEarned: 0, monthEarned: 0, row: null }; }
+  const runs = (db.data && Array.isArray(db.data.runs)) ? db.data.runs : [];
+  const now = Date.now();
+  const weekAgo = now - 7 * 24 * 60 * 60 * 1000;
+  const monthAgo = now - 30 * 24 * 60 * 60 * 1000;
+  const toMs = s => { const d = parseLocalDateTime(s); return d ? d.getTime() : 0; };
+  let latestBalance = null, latestAt = null, latestMs = 0;
+  let weekEarned = 0, monthEarned = 0, allTimeEarned = 0;
+  for (const r of runs) {
+    const tMs = toMs(r.at);
+    const earned = Number.isFinite(r.earned) ? Math.max(0, r.earned) : 0;
+    allTimeEarned += earned;
+    if (tMs >= weekAgo)  weekEarned  += earned;
+    if (tMs >= monthAgo) monthEarned += earned;
+    if (r.balance != null && tMs >= latestMs) { latestBalance = r.balance; latestAt = r.at; latestMs = tMs; }
+  }
+  const row = runs.length
+    ? { thisWeek: weekEarned, thisMonth: monthEarned, allTime: allTimeEarned, lastClaimAt: latestAt, unit: 'coins' }
+    : null;
+  return { latestBalance, latestAt, weekEarned, monthEarned, row };
+}
+
 async function getStatsSummary() {
   const [claims, ms] = await Promise.all([readAllClaims(), getMsRewards()]);
   const now = Date.now();
@@ -1064,7 +1123,7 @@ async function getStatsSummary() {
 }
 
 async function getStatsByService() {
-  const [claims, ms] = await Promise.all([readAllClaims(), getMsRewards()]);
+  const [claims, ms, ae] = await Promise.all([readAllClaims(), getMsRewards(), getAliexpressData()]);
   const rows = {};
   for (const svc of Object.keys(CLAIM_DB_FILES)) {
     rows[svc] = { id: svc, unit: 'games', thisWeek: 0, thisMonth: 0, allTime: 0, lastClaimAt: null };
@@ -1072,6 +1131,9 @@ async function getStatsByService() {
   // MS rows use real aggregates from the MS runs DB instead of the "N/A" stub.
   rows['microsoft']        = { id: 'microsoft',        ...ms.bySession['microsoft'] };
   rows['microsoft-mobile'] = { id: 'microsoft-mobile', ...ms.bySession['microsoft-mobile'] };
+  if (ae.row) {
+    rows['aliexpress'] = { id: 'aliexpress', ...ae.row };
+  }
   const now = Date.now();
   const weekAgo = now - 7 * 24 * 60 * 60 * 1000;
   const monthAgo = now - 30 * 24 * 60 * 60 * 1000;
@@ -1582,6 +1644,8 @@ function paintSettings() {
       '<div class="settings-subhead">Steam</div>' +
       fieldRow('services.steam.minRating',           'Minimum review rating (1–9)', { hint: '6 = Mostly Positive; 7 = Very Positive; 8 = Overwhelmingly Positive.' }) +
       fieldRow('services.steam.minPrice',            'Minimum original price (USD)', { hint: 'Filters out shovelware that was free or near-free before the giveaway.' }) +
+      '<div class="settings-subhead">AliExpress</div>' +
+      fieldRow('services.aliexpress.enabled',        'Enable daily coin collection', { hint: 'Collects the AliExpress daily check-in coins on each claim run (mobile site). Disabled by default — set AE_EMAIL/AE_PASSWORD or log in manually via the Sessions card before enabling.' }) +
     '</div>' +
     '<div class="settings-section">' +
       '<div class="settings-section-head">Advanced</div>' +
@@ -1877,16 +1941,23 @@ async function renderStatsTab() {
     ).join('');
 
     const fmt2 = n => new Intl.NumberFormat().format(n);
+    const unitSuffix = u => u === 'points' ? ' pts' : u === 'coins' ? ' coins' : '';
+    const unitPlaceholder = u => u === 'points'
+      ? 'points-based — balance appears after the next microsoft run'
+      : u === 'coins'
+        ? 'coins-based — appears after enabling AliExpress and running once'
+        : u + '-based';
     const rows = byService.map(r => {
       const last = r.lastClaimAt
         ? '<span title="' + escapeHtml(r.lastClaimAt) + '">' + escapeHtml(formatTimestamp(r.lastClaimAt, 'relative')) + '</span>'
         : '<span class="muted">—</span>';
-      const isPts = r.unit === 'points';
-      if (isPts && !r.lastClaimAt) {
+      const unit = r.unit || 'games';
+      const isGame = unit === 'games';
+      if (!isGame && !r.lastClaimAt) {
         return '<tr><td>' + escapeHtml(r.name) + '</td>' +
-          '<td colspan="4" class="muted note">points-based — balance appears after the next microsoft run</td></tr>';
+          '<td colspan="4" class="muted note">' + unitPlaceholder(unit) + '</td></tr>';
       }
-      const suffix = isPts ? ' pts' : '';
+      const suffix = unitSuffix(unit);
       return '<tr><td>' + escapeHtml(r.name) + '</td>' +
         '<td class="num">' + fmt2(r.thisWeek) + suffix + '</td>' +
         '<td class="num">' + fmt2(r.thisMonth) + suffix + '</td>' +

@@ -12,6 +12,7 @@ Claims free games periodically on:
 - <img alt="logo gog" src="https://github.com/user-attachments/assets/49040b50-ee14-4439-8e3c-e93cafd7c3a5" width="32" align="middle" /> [GOG](https://www.gog.com)
 - <img alt="logo steam" src="https://store.steampowered.com/favicon.ico" width="32" align="middle" /> [Steam](https://store.steampowered.com) — free-to-keep promotions only (not F2P or free weekends)
 - 🎯 [Microsoft Rewards](https://rewards.bing.com) — daily Bing searches and activity cards for points, with before/after balance tracking
+- 🛒 [AliExpress](https://m.aliexpress.com) — daily check-in coins (opt-in; disabled by default)
 
 Uses [patchright](https://github.com/nicbarker/patchright) (Chromium with built-in anti-detection). Runs in Docker with a virtual display and VNC access.
 
@@ -165,6 +166,7 @@ Each store can use the default `EMAIL`/`PASSWORD` or be overridden individually:
 | GOG | `GOG_EMAIL` | `GOG_PASSWORD` | | `GOG_NEWSLETTER=1` |
 | Steam | `STEAM_EMAIL` | `STEAM_PASSWORD` | | `STEAM_MIN_RATING`, `STEAM_MIN_PRICE` |
 | Microsoft Rewards | `MS_EMAIL` | `MS_PASSWORD` | `MS_OTPKEY` | `MS_SCHEDULE_HOURS` |
+| AliExpress | `AE_EMAIL` | `AE_PASSWORD` | | `AE_ENABLED=1` (opt-in; disabled by default) |
 
 ### Steam-Specific Options
 
@@ -507,6 +509,7 @@ All data is stored in the `data/` directory (mounted as a Docker volume):
 | `data/gog.json` | Claimed GOG titles |
 | `data/steam.json` | Claimed Steam titles |
 | `data/microsoft-rewards.json` | MS Rewards run history — `{at, session, before, after, earned}` per run (capped at 500 entries). Feeds the Stats tab's points KPIs. |
+| `data/aliexpress.json` | AliExpress daily coin-collect history — `{at, balance, streak, tomorrow, collected, earned}` per run (capped at 500). Drives the AliExpress row in the Stats tab. Only written when the service is enabled. |
 | `data/ms-used-terms.json` | Microsoft Rewards — search terms used in the last 30 days (dedup window) |
 | `data/config.json` | App-level config overrides written by the Settings tab. Missing = env/defaults in effect. Deleted = same as missing. |
 | `data/screenshots/` | Screenshots of claim results |
