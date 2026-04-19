@@ -4,18 +4,36 @@
 <img alt="logo-free-games-claimer" src="https://user-images.githubusercontent.com/493741/214588518-a4c89998-127e-4a8c-9b1e-ee4a9d075715.png" />
 </p>
 
-Fork of [vogler/free-games-claimer](https://github.com/vogler/free-games-claimer) (dev branch) with additional features and fixes.
+Fork of [vogler/free-games-claimer](https://github.com/vogler/free-games-claimer) (dev branch) with a full-featured control panel, in-app settings, claim-history stats, and Microsoft Rewards points tracking.
 
 Claims free games periodically on:
 - <img alt="logo prime-gaming" src="https://github.com/user-attachments/assets/7627a108-20c6-4525-a1d8-5d221ee89d6e" width="32" align="middle" /> [Amazon Prime Gaming](https://gaming.amazon.com)
 - <img alt="logo epic-games" src="https://github.com/user-attachments/assets/82e9e9bf-b6ac-4f20-91db-36d2c8429cb6" width="32" align="middle" /> [Epic Games Store](https://www.epicgames.com/store/free-games)
 - <img alt="logo gog" src="https://github.com/user-attachments/assets/49040b50-ee14-4439-8e3c-e93cafd7c3a5" width="32" align="middle" /> [GOG](https://www.gog.com)
 - <img alt="logo steam" src="https://store.steampowered.com/favicon.ico" width="32" align="middle" /> [Steam](https://store.steampowered.com) — free-to-keep promotions only (not F2P or free weekends)
-- 🎯 [Microsoft Rewards](https://rewards.bing.com) — daily Bing searches and activity cards for points
+- 🎯 [Microsoft Rewards](https://rewards.bing.com) — daily Bing searches and activity cards for points, with before/after balance tracking
 
 Uses [patchright](https://github.com/nicbarker/patchright) (Chromium with built-in anti-detection). Runs in Docker with a virtual display and VNC access.
 
-See [MODIFICATIONS.md](MODIFICATIONS.md) for a full list of changes from the upstream dev branch.
+See [MODIFICATIONS.md](MODIFICATIONS.md) for the full history of changes from the upstream dev branch.
+
+---
+
+## What's new in 2.0
+
+Major refactor of the control panel and configuration story.
+
+- **Five-tab workspace** — Sessions / Stats / Schedule / Logs / Settings. Header auto-collapses to a single compact status strip once setup is done, freeing the main area for the noVNC browser or the current run's log.
+- **Settings tab** — every runtime flag that `src/config.js` reads is editable in-app. Docker env becomes the *initial default*; in-app saves take priority. Scheduler changes take effect immediately via `fs.watch`, no container restart needed.
+- **Stats tab** — claim history derived from the existing per-service JSON DBs. KPI tiles (this week / month / all-time / last claim / MS points balance / MS points this week), per-service table, 30-day activity chart, recent-claims list with deep links to the stores.
+- **Schedule tab** — next-run wall time with live countdown, human-readable interval (e.g. "Daily, anchored to MS window start 08:00 local time"), last-run summary with status.
+- **Logs tab** — scrollable run-log viewer that polls independently of the Sessions tab so the main noVNC area stays clear.
+- **Microsoft Rewards points tracking** — `microsoft.js` scrapes the Rewards counter before and after each desktop/mobile session. Deltas land in `data/microsoft-rewards.json` and feed the Stats tab's points KPIs.
+- **Username capture fixes** — GOG reads `menu.gog.com/v1/account/basic` directly (no more "Logged in as unknown"); Microsoft reads the ME Control widget in the header.
+- **Prime DLC graceful no-op** — Amazon removed the in-game content tab in 2026; the claim script now probes for it and skips in <1s instead of hanging for 60s on a missing selector.
+- **Cache-Control: no-store** on panel HTML so iPad Safari and other aggressive caches can't serve stale inline JS after a push.
+
+Existing users: pull the new image, open the **Settings** tab, and everything you had set via docker env is already there as a fallback. Edit anything you want to change at runtime — the docker-compose file only needs to change for things that stay env-only (ports, `PANEL_PASSWORD`, paths, credentials).
 
 ---
 
@@ -99,7 +117,19 @@ volumes:
 
 ## Configuration
 
-Options are set via environment variables. You can pass them directly, use `--env-file`, or put them in `data/config.env` (loaded automatically by dotenv).
+Options can be set in two places:
+
+1. **Settings tab in the control panel** (recommended for runtime tweaks) —
+   writes `data/config.json` and takes priority over env. Every field shows
+   its env var name in muted monospace for reference. See
+   [Settings](#settings-in-app-configuration) for details.
+2. **Environment variables** — initial defaults. Pass directly, use
+   `--env-file`, or put them in `data/config.env` (loaded automatically by
+   dotenv). Env is also the only way to set things that stay env-only:
+   panel ports, `PANEL_PASSWORD`, credentials.
+
+The env-var tables below document what each variable does; anything in them
+that's also on the Settings tab can be edited there at runtime instead.
 
 ### General
 
@@ -131,7 +161,7 @@ Each store can use the default `EMAIL`/`PASSWORD` or be overridden individually:
 | Store | Email | Password | OTP Key | Other |
 |-------|-------|----------|---------|-------|
 | Epic Games | `EG_EMAIL` | `EG_PASSWORD` | `EG_OTPKEY` | `EG_PARENTALPIN` |
-| Prime Gaming | `PG_EMAIL` | `PG_PASSWORD` | `PG_OTPKEY` | `PG_REDEEM=1`, `PG_CLAIMDLC=1` |
+| Prime Gaming | `PG_EMAIL` | `PG_PASSWORD` | `PG_OTPKEY` | `PG_REDEEM=1`, `PG_CLAIMDLC=1` *(currently a no-op — Amazon removed the in-game DLC section in 2026; flag still respected for when it returns)* |
 | GOG | `GOG_EMAIL` | `GOG_PASSWORD` | | `GOG_NEWSLETTER=1` |
 | Steam | `STEAM_EMAIL` | `STEAM_PASSWORD` | | `STEAM_MIN_RATING`, `STEAM_MIN_PRICE` |
 | Microsoft Rewards | `MS_EMAIL` | `MS_PASSWORD` | `MS_OTPKEY` | `MS_SCHEDULE_HOURS` |
@@ -225,37 +255,83 @@ Running once daily (`86400`) is recommended.
 
 ## Control Panel
 
-The control panel at **`http://localhost:7080`** is always running and serves as
-the single interface for everything that requires — or benefits from — an
-interactive browser session:
+The control panel at **`http://localhost:7080`** is always running and
+organises everything under five tabs. The header compresses to ~70px once
+setup is complete, so the main area is free for whichever tool you're in.
 
-- **Session cards** for each site (Prime, Epic, GOG, Steam, MS Rewards, MS Mobile).
-  Green = session valid, red = needs re-login. Backed by real URL-based auth
-  checks (not DOM presence), so a session that GOG considers expired won't show
-  as green just because the cached UI looks logged in.
+### Sessions tab (default)
 
-- **Login button** per site. Launches a Chromium session in the embedded noVNC
-  window; you can sign in manually, handle captchas / MFA / phone verification,
-  then click **I'm Logged In** and the panel verifies + persists the session.
+Responsive grid of cards — one per site (Prime, Epic, GOG, Steam, MS Rewards,
+MS Mobile). Grid layout auto-adapts between 1/2/3/4 columns depending on
+viewport width.
 
-  Since this is a real browser on your account, you can also **freely navigate
-  while logged in** — useful for clearing captcha state, verifying game ownership,
-  or manually redeeming individual codes in a separate tab. Anything you do stays
-  in the session and carries over to future automated runs.
+- **Status dot** (green / red / gray) backed by real URL-based auth checks
+  (`/account` redirects, ME Control DOM presence, etc.), not cached UI.
+- **Logged in as \<username\>** pulled per-site from the right source for each
+  — GOG via API, Microsoft via the ME Control widget, Prime / Epic / Steam
+  via the persistent chrome on their respective dashboards.
+- **Login button** launches a visible Chromium in the embedded noVNC window.
+  Solve captchas / MFA / phone verification manually, then click **I'm Logged
+  In** to verify and persist the session. The browser's yours while it's open
+  — clear captcha cookies, verify game ownership, redeem codes in a side tab;
+  anything stays in the session.
+- **Check button** re-runs the session probe without opening a visible
+  browser.
+- During an active login the stepper and cards auto-hide so the noVNC
+  viewport gets the full remaining vertical space.
+- The top-of-tab status strip rolls up "All N sessions OK", "Login needed
+  for X", "Run in progress", and startup auto-check into one row, with
+  "Next run in 1h 15m · Last run 3h ago (success, 4m)" on the right.
 
-- **Run Now** triggers an on-demand claim cycle (Prime / Epic / GOG / Steam).
-  Skips `microsoft.js` by default because that script has an internal delay
-  until its scheduled window — override via `CLAIM_CMD_MANUAL` if you want
-  the full set on demand.
+**Batch Redeem** surfaces automatically when Prime Gaming has delivered GOG
+codes that weren't successfully redeemed (captcha-gated, script interrupted,
+etc.). Opens the GOG redeem page per pending code — solve the captcha once
+in noVNC and the panel drives the rest of the queue; re-challenges pause
+and wait for you.
 
-- **Batch Redeem** appears when Prime Gaming has delivered GOG codes that
-  weren't successfully redeemed (captcha-gated, script interrupted, etc.).
-  Opens the GOG redeem page for each pending code: you solve the captcha once
-  in noVNC, and the panel drives Continue/Redeem clicks for the rest of the
-  queue. Captcha re-challenges pause the batch and wait for you.
+### Stats tab
 
-- **Next run / Last run** info shown prominently so you can see scheduler
-  health at a glance.
+Derived entirely from the existing per-service JSON DBs plus
+`data/microsoft-rewards.json` (see [Data Storage](#data-storage)). No new
+instrumentation was added to the claim scripts beyond the MS balance
+snapshot.
+
+- **KPI tiles:** Games this week / this month / all-time · Last claim
+  (relative time + service · title) · MS Rewards balance · MS points earned
+  this week.
+- **Per-service table:** this-week / this-month / all-time counts + last
+  claim time for Prime / Epic / GOG / Steam. Microsoft rows use the same
+  layout but show points-earned per session (desktop / mobile) with a `pts`
+  suffix.
+- **30-day chart:** flexbox bar chart with y-axis scale, weekly x-tick
+  labels anchored to today, zero-count days shown as a faint stub so the
+  axis stays continuous. Total appears in the section heading.
+- **Recent claims:** last 10 successful claims as a grid with relative time,
+  service, and the game title linking to its store URL.
+
+### Schedule tab
+
+- **Next run:** wall time (`2026-04-20 07:30`) with a live countdown
+  (`in 22h 8m`) updated every 30s.
+- **Interval:** human-readable translation of `LOOP` / `MS_SCHEDULE_*`
+  (e.g. "Every 6 hours" or "Daily, anchored to MS window start 08:00 local
+  time").
+- **Last run:** short wall time + source + status (success/error/finished) +
+  duration.
+- Pause/resume and per-run history are planned follow-ups.
+
+### Logs tab
+
+Monospaced scrollable viewer for the most recent run output. Polls
+`/api/run-log` at 1s while a run is active and 3s otherwise, stops polling
+when you switch tabs. Independent of the Sessions tab — you can leave the
+noVNC visible on Sessions while a run's log streams here.
+
+### Settings tab
+
+Full in-app configuration. Every field listed in `CONFIG_SCHEMA` (see
+[Settings](#settings-in-app-configuration)) is editable here. Docker env is
+the initial default; in-app saves take priority.
 
 ### Notification deep-links
 
@@ -276,9 +352,71 @@ relevant action:
 3. Wait for the startup auto-check banner to finish (~30s).
 4. Click **Login** on each site showing red — solve whatever GOG / Amazon /
    Epic / etc. asks for in the embedded browser.
-5. Once all site cards are green, you're done. Leave the container running;
-   the scheduler handles daily claims. Come back to the panel if a session
-   expires (Pushover will notify).
+5. Once all site cards are green, visit **Settings** to tune
+   scheduling / notifications / per-service flags. You're done. Come back
+   to the panel if a session expires (Pushover will notify).
+
+---
+
+## Settings (in-app configuration)
+
+The Settings tab ships a single **sticky save footer** (`N unsaved changes ·
+[Discard] · [Save]`) that replaces per-section buttons. All dirty fields
+commit together in one PUT. Each field shows the environment variable it
+overrides in a muted monospace label so you can see the docker-env mapping
+at a glance, and a green dot when the app config is the authoritative
+source.
+
+### Precedence
+
+```
+data/config.json   (written by Settings tab)
+     ↓  falls through when undefined
+process.env.<VAR>  (docker env / .env file / config.env)
+     ↓  falls through when missing or empty
+hardcoded default
+```
+
+Revert a field to go back from `app` to `env`/`default` without editing
+the file directly.
+
+### Sections
+
+- **Schedule** — `LOOP`, `MS_SCHEDULE_HOURS`, `MS_SCHEDULE_START`.
+  Changes apply immediately via `fs.watch` — the scheduler wakes up and
+  recomputes its next run. No container restart.
+- **Notifications** — `NOTIFY`, `NOTIFY_TITLE`, `PUBLIC_URL`. A
+  **Send test** button fires apprise with the *current* effective config,
+  so you can tweak the URL and test without a restart.
+- **Per-service** — grouped sub-headings: Prime Gaming (`PG_REDEEM`,
+  `PG_CLAIMDLC`, `PG_TIMELEFT`), Epic Games (`EG_MOBILE`), GOG
+  (`GOG_NEWSLETTER`), Steam (`STEAM_MIN_RATING`, `STEAM_MIN_PRICE`).
+- **Advanced** — `DRYRUN`, `RECORD`, `TIMEOUT`, `LOGIN_TIMEOUT`, `WIDTH`,
+  `HEIGHT`.
+- **Environment (read-only)** — every env var the app reads, grouped by
+  Panel / Data paths / Credentials (sub-grouped by service) / Debug. Non-
+  sensitive values render in full; credentials show as `set (hidden)` by
+  default and require an explicit `[Reveal credentials]` click (with
+  confirmation) to show last-4-masked values like `••••••2bM!`.
+
+### What stays env-only
+
+Credentials (`*_EMAIL`, `*_PASSWORD`, `*_OTPKEY`, `*_PARENTALPIN`),
+panel infrastructure (`PANEL_PORT`, `NOVNC_PORT`, `BASE_PATH`,
+`PANEL_PASSWORD`, `VNC_PASSWORD`), data paths (`BROWSER_DIR`,
+`SCREENSHOTS_DIR`), and debug flags that only affect fresh subprocesses
+(`DEBUG`, `DEBUG_NETWORK`, `TIME`, `INTERACTIVE`, `NOWAIT`, `SHOW`).
+Credentials stay env-only by design — storing them in plaintext JSON on
+disk is a net loss vs. an env var in docker-compose, and the session-
+cookie flow already handles the steady state.
+
+### Hot reload vs next-run reload
+
+- **Scheduler settings** apply within one second via `fs.watch` on
+  `data/config.json`.
+- **Everything else** (notifications, per-service flags, advanced flags)
+  is re-read by the claim scripts at the top of each run, so saving takes
+  effect on the next claim run. No restart required.
 
 ---
 
@@ -368,8 +506,35 @@ All data is stored in the `data/` directory (mounted as a Docker volume):
 | `data/prime-gaming.json` | Claimed Prime Gaming titles, redeemed codes |
 | `data/gog.json` | Claimed GOG titles |
 | `data/steam.json` | Claimed Steam titles |
+| `data/microsoft-rewards.json` | MS Rewards run history — `{at, session, before, after, earned}` per run (capped at 500 entries). Feeds the Stats tab's points KPIs. |
 | `data/ms-used-terms.json` | Microsoft Rewards — search terms used in the last 30 days (dedup window) |
+| `data/config.json` | App-level config overrides written by the Settings tab. Missing = env/defaults in effect. Deleted = same as missing. |
 | `data/screenshots/` | Screenshots of claim results |
+
+---
+
+## HTTP API
+
+The panel exposes a small JSON API, useful for scripting or dashboard
+integration. All endpoints are rooted at `<BASE_PATH>/api`.
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| `GET`  | `/state` | Current state: per-site status, scheduler info, last run, active browser, batch-redeem progress |
+| `POST` | `/launch` | Open a visible browser for a site: `{ "site": "gog" }` |
+| `POST` | `/verify` | After a manual login — verify + persist the session |
+| `POST` | `/check` | Run a headless session probe: `{ "site": "microsoft" }` |
+| `POST` | `/runall` | Fire a claim run (background) — uses `CLAIM_CMD_MANUAL` |
+| `POST` | `/stop-run` | SIGTERM the current run |
+| `GET`  | `/run-log?since=N` | Stream run output from offset `N`, returns `{lines, total, status}` |
+| `GET`  | `/config` | Effective config + schema: `{app, effective, fields[]}` |
+| `PUT`  | `/config` | Patch app config: body `{path: value, ...}`; `null` removes an override |
+| `GET`  | `/env` | Read-only env view; add `?reveal=1` to unmask credentials (last-4 only) |
+| `POST` | `/notifications/test` | Fire a test apprise notification with current effective config |
+| `GET`  | `/stats/summary` | KPI numbers for the Stats tab |
+| `GET`  | `/stats/by-service` | Per-service claim counts + last-claim time |
+| `GET`  | `/stats/daily?days=30` | Daily claim counts for the 30-day chart |
+| `GET`  | `/activity?limit=10` | Recent successful claims |
 
 ---
 
@@ -379,6 +544,10 @@ All data is stored in the `data/` directory (mounted as a Docker volume):
 - **Captcha or MFA needed?** Open the control panel at http://localhost:7080 and click **Login** on the affected site — solve the challenge in the embedded browser
 - **Session expired?** You'll get a notification. Come back to the control panel and click **Login** on the affected site
 - **Script skipping a game?** Check the console output — games are skipped for reasons like: already owned, below rating/price threshold (Steam), requires base game, region locked
+- **Settings tab save doesn't apply?** Scheduler changes land within 1s (`fs.watch`-driven). Everything else takes effect on the next claim run because each claim script re-reads config at startup. If neither happens, check `data/config.json` — it should contain your override. Deleting the file reverts everything to env/defaults.
+- **Settings "Send test" notification fails?** Check `NOTIFY` parses as an apprise URL, and that the `apprise` CLI is installed inside the container (it is on `ghcr.io/feldorn/free-games-claimer`). The test uses the *current* effective config so no restart is needed between edits.
+- **Stats tab shows "Pending" for MS Rewards?** The balance captures on the next `microsoft.js` run. Run `microsoft.js` once (or let the scheduler fire it) and both the balance tile and the per-session points rows populate.
+- **Prime DLC toggle does nothing?** Amazon removed the in-game content section from the Prime Gaming UI in 2026. The flag is still respected; the script detects the missing tab and skips quickly rather than hanging for 60s. It'll resume claiming automatically if Amazon brings the section back.
 - **Debug mode:** Set `DEBUG=1` for verbose output including page text dumps and full stack traces
 
 For issues specific to this fork, open an issue at [feldorn/free-games-claimer](https://github.com/feldorn/free-games-claimer/issues).

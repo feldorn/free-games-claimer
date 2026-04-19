@@ -1,7 +1,7 @@
 {
   "name": "free-games-claimer",
-  "version": "1.4.0",
-  "description": "Automatically claims free games on the Epic Games Store, Amazon Prime Gaming and GOG.",
+  "version": "2.0.0",
+  "description": "Automatically claims free games on Prime Gaming, Epic Games, GOG, and Steam, plus Microsoft Rewards daily points. Ships a five-tab control panel with stats, scheduling, logs, and in-app settings.",
   "homepage": "https://github.com/vogler/free-games-claimer",
   "repository": {
     "type": "git",
