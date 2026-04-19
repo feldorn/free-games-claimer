@@ -114,31 +114,59 @@ const SITES = {
         // Navigate to /account — GOG server-side requires a valid session here;
         // stale sessions get redirected to the homepage with an #openlogin overlay.
         // Homepage-based DOM checks get fooled by cached UI (we hit this earlier),
-        // so we use the final URL as the definitive signal.
+        // so we use the final URL as the definitive session-validity signal.
         await page.goto('https://www.gog.com/account', { waitUntil: 'domcontentloaded', timeout: 20000 });
         await page.waitForTimeout(3000);
         const url = page.url();
         if (url.includes('openlogin') || url.includes('/login')) return { loggedIn: false };
         if (!url.includes('/account')) return { loggedIn: false };
-        // Extract username from menu element — direct text nodes only so the
-        // nested notification-count badge doesn't leak "0" into the name.
-        const el = page.locator('#menuUsername, [hook-test="menuUsername"], .menu-username').first();
-        if (await el.count() > 0) {
-          const user = await el.evaluate(el => {
-            const direct = Array.from(el.childNodes).filter(n => n.nodeType === 3).map(n => n.textContent).join('').replace(/\s+/g, ' ').trim();
-            return direct || (el.textContent || '').replace(/\s+/g, ' ').trim();
-          });
-          return { loggedIn: true, user: user || 'unknown' };
-        }
-        const cookieUser = await page.evaluate(() => {
-          for (const c of document.cookie.split(';')) {
-            const [k, v] = c.trim().split('=');
-            if (k === 'gog_username' || k === 'gog-username') return decodeURIComponent(v);
+
+        // Session is valid. Capturing the username is cosmetic — GOG no
+        // longer renders the name in persistent chrome; it only appears
+        // inside the account dropdown that opens on hover of the avatar.
+        // Any failure here falls back to 'unknown' without invalidating
+        // the session.
+        let user = null;
+        try {
+          await page.goto('https://www.gog.com', { waitUntil: 'domcontentloaded', timeout: 15000 });
+          const trigger = page.locator([
+            'header [class*="menu-user"]',
+            'header [class*="account"]',
+            'header button[aria-haspopup]:has(svg)',
+          ].join(', ')).first();
+          await trigger.waitFor({ state: 'visible', timeout: 8000 });
+          await trigger.hover();
+          const yourAccount = page.getByText('Your account', { exact: true });
+          try {
+            await yourAccount.waitFor({ state: 'visible', timeout: 3000 });
+          } catch {
+            await trigger.click();
+            await yourAccount.waitFor({ state: 'visible', timeout: 4000 });
           }
-          return null;
-        });
-        if (cookieUser) return { loggedIn: true, user: cookieUser };
-        return { loggedIn: true, user: 'unknown' };
+          const sibling = await yourAccount.locator('xpath=following-sibling::*[1]')
+            .textContent({ timeout: 2000 }).catch(() => '');
+          user = (sibling || '').trim() || null;
+          if (!user) {
+            const all = await yourAccount.locator('xpath=ancestor::*[self::div or self::ul][1]')
+              .textContent({ timeout: 2000 }).catch(() => '');
+            const m = (all || '').match(/Your account\s*([A-Za-z0-9_.\-]+)/);
+            user = m && m[1] ? m[1].trim() : null;
+          }
+          // Close the menu so later claim steps don't get their clicks intercepted.
+          await page.keyboard.press('Escape').catch(() => {});
+        } catch { /* username read failed — fall through to cookie + default */ }
+
+        if (!user) {
+          const cookieUser = await page.evaluate(() => {
+            for (const c of document.cookie.split(';')) {
+              const [k, v] = c.trim().split('=');
+              if (k === 'gog_username' || k === 'gog-username') return decodeURIComponent(v);
+            }
+            return null;
+          });
+          if (cookieUser) user = cookieUser;
+        }
+        return { loggedIn: true, user: user || 'unknown' };
       } catch {
         return { loggedIn: false };
       }
