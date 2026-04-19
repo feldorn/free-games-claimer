@@ -855,10 +855,11 @@ const PANEL_HTML = `<!DOCTYPE html>
   .status-banner.needs-login { background: #3a1a1e; border-bottom: 1px solid #e94560; color: #e94560; }
   .status-banner.running { background: #2a2a1e; border-bottom: 1px solid #f0c040; color: #f0c040; }
 
-  .site-cards { display: flex; gap: 10px; flex-wrap: wrap; }
-  .site-card { background: #0f3460; border-radius: 8px; padding: 10px 14px; display: flex; align-items: center; gap: 10px; min-width: 200px; flex: 1; }
+  .site-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+  .site-card { background: #0f3460; border-radius: 8px; padding: 10px 14px; display: flex; flex-direction: column; gap: 6px; min-height: 110px; }
+  .site-card-header { display: flex; align-items: center; gap: 8px; }
   .site-card .name { font-weight: 600; font-size: 14px; }
-  .site-card .status { font-size: 12px; color: #888; margin-top: 2px; }
+  .site-card .status { font-size: 12px; color: #888; flex: 1; }
   .site-card .status.logged-in { color: #4ecca3; }
   .site-card .status.not-logged-in { color: #e94560; }
   .site-card .status.checking { color: #f0c040; }
@@ -870,6 +871,8 @@ const PANEL_HTML = `<!DOCTYPE html>
   .dot.error { background: #ff6b6b; }
   @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
   .card-actions { display: flex; gap: 6px; margin-left: auto; }
+  .site-card .card-actions { margin-left: 0; margin-top: auto; }
+  .site-card .card-actions > .btn { flex: 1; padding: 7px 10px; }
   .btn { border: none; border-radius: 6px; padding: 6px 14px; font-size: 13px; cursor: pointer; font-weight: 500; transition: background 0.2s, transform 0.1s; }
   .btn:active { transform: scale(0.97); }
   .btn:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -916,20 +919,17 @@ const PANEL_HTML = `<!DOCTYPE html>
   @media (max-width: 900px) {
     .header-top { flex-wrap: wrap; row-gap: 8px; }
     .header-actions { margin-left: auto; }
-    .site-card { min-width: calc(50% - 5px); flex: none; }
   }
 
   /* Landscape tablet / large phone */
   @media (max-width: 700px) {
     .header h1 { font-size: 16px; }
     .btn { padding: 6px 10px; font-size: 12px; }
-    .site-card { min-width: calc(50% - 5px); }
   }
 
   /* Phone portrait */
   @media (max-width: 480px) {
     .header { padding: 10px 14px; }
-    .site-card { min-width: 100%; flex: none; }
     .active-session { flex-wrap: wrap; }
     .active-session .card-actions { width: 100%; justify-content: flex-end; }
   }
@@ -1156,8 +1156,11 @@ function render() {
     else if (s.status === 'error') statusText = 'Error checking';
     if (s.checkedAt) statusText += ' (' + s.checkedAt.split(' ')[1] + ')';
     return '<div class="site-card">' +
-      '<div class="dot ' + dotClass + '"></div>' +
-      '<div><div class="name">' + s.name + '</div><div class="status ' + statusClass + '">' + statusText + '</div></div>' +
+      '<div class="site-card-header">' +
+        '<div class="dot ' + dotClass + '"></div>' +
+        '<div class="name">' + s.name + '</div>' +
+      '</div>' +
+      '<div class="status ' + statusClass + '">' + statusText + '</div>' +
       '<div class="card-actions">' +
         '<button class="btn btn-login" onclick="launchSite(\\'' + s.id + '\\')" ' + (disabled ? 'disabled' : '') + '>Login</button>' +
         '<button class="btn btn-check" onclick="checkSite(\\'' + s.id + '\\')" ' + (disabled ? 'disabled' : '') + '>Check</button>' +
