@@ -1296,7 +1296,7 @@ const PANEL_HTML = `<!DOCTYPE html>
   .settings-rail { background: #12213a; border-right: 1px solid #233454; padding: 14px 0; overflow-y: auto; }
   .settings-rail .rail-btn { display: block; width: 100%; text-align: left; padding: 9px 18px; background: transparent; border: none; border-left: 3px solid transparent; color: #a0b4d4; font-size: 13px; cursor: pointer; font-family: inherit; }
   .settings-rail .rail-btn:hover { background: #1a2a48; color: #e0e0e0; }
-  .settings-rail .rail-btn.active { background: #0f3460; color: #fff; border-left-color: #4ecca3; font-weight: 500; }
+  .settings-rail .rail-btn.active { background: rgba(78, 204, 163, 0.08); color: #fff; border-left-color: #4ecca3; font-weight: 600; }
   .settings-pane { overflow-y: auto; padding: 24px 32px 24px; }
   .settings-pane-title { font-size: 11px; color: #8aa0c2; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 16px; display: flex; align-items: center; gap: 12px; }
   .settings-pane-title .spacer { flex: 1; }
@@ -1335,15 +1335,17 @@ const PANEL_HTML = `<!DOCTYPE html>
   /* Per-service accordion */
   .svc-row { border-top: 1px solid #1a2a48; }
   .svc-row:first-of-type { border-top: none; }
-  .svc-head { display: grid; grid-template-columns: auto auto 1fr auto; align-items: center; gap: 10px; padding: 10px 8px; cursor: pointer; background: transparent; border: none; width: 100%; color: inherit; font-family: inherit; font-size: inherit; text-align: left; }
-  .svc-head:hover { background: #12213a; }
-  .svc-head .svc-caret { width: 12px; color: #8aa0c2; }
-  .svc-head .svc-name { font-size: 14px; font-weight: 600; color: #e0e0e0; }
-  .svc-head .svc-summary { font-size: 12px; color: #8aa0c2; justify-self: start; }
-  .svc-head.inactive .svc-name { color: #8aa0c2; }
-  .svc-head .svc-active { display: inline-flex; align-items: center; gap: 6px; color: #8aa0c2; font-size: 12px; font-weight: 400; padding: 4px 8px; border-radius: 4px; cursor: pointer; }
-  .svc-head .svc-active input { width: 14px; height: 14px; cursor: pointer; }
-  .svc-body { padding: 6px 16px 16px; display: none; }
+  .svc-head { display: flex; align-items: stretch; gap: 12px; }
+  .svc-expand { flex: 1; display: grid; grid-template-columns: 14px 1fr; grid-template-rows: auto auto; column-gap: 12px; row-gap: 2px; padding: 10px 12px; cursor: pointer; background: transparent; border: none; color: inherit; font-family: inherit; text-align: left; }
+  .svc-expand:hover { background: rgba(255, 255, 255, 0.025); }
+  .svc-expand .svc-caret { grid-row: 1 / 3; grid-column: 1; align-self: center; color: #8aa0c2; font-size: 13px; }
+  .svc-expand .svc-name { grid-row: 1; grid-column: 2; font-size: 15px; font-weight: 600; color: #ffffff; letter-spacing: 0.01em; }
+  .svc-expand .svc-summary { grid-row: 2; grid-column: 2; font-size: 12.5px; color: #8aa0c2; line-height: 1.4; }
+  .svc-row.inactive .svc-name { color: #c0c8d8; font-weight: 500; }
+  .svc-row.inactive .svc-summary { color: #6a7e9e; }
+  .svc-active { flex-shrink: 0; display: inline-flex; align-items: center; gap: 6px; color: #8aa0c2; font-size: 12px; cursor: pointer; padding-right: 14px; }
+  .svc-active input { width: 14px; height: 14px; cursor: pointer; }
+  .svc-body { padding: 6px 16px 16px 38px; display: none; }
   .svc-body.open { display: block; }
   .setting { display: grid; grid-template-columns: minmax(180px, 220px) 1fr auto; gap: 16px; align-items: start; padding: 12px 0; border-bottom: 1px solid #1a2a48; }
   .setting:last-child { border-bottom: none; }
@@ -1837,7 +1839,7 @@ function fieldRow(path, label, extra) {
 
 // Per-service summary string shown when the accordion row is collapsed.
 function serviceSummary(id) {
-  if (!isServiceActiveForUI(id)) return 'Inactive — enable to start using this service.';
+  if (!isServiceActiveForUI(id)) return 'Enable to configure.';
   const v = k => draftValue('services.' + id + '.' + k);
   switch (id) {
     case 'prime-gaming': {
@@ -1934,9 +1936,22 @@ function paintSettings() {
 
   let html = '';
   if (currentSettingsSection === 'scheduler') {
+    // Show the loop interval in human-readable units under the number input
+    // so "86400" isn't the only thing the user sees.
+    let loopHuman = '';
+    const loopSec = draftValue('scheduler.loopSeconds') || 0;
+    if (loopSec > 0) {
+      let pretty;
+      if (loopSec % 86400 === 0)      pretty = (loopSec / 86400) + 'd';
+      else if (loopSec % 3600 === 0)  pretty = (loopSec / 3600) + 'h';
+      else if (loopSec % 60 === 0)    pretty = (loopSec / 60) + 'm';
+      else                            pretty = loopSec + 's';
+      loopHuman = '<div class="setting-hint" style="margin:-6px 0 8px 4px">= ' + pretty + '</div>';
+    }
     html =
       '<div class="settings-pane-title">Scheduler</div>' +
       fieldRow('scheduler.loopSeconds',     'Loop interval (seconds)', { hint: 'Time between scheduled runs. 0 disables the loop.' }) +
+      loopHuman +
       fieldRow('scheduler.msScheduleHours', 'MS window width (hours)',
         { hint: 'Width of the daily Microsoft Rewards window, anchored to the start time. 0 runs immediately without anchoring.' }) +
       fieldRow('scheduler.msScheduleStart', 'MS window start (local time)', { options: hours }) +
@@ -1958,12 +1973,15 @@ function paintSettings() {
         SERVICE_ROWS.map(serviceRow).join('') +
       '</div>';
   } else if (currentSettingsSection === 'advanced') {
+    // Order reflects what someone opening Advanced is usually there for:
+    // first timeouts (most common debug tweak), then dry-run / recording,
+    // then viewport.
     html =
       '<div class="settings-pane-title">Advanced</div>' +
-      fieldRow('advanced.dryrun',          'Dry run — skip actual claiming',   { hint: 'Runs the claim pipeline without actually claiming anything. Useful for testing.' }) +
-      fieldRow('advanced.record',          'Record HAR + video for debugging', { hint: 'Writes per-run .webm + .har to data/record/. Heavier runs.' }) +
       fieldRow('advanced.timeoutSec',      'Default timeout (seconds)',        { hint: 'Applies to Playwright page operations.' }) +
       fieldRow('advanced.loginTimeoutSec', 'Login timeout (seconds)',          { hint: 'Separate timeout used during the login flow.' }) +
+      fieldRow('advanced.dryrun',          'Dry run — skip actual claiming',   { hint: 'Runs the claim pipeline without actually claiming anything. Useful for testing.' }) +
+      fieldRow('advanced.record',          'Record HAR + video for debugging', { hint: 'Writes per-run .webm + .har to data/record/. Heavier runs.' }) +
       fieldRow('advanced.width',           'Browser viewport width') +
       fieldRow('advanced.height',          'Browser viewport height');
   }
