@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 import { chromium, devices } from 'patchright';
 import { datetime, notify, jsonDb, normalizeTitle } from './src/util.js';
 import { cfg } from './src/config.js';
+import { describeConfig, patchConfig } from './src/app-config.js';
 
 const PANEL_PORT = Number(process.env.PANEL_PORT) || 7080;
 const NOVNC_PORT = process.env.NOVNC_PORT || 6080;
@@ -782,9 +783,13 @@ function runAllScripts({ source = 'panel' } = {}) {
 // Anchor-based wake time: if MS_SCHEDULE_HOURS is set we wake 30min before the window opens
 // tomorrow, so the loop fires at ~the same clock time every day (no drift from run duration).
 // Otherwise we sleep LOOP seconds after the previous run completes.
-const LOOP_SECONDS = Number(process.env.LOOP) || 0;
-const MS_SCHEDULE_HOURS = Number(process.env.MS_SCHEDULE_HOURS) || 0;
-const MS_SCHEDULE_START = Number(process.env.MS_SCHEDULE_START) || 8;
+// Scheduler constants come from cfg (which merges data/config.json on top of
+// env). This way the Settings tab's scheduler section takes effect at the
+// next panel restart without rebuilding the container. Changes without a
+// restart will land once the Phase 4 fs.watch hot-reload is in place.
+const LOOP_SECONDS = cfg.loop;
+const MS_SCHEDULE_HOURS = cfg.ms_schedule_hours;
+const MS_SCHEDULE_START = cfg.ms_schedule_start;
 
 let nextScheduledRun = null; // Date | null
 
@@ -2226,6 +2231,28 @@ const server = http.createServer(async (req, res) => {
       const url = new URL(req.url, `http://${req.headers.host}`);
       const since = parseInt(url.searchParams.get('since') || '0', 10);
       sendJson(res, { lines: runLog.slice(since), total: runLog.length, status: runStatus });
+      return;
+    }
+
+    if (req.method === 'GET' && req.url === '/api/config') {
+      sendJson(res, describeConfig());
+      return;
+    }
+    if (req.method === 'PUT' && req.url === '/api/config') {
+      try {
+        const body = await parseBody(req);
+        if (!body || typeof body !== 'object' || Array.isArray(body)) {
+          sendJson(res, { error: 'body must be a JSON object of path→value (value=null removes override)' }, 400);
+          return;
+        }
+        const { errors } = patchConfig(body);
+        if (errors.length) { sendJson(res, { errors }, 400); return; }
+        // Return the fresh merged view so clients can replace their in-memory
+        // state with a single response.
+        sendJson(res, describeConfig());
+      } catch (e) {
+        sendJson(res, { error: e.message }, 400);
+      }
       return;
     }
 
