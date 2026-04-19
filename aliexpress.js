@@ -1,16 +1,10 @@
+// Opt-in service — the panel's runner only invokes this script when
+// services.aliexpress.active === true (Settings → Per-service → AliExpress).
+// If you run it standalone on the CLI, it always executes; the activation
+// gate lives in interactive-login.js.
 import { chromium } from 'patchright';
 import { datetime, filenamify, prompt, handleSIGINT, jsonDb } from './src/util.js';
 import { cfg } from './src/config.js';
-
-// Opt-in service. Disabled by default because most users don't have an
-// AliExpress account, and the mobile-fingerprint launch is heavier than the
-// other claim scripts. Enable via the panel's Settings → Per-service →
-// AliExpress, or set AE_ENABLED=1 in docker env.
-if (!cfg.aliexpress_enabled) {
-  console.log(`[${datetime()}] aliexpress: disabled — enable in Settings → Per-service → AliExpress.`);
-  process.exit(0);
-}
-
 import { FingerprintInjector } from 'fingerprint-injector';
 import { FingerprintGenerator } from 'fingerprint-generator';
 

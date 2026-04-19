@@ -79,9 +79,10 @@ export const cfg = {
   ms_email: process.env.MS_EMAIL || process.env.EMAIL,
   ms_password: process.env.MS_PASSWORD || process.env.PASSWORD,
   ms_otpkey: process.env.MS_OTPKEY,
-  // aliexpress — opt-in. Disabled by default; toggle in Settings → Per-service
-  // → AliExpress (stores services.aliexpress.enabled in data/config.json).
-  aliexpress_enabled: ae.enabled ?? false,
+  // aliexpress — opt-in service. Disabled by default; toggle Active in
+  // Settings → Per-service → AliExpress (stores services.aliexpress.active
+  // in data/config.json). The runner consults `active` to decide whether
+  // to invoke any claim script, so no script-internal guard is needed.
   ae_email:    process.env.AE_EMAIL    || process.env.EMAIL,
   ae_password: process.env.AE_PASSWORD || process.env.PASSWORD,
   // experimental

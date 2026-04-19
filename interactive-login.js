@@ -448,11 +448,58 @@ let startupAutoCheck = null; // { current, total, siteName } while auto-check is
 // scheduled-daily path but wrong for interactive "run these now".
 //   CLAIM_CMD         — full set, used by the scheduler at its anchored wake.
 //   CLAIM_CMD_MANUAL  — subset (no microsoft.js), used by the "Run Now" button.
-// aliexpress.js exits early when services.aliexpress.enabled is false, so it's
-// safe to include in both commands unconditionally — the short-circuit costs
-// ~100ms when disabled.
-const CLAIM_CMD = process.env.CLAIM_CMD || 'node gog.js; node prime-gaming.js; node epic-games.js; node steam.js; node aliexpress.js; node microsoft.js';
-const CLAIM_CMD_MANUAL = process.env.CLAIM_CMD_MANUAL || 'node gog.js; node prime-gaming.js; node epic-games.js; node steam.js; node aliexpress.js';
+// Claim script order when running every active service. microsoft.js is last
+// because it has an internal wait-until-window that blocks the process; put
+// it after everything else so the rest finishes promptly. microsoft.js is
+// shared between the 'microsoft' (desktop) and 'microsoft-mobile' site cards
+// — invoked once and runs both sessions internally.
+const CLAIM_SCRIPT_ORDER = [
+  { id: 'gog',              script: 'gog.js' },
+  { id: 'prime-gaming',     script: 'prime-gaming.js' },
+  { id: 'epic-games',       script: 'epic-games.js' },
+  { id: 'steam',            script: 'steam.js' },
+  { id: 'aliexpress',       script: 'aliexpress.js' },
+  { id: 'microsoft',        script: 'microsoft.js', linkedWith: 'microsoft-mobile' }, // omitted from "manual" runs by default
+];
+
+function activeServices() {
+  const svc = describeConfig().effective.services || {};
+  const isActive = id => {
+    const s = svc[id];
+    if (s && typeof s.active === 'boolean') return s.active;
+    return id !== 'aliexpress'; // defaults: all traditional services active, AliExpress off
+  };
+  return new Set(Object.keys({
+    'prime-gaming': 1, 'epic-games': 1, 'gog': 1, 'steam': 1,
+    'microsoft': 1, 'microsoft-mobile': 1, 'aliexpress': 1,
+  }).filter(isActive));
+}
+
+// Build the shell command for a claim run from the current active set.
+//   opts.manual=true → drop microsoft.js (it has an internal wait-until-window
+//                      that a "Run Now" press shouldn't trigger).
+// If no services are active, returns null so the caller can report it.
+function buildClaimCommand({ manual = false } = {}) {
+  const active = activeServices();
+  const parts = [];
+  for (const entry of CLAIM_SCRIPT_ORDER) {
+    if (manual && entry.id === 'microsoft') continue;
+    // For scripts that cover multiple sites (microsoft → desktop + mobile),
+    // include the script if ANY linked site is active.
+    const ids = [entry.id].concat(entry.linkedWith ? [entry.linkedWith] : []);
+    if (ids.some(id => active.has(id))) parts.push('node ' + entry.script);
+  }
+  return parts.length ? parts.join('; ') : null;
+}
+
+// Env overrides let people keep the original hard-coded pipelines if they
+// want (e.g. adding a custom pre/post step). When set, the env var wins and
+// the active-set filter is bypassed.
+function resolveClaimCommand({ manual }) {
+  const envKey = manual ? 'CLAIM_CMD_MANUAL' : 'CLAIM_CMD';
+  if (process.env[envKey]) return process.env[envKey];
+  return buildClaimCommand({ manual });
+}
 
 // Unified profile-busy check. The chromium user-data-dir only supports one
 // process at a time — four distinct code paths can hold it: session-checks
@@ -716,7 +763,9 @@ function clearFinishedBatchRedeem() {
 
 async function checkAllSites() {
   const results = {};
+  const active = activeServices();
   for (const siteId of Object.keys(SITES)) {
+    if (!active.has(siteId)) continue; // skip deactivated services
     if (activeBrowser) {
       results[siteId] = { error: 'Browser session active, close it first.' };
       continue;
@@ -744,7 +793,14 @@ function runAllScripts({ source = 'panel' } = {}) {
     : process.env;
 
   // Manual "Run Now" uses the subset without microsoft.js so it actually ends.
-  const cmd = source === 'scheduler' ? CLAIM_CMD : CLAIM_CMD_MANUAL;
+  // Both paths build dynamically from the current active-service set so
+  // deactivating a site takes effect on the next run without a restart.
+  const cmd = resolveClaimCommand({ manual: source !== 'scheduler' });
+  if (!cmd) {
+    console.log(`[${datetime()}] Run (${source}): no active services — skipping.`);
+    runStatus = 'idle';
+    return { success: false, error: 'No active services configured. Enable at least one in Settings → Per-service.' };
+  }
 
   const child = spawn('bash', ['-c', cmd], {
     cwd: process.cwd(),
@@ -949,11 +1005,17 @@ async function schedulerLoop() {
 }
 
 function getState() {
-  const allLoggedIn = Object.values(siteStatus).every(s => s.status === 'logged_in');
+  const active = activeServices();
+  // allLoggedIn counts only services the user opted into — an inactive
+  // service can't invalidate the "All sessions OK" summary strip.
+  const allLoggedIn = Object.entries(siteStatus)
+    .filter(([id]) => active.has(id))
+    .every(([, s]) => s.status === 'logged_in');
   return {
     sites: Object.entries(SITES).map(([id, site]) => ({
       id,
       name: site.name,
+      active: active.has(id),
       ...siteStatus[id],
     })),
     activeBrowser: activeBrowser ? { site: activeBrowser.siteId, name: SITES[activeBrowser.siteId].name } : null,
@@ -962,10 +1024,10 @@ function getState() {
     runSource,
     runLogLength: runLog.length,
     nextScheduledRun: nextScheduledRun ? datetime(nextScheduledRun) : null,
-    loopEnabled: LOOP_SECONDS > 0 || MS_SCHEDULE_HOURS > 0,
-    loopSeconds: LOOP_SECONDS,
-    msScheduleHours: MS_SCHEDULE_HOURS,
-    msScheduleStart: MS_SCHEDULE_START,
+    loopEnabled: (() => { const c = getSchedulerConfig(); return c.loop > 0 || c.msHours > 0; })(),
+    loopSeconds: getSchedulerConfig().loop,
+    msScheduleHours: getSchedulerConfig().msHours,
+    msScheduleStart: getSchedulerConfig().msStart,
     batchRedeem: batchRedeem ? {
       phase: batchRedeem.phase,
       message: batchRedeem.message,
@@ -1256,8 +1318,11 @@ const PANEL_HTML = `<!DOCTYPE html>
   .settings-footer { background: #16233c; border-top: 1px solid #233454; padding: 12px 32px; display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
   .settings-footer .dirty-count { color: #f0c040; font-size: 13px; margin-right: auto; font-weight: 500; }
 
-  .settings-subhead { font-size: 12px; color: #c0c8d8; font-weight: 600; margin: 14px 0 4px; padding-top: 10px; border-top: 1px solid #1a2a48; }
+  .settings-subhead { font-size: 12px; color: #c0c8d8; font-weight: 600; margin: 14px 0 4px; padding-top: 10px; border-top: 1px solid #1a2a48; display: flex; align-items: center; gap: 12px; }
   .settings-subhead:first-of-type { border-top: none; padding-top: 0; margin-top: 0; }
+  .settings-active-toggle { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; color: #8aa0c2; font-size: 12px; font-weight: 400; cursor: pointer; text-transform: none; letter-spacing: 0; }
+  .settings-active-toggle input { width: 14px; height: 14px; cursor: pointer; }
+  .settings-subflag-placeholder { font-size: 11px; color: #8aa0c2; font-style: italic; padding: 10px 0 6px; margin-left: 4px; }
 
   .env-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 6px; }
   .env-table th, .env-table td { padding: 5px 8px; text-align: left; border-bottom: 1px solid #1a2a48; vertical-align: top; }
@@ -1351,6 +1416,18 @@ const PANEL_HTML = `<!DOCTYPE html>
   @media (min-width: 960px)  { .site-cards { grid-template-columns: repeat(3, 1fr); } }
   @media (min-width: 1400px) { .site-cards { grid-template-columns: repeat(4, 1fr); } }
   .site-card { background: #0f3460; border-radius: 8px; padding: 10px 14px; display: flex; flex-direction: column; gap: 6px; min-height: 110px; }
+  .site-card.card-inactive { background: #12213a; border: 1px dashed #2a3a5a; opacity: 0.85; }
+  .site-card.card-inactive .name { color: #a0b4d4; }
+  .site-card.card-inactive .status { color: #8aa0c2; font-style: italic; }
+
+  .available-drawer { margin-top: 12px; background: #12213a; border: 1px solid #233454; border-radius: 8px; }
+  .available-drawer .drawer-head { width: 100%; text-align: left; padding: 10px 14px; background: transparent; border: none; color: #a0b4d4; font-size: 13px; cursor: pointer; font-family: inherit; display: flex; align-items: center; gap: 8px; }
+  .available-drawer .drawer-head:hover { color: #e0e0e0; }
+  .available-drawer .drawer-head .caret { display: inline-block; width: 12px; }
+  .available-drawer .drawer-body { padding: 0 14px 12px; display: grid; grid-template-columns: repeat(1, 1fr); gap: 10px; }
+  @media (min-width: 640px)  { .available-drawer .drawer-body { grid-template-columns: repeat(2, 1fr); } }
+  @media (min-width: 960px)  { .available-drawer .drawer-body { grid-template-columns: repeat(3, 1fr); } }
+  @media (min-width: 1400px) { .available-drawer .drawer-body { grid-template-columns: repeat(4, 1fr); } }
   .site-card-header { display: flex; align-items: center; gap: 8px; }
   .site-card .name { font-weight: 600; font-size: 14px; }
   .site-card .status { font-size: 12px; color: #888; flex: 1; }
@@ -1448,6 +1525,7 @@ const PANEL_HTML = `<!DOCTYPE html>
   <div class="steps sessions-only" id="steps"></div>
   <div class="status-strip sessions-only" id="statusStrip"></div>
   <div class="site-cards sessions-only" id="siteCards"></div>
+  <div class="available-drawer sessions-only" id="availableDrawer" style="display:none"></div>
   <div class="sessions-only" id="batchRedeemInfo" style="display:none; margin-top: 10px;"></div>
   <div class="sessions-only" id="activeSession" style="display:none"></div>
 </div>
@@ -1518,6 +1596,31 @@ let pendingGogCount = 0;
 // Snapshot the initial setup-instructions HTML so render() can restore it
 // after swapping in the shorter "all sessions verified" message.
 const DEFAULT_PLACEHOLDER_HTML = document.getElementById('vncPlaceholder')?.innerHTML || '';
+
+function toggleAvailableDrawer() {
+  const body = document.querySelector('#availableDrawer .drawer-body');
+  const head = document.querySelector('#availableDrawer .drawer-head');
+  if (!body || !head) return;
+  const nowOpen = body.hasAttribute('hidden');
+  if (nowOpen) body.removeAttribute('hidden'); else body.setAttribute('hidden', '');
+  head.setAttribute('aria-expanded', String(nowOpen));
+  const caret = head.querySelector('.caret'); if (caret) caret.textContent = nowOpen ? '▾' : '▸';
+  localStorage.setItem('drawerSeen', '1');
+}
+
+async function enableService(id) {
+  localStorage.setItem('drawerSeen', '1');
+  try {
+    await api('PUT', '/config', { ['services.' + id + '.active']: true });
+    showToast('Enabled — checking session…', 'success');
+    await refreshState();
+    // Kick off a session probe for the freshly-enabled card so the status
+    // dot flips from gray to red/green without waiting for the next tick.
+    api('POST', '/check', { site: id }).then(refreshState).catch(() => {});
+  } catch (e) {
+    showToast('Failed to enable: ' + (e && e.message || 'unknown'), 'error');
+  }
+}
 
 function switchTab(tab) {
   document.body.dataset.tab = tab;
@@ -1633,19 +1736,24 @@ function paintSettings() {
     '</div>' +
     '<div class="settings-section">' +
       '<div class="settings-section-head">Per-service</div>' +
-      '<div class="settings-subhead">Prime Gaming</div>' +
-      fieldRow('services.prime-gaming.redeem',       'Redeem keys on external stores') +
-      fieldRow('services.prime-gaming.claimDlc',     'Claim in-game DLC content', { hint: 'Amazon removed the in-game content tab from Prime Gaming — this toggle is currently a no-op. The script skips cleanly when the tab is missing; will resume claiming if/when Amazon brings it back.' }) +
-      fieldRow('services.prime-gaming.timeLeftDays', 'Skip if more than N days remain to claim', { hint: 'Leave blank to claim everything regardless of how long is left.' }) +
-      '<div class="settings-subhead">Epic Games</div>' +
-      fieldRow('services.epic-games.claimMobile',    'Claim mobile games') +
-      '<div class="settings-subhead">GOG</div>' +
-      fieldRow('services.gog.keepNewsletter',        'Keep newsletter subscription after claiming') +
-      '<div class="settings-subhead">Steam</div>' +
-      fieldRow('services.steam.minRating',           'Minimum review rating (1–9)', { hint: '6 = Mostly Positive; 7 = Very Positive; 8 = Overwhelmingly Positive.' }) +
-      fieldRow('services.steam.minPrice',            'Minimum original price (USD)', { hint: 'Filters out shovelware that was free or near-free before the giveaway.' }) +
-      '<div class="settings-subhead">AliExpress</div>' +
-      fieldRow('services.aliexpress.enabled',        'Enable daily coin collection', { hint: 'Collects the AliExpress daily check-in coins on each claim run (mobile site). Disabled by default — set AE_EMAIL/AE_PASSWORD or log in manually via the Sessions card before enabling.' }) +
+      serviceSection('prime-gaming', 'Prime Gaming', [
+        fieldRow('services.prime-gaming.redeem',       'Redeem keys on external stores'),
+        fieldRow('services.prime-gaming.claimDlc',     'Claim in-game DLC content', { hint: 'Amazon removed the in-game content tab from Prime Gaming — this toggle is currently a no-op. The script skips cleanly when the tab is missing; will resume claiming if/when Amazon brings it back.' }),
+        fieldRow('services.prime-gaming.timeLeftDays', 'Skip if more than N days remain to claim', { hint: 'Leave blank to claim everything regardless of how long is left.' }),
+      ]) +
+      serviceSection('epic-games', 'Epic Games', [
+        fieldRow('services.epic-games.claimMobile',    'Claim mobile games'),
+      ]) +
+      serviceSection('gog', 'GOG', [
+        fieldRow('services.gog.keepNewsletter',        'Keep newsletter subscription after claiming'),
+      ]) +
+      serviceSection('steam', 'Steam', [
+        fieldRow('services.steam.minRating',           'Minimum review rating (1–9)', { hint: '6 = Mostly Positive; 7 = Very Positive; 8 = Overwhelmingly Positive.' }),
+        fieldRow('services.steam.minPrice',            'Minimum original price (USD)', { hint: 'Filters out shovelware that was free or near-free before the giveaway.' }),
+      ]) +
+      serviceSection('microsoft', 'Microsoft Rewards', []) +
+      serviceSection('microsoft-mobile', 'Microsoft Rewards (Mobile)', []) +
+      serviceSection('aliexpress', 'AliExpress', [], { hint: 'Collects the AliExpress daily check-in coins on each claim run (mobile site). Log in via the AliExpress card once, or set AE_EMAIL/AE_PASSWORD for unattended re-login.' }) +
     '</div>' +
     '<div class="settings-section">' +
       '<div class="settings-section-head">Advanced</div>' +
@@ -1745,6 +1853,59 @@ function setSettingValue(path, value) {
     settingsDirty[path] = value;
   }
   updateSettingsFooter();
+  // Repaint whenever a service's Active flag flips so sub-flags appear or
+  // disappear (progressive disclosure). Skip for other paths so text inputs
+  // don't lose focus mid-typing.
+  if (/^services\\.[^.]+\\.active$/.test(path)) paintSettings();
+}
+
+function isServiceActiveForUI(id) {
+  const path = 'services.' + id + '.active';
+  if (Object.prototype.hasOwnProperty.call(settingsDirty, path)) {
+    const v = settingsDirty[path];
+    if (v !== null) return !!v;
+  }
+  const f = settingsData && settingsData.fields.find(x => x.path === path);
+  return f ? !!f.effective : true;
+}
+
+function serviceSection(id, title, childRowsHtml, extra) {
+  extra = extra || {};
+  const active = isServiceActiveForUI(id);
+  const checked = active ? 'checked' : '';
+  const head =
+    '<div class="settings-subhead">' +
+      escapeHtml(title) +
+      '<label class="settings-active-toggle">' +
+        '<input type="checkbox" ' + checked + ' onchange="setActiveService(\\'' + id + '\\', this.checked)">Active' +
+      '</label>' +
+    '</div>';
+  if (!active) return head + '<div class="settings-subflag-placeholder">Enable to configure.</div>';
+  const rows = Array.isArray(childRowsHtml) ? childRowsHtml.join('') : (childRowsHtml || '');
+  const hintRow = extra.hint ? '<div class="setting-hint" style="margin:6px 0 8px 4px">' + escapeHtml(extra.hint) + '</div>' : '';
+  return head + hintRow + rows;
+}
+
+async function setActiveService(id, nextActive) {
+  const path = 'services.' + id + '.active';
+  if (!nextActive) {
+    // Confirm deactivation only when the service has claim history to lose.
+    let hasHistory = false;
+    try {
+      const byService = await api('GET', '/stats/by-service');
+      const row = byService.find(r => r.id === id);
+      if (row && ((typeof row.allTime === 'number' && row.allTime > 0) || row.lastClaimAt)) hasHistory = true;
+    } catch {}
+    if (hasHistory) {
+      const label = ({
+        'prime-gaming': 'Prime Gaming', 'epic-games': 'Epic Games', 'gog': 'GOG', 'steam': 'Steam',
+        'microsoft': 'Microsoft Rewards', 'microsoft-mobile': 'Microsoft Rewards (Mobile)', 'aliexpress': 'AliExpress',
+      })[id] || id;
+      const ok = confirm('Deactivate ' + label + '?\\n\\nClaim history already on record will be preserved, but scheduled runs will skip this service until you reactivate it.');
+      if (!ok) { paintSettings(); return; } // repaint restores the checkbox
+    }
+  }
+  setSettingValue(path, nextActive);
 }
 
 function revertSettingValue(path) {
@@ -2241,7 +2402,9 @@ function render() {
   }
 
   // Status strip — one line that rolls up the old green banner + "Next run" line.
-  const totalCount = state.sites.length;
+  // Counts active services only; deactivated ones don't affect "All sessions OK".
+  const activeSites = state.sites.filter(s => s.active !== false);
+  const totalCount = activeSites.length;
   const secondaryParts = [];
   if (!isRunning && state.nextScheduledRun) secondaryParts.push('Next run ' + formatTimestamp(state.nextScheduledRun, 'relative'));
   if (state.lastRun) {
@@ -2261,9 +2424,9 @@ function render() {
     stripKind = 'warn';
     const src = state.runSource === 'scheduler' ? 'scheduler' : 'manual';
     stripText = '● Run in progress (' + src + ')…';
-  } else if (state.sites.some(s => s.status === 'not_logged_in')) {
+  } else if (activeSites.some(s => s.status === 'not_logged_in')) {
     stripKind = 'err';
-    const missing = state.sites.filter(s => s.status === 'not_logged_in').map(s => s.name).join(', ');
+    const missing = activeSites.filter(s => s.status === 'not_logged_in').map(s => s.name).join(', ');
     stripText = '● Login needed for: ' + missing;
   } else if (state.allLoggedIn && totalCount > 0) {
     const label = totalCount === 1 ? 'session' : 'sessions';
@@ -2289,7 +2452,11 @@ function render() {
     strip.style.display = 'none';
   }
 
-  cards.innerHTML = state.sites.map(s => {
+  // Split sites into active (main grid) and inactive (drawer below).
+  const activeCards = state.sites.filter(s => s.active !== false);
+  const inactiveCards = state.sites.filter(s => s.active === false);
+
+  cards.innerHTML = activeCards.map(s => {
     const dotClass = s.status === 'logged_in' ? 'logged-in' : s.status === 'not_logged_in' ? 'not-logged-in' : s.status === 'error' ? 'error' : 'unknown';
     const statusClass = dotClass;
     let statusText = 'Not checked';
@@ -2309,6 +2476,39 @@ function render() {
       '</div>' +
     '</div>';
   }).join('');
+
+  // "Available services" drawer — inactive sites with a single Enable button.
+  const drawer = document.getElementById('availableDrawer');
+  if (drawer) {
+    if (inactiveCards.length === 0) {
+      drawer.style.display = 'none';
+    } else {
+      drawer.style.display = 'block';
+      // localStorage gates whether the drawer opens expanded the first time.
+      // Once the user interacts (expand or enable), it stays collapsed on
+      // subsequent visits.
+      const interacted = localStorage.getItem('drawerSeen') === '1';
+      const expanded = !interacted;
+      const cardsHtml = inactiveCards.map(s =>
+        '<div class="site-card card-inactive">' +
+          '<div class="site-card-header">' +
+            '<div class="dot unknown"></div>' +
+            '<div class="name">' + s.name + '</div>' +
+          '</div>' +
+          '<div class="status">Not active — enable to start using this service.</div>' +
+          '<div class="card-actions">' +
+            '<button class="btn btn-run" onclick="enableService(\\'' + s.id + '\\')">Enable</button>' +
+          '</div>' +
+        '</div>'
+      ).join('');
+      drawer.innerHTML =
+        '<button class="drawer-head" onclick="toggleAvailableDrawer()" aria-expanded="' + expanded + '">' +
+          '<span class="caret">' + (expanded ? '▾' : '▸') + '</span> ' +
+          inactiveCards.length + ' service' + (inactiveCards.length === 1 ? '' : 's') + ' available' +
+        '</button>' +
+        '<div class="drawer-body" ' + (expanded ? '' : 'hidden') + '>' + cardsHtml + '</div>';
+    }
+  }
 
   if (state.activeBrowser) {
     session.style.display = 'flex';
@@ -2851,7 +3051,8 @@ server.listen(PANEL_PORT, async () => {
   }
   console.log(`[${datetime()}] Open the control panel URL in your browser.`);
   console.log(`[${datetime()}] Auto-checking all sessions...`);
-  const siteIds = Object.keys(SITES);
+  const active = activeServices();
+  const siteIds = Object.keys(SITES).filter(id => active.has(id));
   startupAutoCheck = { current: 0, total: siteIds.length, siteName: '' };
   for (const siteId of siteIds) {
     startupAutoCheck.siteName = SITES[siteId].name;
@@ -2859,7 +3060,7 @@ server.listen(PANEL_PORT, async () => {
     startupAutoCheck.current++;
   }
   startupAutoCheck = null;
-  console.log(`[${datetime()}] Auto-check complete.`);
+  console.log(`[${datetime()}] Auto-check complete (${siteIds.length} active, ${Object.keys(SITES).length - siteIds.length} skipped).`);
 
   // Kick off the scheduler after session auto-check so first run sees fresh
   // status. The loop always starts — when both LOOP and MS_SCHEDULE_HOURS

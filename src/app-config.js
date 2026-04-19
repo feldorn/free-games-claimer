@@ -50,7 +50,17 @@ export const CONFIG_SCHEMA = [
   { path: 'services.gog.keepNewsletter',        env: 'GOG_NEWSLETTER',   type: 'boolean', default: false, coerce: toBool },
   { path: 'services.steam.minRating',           env: 'STEAM_MIN_RATING', type: 'number',  default: 6,  coerce: v => Number(v) || 6 },
   { path: 'services.steam.minPrice',            env: 'STEAM_MIN_PRICE',  type: 'number',  default: 10, coerce: v => Number(v) || 10 },
-  { path: 'services.aliexpress.enabled',        env: 'AE_ENABLED',       type: 'boolean', default: false, coerce: toBool },
+  // Per-service "active" flag — controls whether the Sessions card shows,
+  // whether auto-check/Check All probe it, and whether the claim runner
+  // invokes the script. Six traditional services default to active; any new
+  // opt-in service (AliExpress today, others later) defaults to inactive.
+  { path: 'services.prime-gaming.active',       env: 'PG_ACTIVE',        type: 'boolean', default: true,  coerce: toBool },
+  { path: 'services.epic-games.active',         env: 'EG_ACTIVE',        type: 'boolean', default: true,  coerce: toBool },
+  { path: 'services.gog.active',                env: 'GOG_ACTIVE',       type: 'boolean', default: true,  coerce: toBool },
+  { path: 'services.steam.active',              env: 'STEAM_ACTIVE',     type: 'boolean', default: true,  coerce: toBool },
+  { path: 'services.microsoft.active',          env: 'MS_ACTIVE',        type: 'boolean', default: true,  coerce: toBool },
+  { path: 'services.microsoft-mobile.active',   env: 'MS_MOBILE_ACTIVE', type: 'boolean', default: true,  coerce: toBool },
+  { path: 'services.aliexpress.active',         env: 'AE_ACTIVE',        type: 'boolean', default: false, coerce: toBool },
 ];
 
 const schemaByPath = new Map(CONFIG_SCHEMA.map(f => [f.path, f]));
@@ -64,6 +74,31 @@ export function readConfigFile() {
   } catch (e) {
     console.error(`[config] failed to read ${CONFIG_FILE}: ${e.message} — treating as empty`);
     return {};
+  }
+}
+
+// Silent migration: aliexpress.enabled was the earlier name for
+// aliexpress.active. Translate on disk whenever we see the legacy key. Runs
+// on every describeConfig call because the config file can be replaced at
+// runtime (user restores from backup, swaps it out, etc.) — the cost is one
+// extra read when there's nothing to do.
+function migrateLegacyKeys() {
+  const app = readConfigFile();
+  const ae = app.services && app.services.aliexpress;
+  if (!ae || ae.enabled === undefined) return;
+  if (ae.active === undefined) {
+    ae.active = !!ae.enabled;
+    delete ae.enabled;
+    try {
+      writeConfigFile(app);
+      console.log('[config] migrated services.aliexpress.enabled → services.aliexpress.active');
+    } catch (e) {
+      console.error('[config] migration write failed:', e.message);
+    }
+  } else {
+    // Both were set — the new key wins; drop the legacy one.
+    delete ae.enabled;
+    try { writeConfigFile(app); } catch {}
   }
 }
 
@@ -132,6 +167,7 @@ function resolveField(field, appConfig) {
 
 // Produce everything the API and cfg loader both need in one pass.
 export function describeConfig() {
+  migrateLegacyKeys();
   const appConfig = readConfigFile();
   const effective = {};
   const fields = CONFIG_SCHEMA.map(f => {
