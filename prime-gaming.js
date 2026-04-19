@@ -395,7 +395,18 @@ try {
   // https://github.com/vogler/free-games-claimer/issues/55
   if (cfg.pg_claimdlc) {
     log.info('Checking in-game content (DLC)');
-    await page.click('button[data-type="InGameLoot"]');
+    // Amazon removed the in-game content tab from the Prime Gaming claims
+    // page some time in 2026 — the page now serves only a "Claim Games"
+    // list with no InGameLoot data-type anywhere in the markup. Probe for
+    // the tab briefly and skip cleanly instead of blocking on a 60s
+    // timeout. If Amazon brings the section back the existing flow
+    // downstream still works.
+    const lootTab = page.locator('button[data-type="InGameLoot"]');
+    if (await lootTab.count() === 0) {
+      log.warn('In-game content tab not present on the current Prime Gaming page — Amazon appears to have removed this section. Skipping.');
+      // fall through to the summary at the bottom of this block
+    } else {
+    await lootTab.click();
     const loot = page.locator('div[data-a-target="offer-list-IN_GAME_LOOT"]');
     await loot.waitFor();
 
@@ -465,6 +476,7 @@ try {
     if (Object.keys(dlc_unlinked).length) {
       log.warn(`DLC — unlinked accounts: ${Object.entries(dlc_unlinked).map(([k, v]) => `${k} (${v.length})`).join(', ')}`);
     }
+    } // end of "lootTab exists" branch
   }
   const summaryParts = [];
   if (claimedCount) summaryParts.push(`${claimedCount} claimed`);

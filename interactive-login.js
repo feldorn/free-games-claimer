@@ -1573,7 +1573,7 @@ function paintSettings() {
       '<div class="settings-section-head">Per-service</div>' +
       '<div class="settings-subhead">Prime Gaming</div>' +
       fieldRow('services.prime-gaming.redeem',       'Redeem keys on external stores') +
-      fieldRow('services.prime-gaming.claimDlc',     'Claim in-game DLC content') +
+      fieldRow('services.prime-gaming.claimDlc',     'Claim in-game DLC content', { hint: 'Amazon removed the in-game content tab from Prime Gaming — this toggle is currently a no-op. The script skips cleanly when the tab is missing; will resume claiming if/when Amazon brings it back.' }) +
       fieldRow('services.prime-gaming.timeLeftDays', 'Skip if more than N days remain to claim', { hint: 'Leave blank to claim everything regardless of how long is left.' }) +
       '<div class="settings-subhead">Epic Games</div>' +
       fieldRow('services.epic-games.claimMobile',    'Claim mobile games') +
