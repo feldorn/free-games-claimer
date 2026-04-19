@@ -1032,11 +1032,11 @@ const PANEL_HTML = `<!DOCTYPE html>
   body[data-tab="logs"] .tab-panel[data-panel="logs"] { display: flex; flex: 1; flex-direction: column; }
   body:not([data-tab="sessions"]) .sessions-only { display: none !important; }
 
-  .stats-kpis { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; margin-bottom: 24px; }
+  .stats-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 24px; }
   .kpi { background: #16233c; border: 1px solid #233454; border-radius: 8px; padding: 14px 16px; }
   .kpi .kpi-label { font-size: 11px; color: #8aa0c2; text-transform: uppercase; letter-spacing: 0.06em; }
-  .kpi .kpi-value { font-size: 28px; font-weight: 600; color: #fff; margin-top: 6px; line-height: 1.1; }
-  .kpi .kpi-hint { font-size: 12px; color: #8aa0c2; margin-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .kpi .kpi-value { font-size: 28px; font-weight: 600; color: #fff; margin-top: 6px; line-height: 1.15; }
+  .kpi .kpi-hint { font-size: 12px; color: #8aa0c2; margin-top: 6px; line-height: 1.4; }
 
   .stats-section { margin-top: 24px; }
   .stats-section-title { font-size: 11px; color: #8aa0c2; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 10px; }
@@ -1044,22 +1044,23 @@ const PANEL_HTML = `<!DOCTYPE html>
   .stats-table { width: 100%; border-collapse: collapse; font-size: 13px; }
   .stats-table th, .stats-table td { padding: 8px 10px; text-align: left; border-bottom: 1px solid #233454; }
   .stats-table th { font-size: 11px; color: #8aa0c2; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 500; }
-  .stats-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .stats-table th.num, .stats-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .stats-table th.ts,  .stats-table td.ts  { text-align: left;  font-variant-numeric: tabular-nums; }
+  .stats-table td.muted.note { text-align: right; }
   .stats-table .muted { color: #8aa0c2; font-style: italic; }
 
-  .stats-chart-wrap { background: #0d1830; border-radius: 6px; padding: 8px 10px 6px; }
-  .stats-chart { display: flex; align-items: flex-end; gap: 2px; height: 120px; }
-  .stats-chart .bar { flex: 1; background: #4ecca3; min-height: 2px; border-radius: 2px 2px 0 0; }
-  .stats-chart .bar.zero { background: #223454; opacity: 0.5; }
-  .stats-chart-labels { display: flex; justify-content: space-between; color: #8aa0c2; font-size: 11px; margin-top: 6px; }
+  .stats-chart-wrap { background: #0d1830; border-radius: 6px; padding: 10px 12px; }
+  .stats-chart-wrap svg { display: block; width: 100%; height: auto; }
 
   .stats-activity { display: flex; flex-direction: column; gap: 4px; }
-  .stats-activity .act { display: flex; gap: 12px; padding: 8px 10px; background: #16233c; border-radius: 6px; font-size: 13px; align-items: center; }
-  .stats-activity .act .at { color: #8aa0c2; font-size: 12px; min-width: 160px; font-variant-numeric: tabular-nums; }
-  .stats-activity .act .svc { color: #4ecca3; min-width: 120px; font-weight: 500; }
-  .stats-activity .act .title { flex: 1; color: #e0e0e0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .stats-activity .act .title a { color: inherit; text-decoration: none; }
-  .stats-activity .act .title a:hover { text-decoration: underline; }
+  .stats-activity .act { display: grid; grid-template-columns: 110px 160px 1fr; gap: 12px; padding: 8px 10px; background: #16233c; border-radius: 6px; font-size: 13px; align-items: center; }
+  .stats-activity .act .at { color: #8aa0c2; font-size: 12px; font-variant-numeric: tabular-nums; }
+  .stats-activity .act .svc { color: #4ecca3; font-weight: 500; }
+  .stats-activity .act .title { color: #e0e0e0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .stats-activity .act .title a,
+  .stats-activity .act .title a:hover,
+  .stats-activity .act .title a:visited,
+  .stats-activity .act .title a:active { color: inherit; text-decoration: none; }
   .stats-empty { color: #8aa0c2; font-style: italic; padding: 20px; text-align: center; background: #16233c; border-radius: 6px; }
 
   .sched-row { display: flex; gap: 24px; margin-bottom: 22px; align-items: baseline; }
@@ -1186,7 +1187,7 @@ const PANEL_HTML = `<!DOCTYPE html>
       <button class="tab" data-tab="logs" onclick="switchTab('logs')">Logs</button>
     </nav>
     <div class="header-actions">
-      <button class="btn btn-check-all" onclick="checkAll()" id="btnCheckAll">Check All Sessions</button>
+      <button class="btn btn-check-all sessions-only" onclick="checkAll()" id="btnCheckAll">Check All Sessions</button>
       <button class="btn btn-run" onclick="runAll()" id="btnRunAll">Run Now</button>
     </div>
   </div>
@@ -1221,11 +1222,8 @@ const PANEL_HTML = `<!DOCTYPE html>
       <table class="stats-table" id="statsTable"></table>
     </div>
     <div class="stats-section">
-      <div class="stats-section-title">Claims over the last 30 days</div>
-      <div class="stats-chart-wrap">
-        <div class="stats-chart" id="statsChart"></div>
-        <div class="stats-chart-labels" id="statsChartLabels"></div>
-      </div>
+      <div class="stats-section-title" id="chartSectionTitle">Claims over the last 30 days</div>
+      <div class="stats-chart-wrap" id="chartArea"></div>
     </div>
     <div class="stats-section">
       <div class="stats-section-title">Recent claims</div>
@@ -1270,11 +1268,67 @@ function switchTab(tab) {
   if (tab === 'stats') renderStatsTab();
 }
 
+function relativeTime(dtStr) {
+  if (!dtStr) return '';
+  const d = new Date(String(dtStr).replace(' ', 'T'));
+  if (!Number.isFinite(d.getTime())) return dtStr;
+  const diff = Date.now() - d.getTime();
+  if (diff < 0) return 'just now';
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return mins + 'm ago';
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return hrs + 'h ago';
+  const days = Math.floor(hrs / 24);
+  if (days < 30) return days + 'd ago';
+  const months = Math.floor(days / 30);
+  if (months < 12) return months + 'mo ago';
+  return Math.floor(months / 12) + 'y ago';
+}
+
+// SVG 30-day bar chart with a y-axis scale, horizontal gridlines, and weekly
+// x-axis labels. Returns an SVG string ready to drop into a container.
+function renderDailyChart(daily) {
+  if (!daily.length) return '<div class="stats-empty">No data yet.</div>';
+  const W = 600, H = 180;
+  const padL = 28, padR = 8, padT = 10, padB = 26;
+  const plotW = W - padL - padR;
+  const plotH = H - padT - padB;
+  const rawMax = Math.max(...daily.map(d => d.count), 0);
+  const step = rawMax <= 4 ? 1 : rawMax <= 10 ? 2 : rawMax <= 20 ? 5 : rawMax <= 50 ? 10 : 20;
+  const yMax = Math.max(step, Math.ceil(rawMax / step) * step);
+  const barW = plotW / daily.length;
+  const grid = [];
+  for (let v = 0; v <= yMax; v += step) {
+    const y = padT + plotH - (v / yMax) * plotH;
+    grid.push(`<line x1="${padL}" x2="${padL + plotW}" y1="${y}" y2="${y}" stroke="#233454" stroke-width="0.6"/>`);
+    grid.push(`<text x="${padL - 6}" y="${y + 3}" fill="#8aa0c2" font-size="10" text-anchor="end">${v}</text>`);
+  }
+  const bars = daily.map((d, i) => {
+    const h = (d.count / yMax) * plotH;
+    const x = padL + i * barW + 0.5;
+    const w = Math.max(barW - 1, 1);
+    const y = padT + plotH - h;
+    const fill = d.count === 0 ? '#2a3a5a' : '#4ecca3';
+    const minH = 1;
+    return `<rect x="${x}" y="${d.count === 0 ? padT + plotH - minH : y}" width="${w}" height="${d.count === 0 ? minH : Math.max(h, 1)}" fill="${fill}" rx="1"><title>${d.date}: ${d.count}</title></rect>`;
+  }).join('');
+  // Weekly x-axis labels: first, every 7 days, and last (dedupe if close).
+  const labelIdx = new Set([0, daily.length - 1]);
+  for (let i = 6; i < daily.length - 2; i += 7) labelIdx.add(i);
+  const xLabels = [...labelIdx].sort((a, b) => a - b).map(i => {
+    const x = padL + i * barW + barW / 2;
+    const md = daily[i].date.slice(5);
+    return `<text x="${x}" y="${H - 8}" fill="#8aa0c2" font-size="10" text-anchor="middle">${md}</text>`;
+  }).join('');
+  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="height:180px">${grid.join('')}${bars}${xLabels}</svg>`;
+}
+
 async function renderStatsTab() {
   const kpis = document.getElementById('statsKpis');
   const table = document.getElementById('statsTable');
-  const chart = document.getElementById('statsChart');
-  const chartLabels = document.getElementById('statsChartLabels');
+  const chartArea = document.getElementById('chartArea');
+  const chartSectionTitle = document.getElementById('chartSectionTitle');
   const activity = document.getElementById('statsActivity');
   if (!kpis) return;
   try {
@@ -1284,25 +1338,25 @@ async function renderStatsTab() {
       api('GET', '/stats/daily?days=30'),
       api('GET', '/activity?limit=10'),
     ]);
-    const lastHint = summary.lastClaim ? summary.lastClaim.title : '';
-    const lastVal  = summary.lastClaim ? summary.lastClaim.serviceName : '—';
     const fmt = n => (n == null ? '—' : new Intl.NumberFormat().format(n));
     const tiles = [
       { label: 'Games this week',  value: fmt(summary.gamesThisWeek) },
       { label: 'Games this month', value: fmt(summary.gamesThisMonth) },
       { label: 'Games all-time',   value: fmt(summary.gamesAllTime) },
-      { label: 'Last claim',       value: lastVal, hint: lastHint },
+      { label: 'Last claim',
+        value: summary.lastClaim ? relativeTime(summary.lastClaim.at) : '—',
+        hint:  summary.lastClaim ? summary.lastClaim.serviceName + ' · ' + summary.lastClaim.title : '' },
       { label: 'MS Rewards balance',
         value: fmt(summary.msPointsBalance),
-        hint: summary.msPointsBalance == null ? 'captured on next microsoft run' : 'as of ' + summary.msPointsBalanceAt },
+        hint:  summary.msPointsBalance == null ? 'captured on next microsoft run' : 'as of ' + summary.msPointsBalanceAt },
       { label: 'MS points this week',
         value: fmt(summary.msPointsThisWeek),
-        hint: summary.msPointsBalance == null ? '' : 'via captured runs' },
+        hint:  summary.msPointsBalance == null ? '' : 'via captured runs' },
     ];
     kpis.innerHTML = tiles.map(k =>
       '<div class="kpi"><div class="kpi-label">' + k.label + '</div>' +
       '<div class="kpi-value">' + escapeHtml(String(k.value)) + '</div>' +
-      (k.hint ? '<div class="kpi-hint" title="' + escapeHtml(k.hint) + '">' + escapeHtml(k.hint) + '</div>' : '') +
+      (k.hint ? '<div class="kpi-hint">' + escapeHtml(k.hint) + '</div>' : '') +
       '</div>'
     ).join('');
 
@@ -1310,40 +1364,28 @@ async function renderStatsTab() {
     const rows = byService.map(r => {
       const last = r.lastClaimAt || '<span class="muted">—</span>';
       const isPts = r.unit === 'points';
-      // MS row with no captured runs yet — show a hint instead of a row of zeros.
       if (isPts && !r.lastClaimAt) {
         return '<tr><td>' + escapeHtml(r.name) + '</td>' +
-          '<td colspan="4" class="muted">points-based — balance appears after the next microsoft run</td></tr>';
+          '<td colspan="4" class="muted note">points-based — balance appears after the next microsoft run</td></tr>';
       }
       const suffix = isPts ? ' pts' : '';
       return '<tr><td>' + escapeHtml(r.name) + '</td>' +
         '<td class="num">' + fmt2(r.thisWeek) + suffix + '</td>' +
         '<td class="num">' + fmt2(r.thisMonth) + suffix + '</td>' +
         '<td class="num">' + fmt2(r.allTime) + suffix + '</td>' +
-        '<td>' + last + '</td></tr>';
+        '<td class="ts">' + last + '</td></tr>';
     }).join('');
     table.innerHTML = '<thead><tr>' +
       '<th>Service</th>' +
       '<th class="num">This week</th>' +
       '<th class="num">This month</th>' +
       '<th class="num">All-time</th>' +
-      '<th>Last claim</th>' +
+      '<th class="ts">Last claim</th>' +
       '</tr></thead><tbody>' + rows + '</tbody>';
 
-    const max = Math.max(1, ...daily.map(d => d.count));
-    chart.innerHTML = daily.map(d => {
-      const pct = (d.count / max) * 100;
-      const cls = d.count === 0 ? ' zero' : '';
-      return '<div class="bar' + cls + '" style="height:' + pct + '%" title="' + d.date + ': ' + d.count + '"></div>';
-    }).join('');
-    if (daily.length) {
-      const totalInRange = daily.reduce((s, d) => s + d.count, 0);
-      chartLabels.innerHTML = '<span>' + daily[0].date + '</span>' +
-        '<span>' + totalInRange + ' in last 30 days</span>' +
-        '<span>' + daily[daily.length - 1].date + '</span>';
-    } else {
-      chartLabels.innerHTML = '';
-    }
+    const totalInRange = daily.reduce((s, d) => s + d.count, 0);
+    chartSectionTitle.textContent = 'Claims over the last 30 days · ' + totalInRange + ' total';
+    chartArea.innerHTML = renderDailyChart(daily);
 
     if (!recent || !recent.length) {
       activity.innerHTML = '<div class="stats-empty">No claims recorded yet. The activity log will populate after your first successful claim run.</div>';
@@ -1353,7 +1395,7 @@ async function renderStatsTab() {
           ? '<a href="' + encodeURI(a.url) + '" target="_blank" rel="noopener">' + escapeHtml(a.title) + '</a>'
           : escapeHtml(a.title);
         return '<div class="act">' +
-          '<span class="at">' + escapeHtml(a.at) + '</span>' +
+          '<span class="at" title="' + escapeHtml(a.at) + '">' + escapeHtml(relativeTime(a.at)) + '</span>' +
           '<span class="svc">' + escapeHtml(a.serviceName) + '</span>' +
           '<span class="title">' + titleHtml + '</span>' +
           '</div>';
