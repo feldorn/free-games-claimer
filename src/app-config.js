@@ -194,7 +194,6 @@ export const ENV_DISPLAY = [
   { env: 'INTERACTIVE',   category: 'debug', label: 'INTERACTIVE' },
   { env: 'NOWAIT',        category: 'debug', label: 'NOWAIT' },
   { env: 'SHOW',          category: 'debug', label: 'SHOW' },
-  { env: 'LOGIN_MODE',    category: 'debug', label: 'LOGIN_MODE (panel-only)' },
 ];
 
 const SENSITIVE_PATTERN = /password|otpkey|token|secret|key$/i;
