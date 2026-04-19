@@ -205,6 +205,21 @@ function maskLast4(s) {
   return '••••••' + s.slice(-4);
 }
 
+// Live scheduler config read — bypasses the module-level cfg so the scheduler
+// loop (which lives in interactive-login.js) can re-read after a config save
+// and reschedule without a panel restart.
+export function getSchedulerConfig() {
+  const s = describeConfig().effective.scheduler || {};
+  return {
+    loop:    s.loopSeconds     ?? 0,
+    msHours: s.msScheduleHours ?? 0,
+    msStart: s.msScheduleStart ?? 8,
+  };
+}
+
+// Absolute path to the config file — scheduler's fs.watch targets this.
+export const CONFIG_FILE_PATH = CONFIG_FILE;
+
 // Produce the list shown in the Environment section. `reveal=true` returns
 // last-4-masked values for sensitive vars; otherwise only `{set: true|false}`
 // is exposed for sensitive ones.

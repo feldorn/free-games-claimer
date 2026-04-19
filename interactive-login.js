@@ -1,9 +1,11 @@
 import http from 'node:http';
 import { spawn, execFile } from 'node:child_process';
+import { watch } from 'node:fs';
+import path from 'node:path';
 import { chromium, devices } from 'patchright';
 import { datetime, notify, jsonDb, normalizeTitle } from './src/util.js';
 import { cfg } from './src/config.js';
-import { describeConfig, patchConfig, describeEnv } from './src/app-config.js';
+import { describeConfig, patchConfig, describeEnv, getSchedulerConfig, CONFIG_FILE_PATH } from './src/app-config.js';
 
 const PANEL_PORT = Number(process.env.PANEL_PORT) || 7080;
 const NOVNC_PORT = process.env.NOVNC_PORT || 6080;
@@ -794,14 +796,50 @@ const MS_SCHEDULE_START = cfg.ms_schedule_start;
 let nextScheduledRun = null; // Date | null
 
 function computeNextWakeMs() {
-  if (MS_SCHEDULE_HOURS > 0) {
-    const wakeHour = MS_SCHEDULE_START > 0 ? MS_SCHEDULE_START - 1 : 23;
+  const c = getSchedulerConfig();
+  if (c.msHours > 0) {
+    const wakeHour = c.msStart > 0 ? c.msStart - 1 : 23;
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
     tomorrow.setHours(wakeHour, 30, 0, 0);
     return Math.max(tomorrow.getTime() - Date.now(), 60 * 1000);
   }
-  return LOOP_SECONDS * 1000;
+  return c.loop * 1000;
+}
+
+// Set by watchConfigForScheduler() on save — lets the scheduler abandon
+// its current sleep and recompute with the new interval immediately.
+let schedulerWakeup = null;
+
+// Cancellable sleep: resolves normally after ms, or early with 'reload' if
+// schedulerWakeup() is invoked (by the config-file watcher).
+function sleepUntilWakeup(ms) {
+  return new Promise(resolve => {
+    const t = setTimeout(() => { schedulerWakeup = null; resolve('tick'); }, ms);
+    schedulerWakeup = () => { clearTimeout(t); schedulerWakeup = null; resolve('reload'); };
+  });
+}
+
+function watchConfigForScheduler() {
+  const dir = path.dirname(CONFIG_FILE_PATH);
+  const base = path.basename(CONFIG_FILE_PATH);
+  let debounce = null;
+  try {
+    // Watch the parent dir so we're robust to config.json being created
+    // (first PUT), deleted (revert everything), or replaced via rename
+    // (atomic write from patchConfig).
+    watch(dir, { persistent: false }, (eventType, filename) => {
+      if (filename !== base) return;
+      clearTimeout(debounce);
+      debounce = setTimeout(() => {
+        debounce = null;
+        console.log(`[${datetime()}] Scheduler: config changed — recomputing next wake.`);
+        if (schedulerWakeup) schedulerWakeup();
+      }, 150);
+    });
+  } catch (e) {
+    console.error(`[${datetime()}] Scheduler: fs.watch setup failed (${e.message}). Config changes will need a restart to apply.`);
+  }
 }
 
 async function postRunSessionCheck() {
@@ -846,9 +884,21 @@ async function schedulerLoop() {
   // "Run Now" in the panel (matches how cron, systemd timers, etc. behave).
   while (true) {
     const sleepMs = computeNextWakeMs();
+    if (sleepMs <= 0) {
+      // Scheduler disabled (LOOP=0 and MS_SCHEDULE_HOURS=0). Park indefinitely
+      // and let a config change unstick us.
+      nextScheduledRun = null;
+      console.log(`[${datetime()}] Scheduler: disabled — waiting for config change.`);
+      await sleepUntilWakeup(2 ** 31 - 1);
+      continue;
+    }
     nextScheduledRun = new Date(Date.now() + sleepMs);
     console.log(`[${datetime()}] Scheduler: next run at ${datetime(nextScheduledRun)}.`);
-    await new Promise(r => setTimeout(r, sleepMs));
+    const how = await sleepUntilWakeup(sleepMs);
+    if (how === 'reload') {
+      // Config changed mid-sleep — skip the run, recompute.
+      continue;
+    }
 
     const busy = browserBusy();
     if (busy) {
@@ -2728,10 +2778,12 @@ server.listen(PANEL_PORT, async () => {
   startupAutoCheck = null;
   console.log(`[${datetime()}] Auto-check complete.`);
 
-  // Kick off the scheduler after session auto-check so first run sees fresh status.
-  if (LOOP_SECONDS > 0 || MS_SCHEDULE_HOURS > 0) {
-    schedulerLoop().catch(err => {
-      console.error(`[${datetime()}] Scheduler crashed:`, err);
-    });
-  }
+  // Kick off the scheduler after session auto-check so first run sees fresh
+  // status. The loop always starts — when both LOOP and MS_SCHEDULE_HOURS
+  // resolve to 0 it parks in sleepUntilWakeup and wakes on config change via
+  // watchConfigForScheduler().
+  schedulerLoop().catch(err => {
+    console.error(`[${datetime()}] Scheduler crashed:`, err);
+  });
+  watchConfigForScheduler();
 });
