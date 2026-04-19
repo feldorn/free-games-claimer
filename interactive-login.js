@@ -843,6 +843,21 @@ const PANEL_HTML = `<!DOCTYPE html>
   .header h1 { font-size: 18px; color: #e94560; white-space: nowrap; }
   .header-actions { display: flex; gap: 8px; margin-left: auto; flex-wrap: wrap; justify-content: flex-end; }
 
+  .tab-nav { display: flex; gap: 2px; }
+  .tab-nav .tab { padding: 5px 12px; background: transparent; color: #a0a0c0; font-size: 13px; cursor: pointer; border: none; border-radius: 6px; font-weight: 500; }
+  .tab-nav .tab:hover { background: #1a2a4a; color: #e0e0e0; }
+  .tab-nav .tab.active { background: #0f3460; color: #fff; }
+
+  .tab-panel { display: none; }
+  .tab-panel.stub { padding: 40px; color: #8aa0c2; text-align: center; line-height: 1.7; }
+  .tab-panel.stub h2 { color: #e0e0e0; margin-bottom: 10px; font-size: 18px; }
+  .tab-panel.stub p { font-size: 14px; max-width: 480px; margin: 0 auto; }
+  body[data-tab="sessions"] .tab-panel[data-panel="sessions"] { display: flex; flex: 1; flex-direction: column; }
+  body[data-tab="stats"] .tab-panel[data-panel="stats"],
+  body[data-tab="schedule"] .tab-panel[data-panel="schedule"],
+  body[data-tab="logs"] .tab-panel[data-panel="logs"] { display: block; }
+  body:not([data-tab="sessions"]) .sessions-only { display: none !important; }
+
   .steps { display: flex; gap: 4px; align-items: center; font-size: 12px; color: #888; margin-bottom: 10px; flex-wrap: wrap; }
   .step { padding: 4px 10px; border-radius: 12px; background: #0f3460; white-space: nowrap; }
   .step.active { background: #e94560; color: white; }
@@ -935,37 +950,57 @@ const PANEL_HTML = `<!DOCTYPE html>
   }
 </style>
 </head>
-<body>
+<body data-tab="sessions">
 <div class="header">
   <div class="header-top">
     <h1>Free Games Claimer</h1>
+    <nav class="tab-nav">
+      <button class="tab active" data-tab="sessions" onclick="switchTab('sessions')">Sessions</button>
+      <button class="tab" data-tab="stats" onclick="switchTab('stats')">Stats</button>
+      <button class="tab" data-tab="schedule" onclick="switchTab('schedule')">Schedule</button>
+      <button class="tab" data-tab="logs" onclick="switchTab('logs')">Logs</button>
+    </nav>
     <div class="header-actions">
       <button class="btn btn-check-all" onclick="checkAll()" id="btnCheckAll">Check All Sessions</button>
       <button class="btn btn-run" onclick="runAll()" id="btnRunAll">Run Now</button>
     </div>
   </div>
-  <div class="steps" id="steps"></div>
-  <div class="site-cards" id="siteCards"></div>
-  <div id="batchRedeemInfo" style="display:none; margin-top: 10px;"></div>
-  <div id="schedulerInfo" style="display:none; margin-top: 10px; font-size: 13px; color: #888;"></div>
-  <div id="activeSession" style="display:none"></div>
+  <div class="steps sessions-only" id="steps"></div>
+  <div class="site-cards sessions-only" id="siteCards"></div>
+  <div class="sessions-only" id="batchRedeemInfo" style="display:none; margin-top: 10px;"></div>
+  <div class="sessions-only" id="schedulerInfo" style="display:none; margin-top: 10px; font-size: 13px; color: #888;"></div>
+  <div class="sessions-only" id="activeSession" style="display:none"></div>
 </div>
-<div id="statusBanner" class="status-banner" style="display:none"></div>
+<div id="statusBanner" class="status-banner sessions-only" style="display:none"></div>
 <div class="main-area" id="mainArea">
-  <div class="vnc-container" id="vncContainer">
-    <div class="vnc-placeholder" id="vncPlaceholder">
-      <div>
-        <div style="font-size: 20px; margin-bottom: 16px; color: #e94560; font-weight: 600;">How to set up your login sessions</div>
-        <div style="text-align: left; max-width: 520px; margin: 0 auto;">
-          <b>Step 1:</b> Click <b>Check All Sessions</b> above to see which sites need login.<br><br>
-          <b>Step 2:</b> For each site showing <span style="color: #e94560;">red</span>, click its <b>Login</b> button.<br>
-          &nbsp;&nbsp;&nbsp;&nbsp;A browser will appear here. Log in manually (handle captchas, MFA, etc.).<br>
-          &nbsp;&nbsp;&nbsp;&nbsp;When done, click <span class="highlight">"I\'m Logged In"</span> to verify and save the session.<br><br>
-          <b>Step 3:</b> Once all sites show <span class="highlight">green</span>, click <b>Run Now</b> to verify claiming works.<br><br>
-          <b>Step 4:</b> You're done — the scheduler (if <span style="color: #f0c040;">LOOP</span> is set) runs claims automatically. Come back to this panel when a session expires.
+  <div class="tab-panel" data-panel="sessions">
+    <div class="vnc-container" id="vncContainer">
+      <div class="vnc-placeholder" id="vncPlaceholder">
+        <div>
+          <div style="font-size: 20px; margin-bottom: 16px; color: #e94560; font-weight: 600;">How to set up your login sessions</div>
+          <div style="text-align: left; max-width: 520px; margin: 0 auto;">
+            <b>Step 1:</b> Click <b>Check All Sessions</b> above to see which sites need login.<br><br>
+            <b>Step 2:</b> For each site showing <span style="color: #e94560;">red</span>, click its <b>Login</b> button.<br>
+            &nbsp;&nbsp;&nbsp;&nbsp;A browser will appear here. Log in manually (handle captchas, MFA, etc.).<br>
+            &nbsp;&nbsp;&nbsp;&nbsp;When done, click <span class="highlight">"I\'m Logged In"</span> to verify and save the session.<br><br>
+            <b>Step 3:</b> Once all sites show <span class="highlight">green</span>, click <b>Run Now</b> to verify claiming works.<br><br>
+            <b>Step 4:</b> You're done — the scheduler (if <span style="color: #f0c040;">LOOP</span> is set) runs claims automatically. Come back to this panel when a session expires.
+          </div>
         </div>
       </div>
     </div>
+  </div>
+  <div class="tab-panel stub" data-panel="stats">
+    <h2>Stats</h2>
+    <p>Games claimed this week and all-time, MS Rewards balance and points claimable today, per-service breakdown, 30-day chart — coming soon.</p>
+  </div>
+  <div class="tab-panel stub" data-panel="schedule">
+    <h2>Schedule</h2>
+    <p>Next run countdown, cron schedule, pause/resume, and the last 10 runs — coming soon.</p>
+  </div>
+  <div class="tab-panel stub" data-panel="logs">
+    <h2>Logs</h2>
+    <p>Recent claim activity and errors, filterable by service — coming soon.</p>
   </div>
 </div>
 <script>
@@ -977,6 +1012,14 @@ let showingLog = false;
 let logOffset = 0;
 let logPollTimer = null;
 let pendingGogCount = 0;
+
+function switchTab(tab) {
+  document.body.dataset.tab = tab;
+  document.querySelectorAll('.tab-nav .tab').forEach(t => {
+    t.classList.toggle('active', t.dataset.tab === tab);
+  });
+}
+
 async function refreshPendingGogCount() {
   try {
     const r = await api('GET', '/pending-gog-count');
