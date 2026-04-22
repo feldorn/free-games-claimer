@@ -48,9 +48,26 @@ const page = context.pages().length ? context.pages()[0] : await context.newPage
 
 const auth = async url => {
   console.log('auth', url);
-  await page.goto(url, { waitUntil: 'domcontentloaded' });
   const loginBtn = page.locator('button:has-text("Log in")');
   const loggedIn = page.locator('h3:text-is("day streak")');
+  // AliExpress mobile sometimes hangs on initial load — a manual F5 recovers it.
+  // Auto-reload up to 3 times if neither the login button nor the logged-in
+  // marker shows up within a short window.
+  const QUICK_WAIT_MS = 15000;
+  const MAX_RELOADS = 3;
+  for (let attempt = 0; attempt <= MAX_RELOADS; attempt++) {
+    if (attempt === 0) await page.goto(url, { waitUntil: 'domcontentloaded' });
+    else {
+      console.log(`Page stuck loading; reloading (attempt ${attempt}/${MAX_RELOADS})`);
+      await page.reload({ waitUntil: 'domcontentloaded' }).catch(_ => {});
+    }
+    const appeared = await Promise.any([
+      loginBtn.waitFor({ timeout: QUICK_WAIT_MS }).then(_ => true),
+      loggedIn.waitFor({ timeout: QUICK_WAIT_MS }).then(_ => true),
+    ]).catch(_ => false);
+    if (appeared) break;
+    if (attempt === MAX_RELOADS) throw new Error('AliExpress page never finished loading (login button / logged-in marker never appeared)');
+  }
   await Promise.race([loginBtn.waitFor().then(async () => {
     console.error('Not logged in! Will wait for 120s for you to login in the browser or terminal...');
     context.setDefaultTimeout(120 * 1000);
