@@ -556,14 +556,44 @@ async function readPointsBalance(page) {
   return null;
 }
 
+// Microsoft's dashboard sometimes shows a blocking modal (#popUpModal) that
+// intercepts pointer events and makes card clicks time out. Dismiss it by
+// clicking its close button if we can find one, otherwise press Escape.
+async function dismissDashboardPopup(page) {
+  const modal = page.locator('#popUpModal').first();
+  if (!(await modal.isVisible().catch(() => false))) return false;
+  const close = modal.locator('button[aria-label*="lose" i], button[aria-label*="ismiss" i], .closeIcon, [class*="lose" i][role="button"]').first();
+  if (await close.count()) {
+    await close.click({ timeout: 2000 }).catch(() => {});
+  } else {
+    await page.keyboard.press('Escape').catch(() => {});
+  }
+  await modal.waitFor({ state: 'hidden', timeout: 3000 }).catch(() => {});
+  return true;
+}
+
 async function clickEveryPendingActivityCard(page) {
   log.info('Clicking pending activity cards');
   await page.goto(BING_REWARDS_URL, { waitUntil: 'load' });
+  await dismissDashboardPopup(page);
   const cards = await page.locator(BING_REWARDS_ACTIVITY_CARD_SELECTOR).elementHandles();
   log.status('Activity cards found', cards.length);
   for (let i = 0; i < cards.length; i++) {
     log.progressStart(`Clicking card #${i + 1}: ...`);
-    await cards[i].click();
+    try {
+      await cards[i].click({ timeout: 15000 });
+    } catch (e) {
+      // Popup may have appeared between cards — dismiss and retry once.
+      const dismissed = await dismissDashboardPopup(page);
+      log.progressAppend(dismissed ? ' popup dismissed, retrying...' : ' retrying...');
+      try {
+        await cards[i].click({ timeout: 15000 });
+      } catch (e2) {
+        log.progressEnd(' SKIP');
+        log.warn(`Card #${i + 1} click failed: ${e2.message.split('\n')[0]}`);
+        continue;
+      }
+    }
     const ms = randomMs(15);
     log.progressAppend(` Sleep: ${(ms / 1000).toFixed(1)}s ...`);
     await delay(ms);
