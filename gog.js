@@ -129,19 +129,28 @@ try {
   if (!user) {
     try {
       user = await page.evaluate(() => {
-        const el = document.querySelector('a[href*="/account"]');
-        if (el) {
-          const text = el.textContent?.trim();
-          if (text && text !== 'Account' && text.length > 0) return text;
-        }
+        // Cookie first — authoritative and immune to DOM drift.
         const cookies = document.cookie.split(';');
         for (const c of cookies) {
           const [k, v] = c.trim().split('=');
           if (k === 'gog_username' || k === 'gog-username') return decodeURIComponent(v);
         }
+        // Fallback: profile link (e.g. /u/<name>). Avoid href*="/account" because
+        // GOG's sub-nav has /account/games, /account/orders, etc., whose textContent
+        // looks like "Games 0" (label + unread badge) and would poison the username.
+        const profile = document.querySelector('a[href^="/u/"]');
+        if (profile) {
+          const text = (profile.textContent || '').replace(/\s+/g, ' ').trim();
+          if (text) return text;
+        }
         return null;
       });
     } catch {}
+  }
+  // Guard against known GOG sub-nav labels leaking in (badges append a count).
+  if (user && /^(Games|Orders|Wishlist|Friends|Library|Account|Settings)(\s+\d+)?$/i.test(user)) {
+    log.warn(`Detected username looked like a nav label ("${user}") — discarding`);
+    user = null;
   }
   if (!user) {
     user = cfg.gog_email?.split('@')[0] || 'unknown';
