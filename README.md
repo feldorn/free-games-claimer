@@ -50,6 +50,8 @@ docker run --rm -it -p 6080:6080 -p 7080:7080 -v fgc:/fgc/data --pull=always ghc
 
 This runs all 4 claimers (`prime-gaming`, `epic-games`, `gog`, `steam`), claims any available free games, and exits.
 
+The image is published for both `linux/amd64` and `linux/arm64`, so the same tag works on x86 servers, Apple Silicon, and Raspberry Pi (64-bit).
+
 ### First Run — Login Setup
 
 The control panel is always available at **http://localhost:7080**. On first run, open it and:
