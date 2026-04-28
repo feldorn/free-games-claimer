@@ -55,7 +55,11 @@ RUN apt-get update \
       /var/tmp/* \
       /tmp/* \
       /usr/share/doc/* \
-    && ln -s /usr/share/novnc/vnc_auto.html /usr/share/novnc/index.html \
+    # Ubuntu Noble's novnc 1.3.0-2 ships a broken vnc_auto.html (its JS chain
+    # imports `dragThreshold` from core/util/browser.js, which doesn't export
+    # it — SyntaxError on load). vnc.html works fine; redirect to it with
+    # autoconnect so visiting :6080 still "just works".
+    && printf '%s\n' '<!doctype html><meta http-equiv="refresh" content="0;url=vnc.html?autoconnect=true&resize=scale">' > /usr/share/novnc/index.html \
     && pip install apprise --break-system-packages --no-cache-dir
 
 WORKDIR /fgc
