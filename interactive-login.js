@@ -254,18 +254,27 @@ const SITES = {
     browserDir: cfg.dir.browser + '-aliexpress',
     contextOptions: devices['Pixel 7'],
     async checkLogin(page) {
+      const loginBtn = page.locator('button:has-text("Log in")');
+      const streak = page.locator('h3:text-is("day streak")');
+      // AliExpress mobile frequently hangs on initial load — same issue as in
+      // aliexpress.js auth(). Auto-reload up to 3 times until either the login
+      // button or the logged-in "day streak" marker appears, then short-circuit.
+      const QUICK_WAIT_MS = 15000;
+      const MAX_RELOADS = 3;
       try {
-        await page.goto('https://m.aliexpress.com/p/coin-index/index.html', { waitUntil: 'domcontentloaded', timeout: 20000 });
-        await page.waitForTimeout(3500);
-        const loginBtn = page.locator('button:has-text("Log in")');
-        const streak = page.locator('h3:text-is("day streak")');
-        // Race the two diagnostic elements; whichever resolves first tells us
-        // the state. Short timeout: the page typically settles within 3-5s.
-        await Promise.race([
-          loginBtn.waitFor({ state: 'visible', timeout: 8000 }).catch(() => null),
-          streak.waitFor({ state: 'visible', timeout: 8000 }).catch(() => null),
-        ]);
-        if (await streak.count() > 0) return { loggedIn: true, user: 'member' };
+        for (let attempt = 0; attempt <= MAX_RELOADS; attempt++) {
+          if (attempt === 0) {
+            await page.goto('https://m.aliexpress.com/p/coin-index/index.html', { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
+          } else {
+            await page.reload({ waitUntil: 'domcontentloaded' }).catch(() => {});
+          }
+          const which = await Promise.any([
+            loginBtn.waitFor({ state: 'visible', timeout: QUICK_WAIT_MS }).then(() => 'login'),
+            streak.waitFor({ state: 'visible', timeout: QUICK_WAIT_MS }).then(() => 'streak'),
+          ]).catch(() => null);
+          if (which === 'streak') return { loggedIn: true, user: 'member' };
+          if (which === 'login') return { loggedIn: false };
+        }
         return { loggedIn: false };
       } catch {
         return { loggedIn: false };
