@@ -8,7 +8,7 @@ FROM ubuntu:noble
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 ARG DEBIAN_FRONTEND=noninteractive
 
-# Install nodejs and deps for virtual display, noVNC, chromium, and pipx for installing apprise.
+# Install nodejs and deps for virtual display, noVNC, chromium, and pip for installing apprise.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends curl ca-certificates gnupg \
     && mkdir -p /etc/apt/keyrings \
@@ -28,7 +28,9 @@ RUN apt-get update \
       tini \
       nodejs \
       dos2unix \
-      # use `pip install apprise --break-system-packages` instead of pipx (should be used locally, but we only need one pkg and pipx needs adjustment to $PATH) instead of apt-get's apprise (1.7.2 instead of 1.9.3)
+      # apprise is installed below via `pip install --break-system-packages`
+      # rather than apt's apprise package (1.7.2 vs upstream 1.9.3) or pipx
+      # (overkill for a single package, and needs $PATH tweaking).
       pip \
     # RUN npx patchright install-deps chromium
     # ^ installing deps manually instead saved ~130MB:
