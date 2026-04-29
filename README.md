@@ -192,6 +192,7 @@ Steam discovers free-to-keep games via [SteamDB](https://steamdb.info/upcoming/f
 | `MS_OTPKEY` | | TOTP secret for automatic 2FA (otplib). Only needed if the account uses app-based TOTP, not phone push approval. |
 | `MS_SCHEDULE_HOURS` | `0` | Schedule window width in hours. When set, picks a random time within the window each day and waits until then. Use with `MS_SCHEDULE_START`. `0` = run immediately. |
 | `MS_SCHEDULE_START` | `8` | Window start hour (0–23). With `MS_SCHEDULE_HOURS=4` and `MS_SCHEDULE_START=8`, runs land randomly between 8am and 12pm each day. The LOOP sleep anchors to this time to prevent daily drift. |
+| `MS_SEARCH_DELAY_MAX_SEC` | `180` | Upper bound (seconds) for the random pause before each Bing search and between consecutive searches. With ~60 searches per run, this dominates total runtime: avg ≈ N × value/2 seconds. Default 180 paces searches like a human; lower values (e.g. `30`) shorten runs to a few minutes but increase the risk of MS flagging the account as a bot. Lower bound stays 1s. |
 
 Microsoft Rewards collects daily points by running a desktop Bing session (33–37 searches) and a mobile session emulating a Pixel 7 (23–27 searches), plus clicking any pending activity cards. Search terms are sourced fresh each run from Google Trends and BBC/ESPN RSS feeds, with a 30-day dedup window to avoid repeating terms. The existing 800-term pool is used as fallback when live sources are unreachable.
 

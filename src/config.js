@@ -19,6 +19,7 @@ const eg    = svc['epic-games']   || {};
 const gog   = svc['gog']          || {};
 const steam = svc['steam']        || {};
 const ae    = svc['aliexpress']   || {};
+const ms    = svc['microsoft']    || {};
 
 // Options - also see table in README.md
 export const cfg = {
@@ -79,6 +80,11 @@ export const cfg = {
   ms_email: process.env.MS_EMAIL || process.env.EMAIL,
   ms_password: process.env.MS_PASSWORD || process.env.PASSWORD,
   ms_otpkey: process.env.MS_OTPKEY,
+  // Upper bound (seconds) for the random pause before starting Bing searches
+  // and between consecutive searches. Default 180 keeps the human-like pacing
+  // that avoids MS bot detection; lowering it shortens runs at the user's own
+  // risk. Lower bound stays 1s in randomMs().
+  ms_search_delay_max: ms.searchDelayMaxSec ?? 180,
   // aliexpress — opt-in service. Disabled by default; toggle Active in
   // Settings → Per-service → AliExpress (stores services.aliexpress.active
   // in data/config.json). The runner consults `active` to decide whether

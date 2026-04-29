@@ -50,6 +50,7 @@ export const CONFIG_SCHEMA = [
   { path: 'services.gog.keepNewsletter',        env: 'GOG_NEWSLETTER',   type: 'boolean', default: false, coerce: toBool },
   { path: 'services.steam.minRating',           env: 'STEAM_MIN_RATING', type: 'number',  default: 6,  coerce: v => Number(v) || 6 },
   { path: 'services.steam.minPrice',            env: 'STEAM_MIN_PRICE',  type: 'number',  default: 10, coerce: v => Number(v) || 10 },
+  { path: 'services.microsoft.searchDelayMaxSec', env: 'MS_SEARCH_DELAY_MAX_SEC', type: 'number', default: 180, coerce: v => Math.max(1, Number(v) || 180) },
   // Per-service "active" flag — controls whether the Sessions card shows,
   // whether auto-check/Check All probe it, and whether the claim runner
   // invokes the script. Six traditional services default to active; any new

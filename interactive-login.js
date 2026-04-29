@@ -1964,6 +1964,8 @@ const SERVICE_ROWS = [
       { hint: 'Width of the daily Microsoft Rewards window, anchored to the start time. 0 runs immediately without anchoring.' }],
     ['scheduler.msScheduleStart', 'Schedule window start (local time)',
       { options: HOURS_OF_DAY }],
+    ['services.microsoft.searchDelayMaxSec', 'Max delay between Bing searches (seconds)',
+      { hint: 'Upper bound for the random pause before each Bing search. Default 180 mimics a human pace; lower values shorten runs significantly (~60 searches × this/2 avg = total search time) but increase the risk of MS flagging the account as a bot.' }],
   ]},
   { id: 'aliexpress', title: 'AliExpress', fields: [] },
 ];

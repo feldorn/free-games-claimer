@@ -617,14 +617,15 @@ async function executeBingSearch(page, searchTerm, preEnterMs) {
 }
 
 async function executeBingSearches(page, searchTerms) {
-  const initMs = randomMs(180);
+  const maxDelay = cfg.ms_search_delay_max;
+  const initMs = randomMs(maxDelay);
   log.progressInfo(`Executing ${searchTerms.length} Bing searches ... Sleep: ${(initMs / 1000).toFixed(1)}s ...`);
   await delay(initMs);
   log.progressEnd(' ready');
   for (let i = 0; i < searchTerms.length; i++) {
     const term = searchTerms[i];
     const preEnterMs = randomMs(10);
-    const interMs = i < searchTerms.length - 1 ? randomMs(180) : 0;
+    const interMs = i < searchTerms.length - 1 ? randomMs(maxDelay) : 0;
     log.progressStart(`Search #${i + 1}: "${term}" ...`);
     let ok = false;
     for (let attempt = 1; attempt <= 3; attempt++) {
