@@ -215,6 +215,14 @@ try {
         return btn && /[ei]/i.test(btn.textContent) && btn.textContent != 'Loading';
       }
     );
+    // Epic momentarily shows "Get" as the placeholder while the ownership
+    // lookup resolves; the button flips to "In Library" 1-2s later if you
+    // already own the game. Without a settle wait we'd misread "Get",
+    // click it, and then time out 60s waiting for a purchase iframe that
+    // never appears (because Epic shows the already-owned modal instead).
+    // networkidle is best-effort capped at 5s — strictness loses races,
+    // we'd rather under-wait than block a healthy page.
+    await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => { });
     const purchaseBtn = page.locator('button[data-testid="purchase-cta-button"]').first();
     const btnText = (await purchaseBtn.innerText()).toLowerCase(); // barrier to block until page is loaded
 
@@ -272,6 +280,19 @@ try {
       urls.push(baseUrl); // add base game to the list of games to claim
       urls.push(url); // add add-on itself again
     } else { // GET
+      // Last-second re-check before we commit to clicking — covers the
+      // case where networkidle returned but Epic's ownership state was
+      // still loading; the button can flip from "Get" to "In Library"
+      // any time before user interaction.
+      const recheckText = (await purchaseBtn.innerText().catch(() => btnText)).toLowerCase();
+      if (recheckText === 'in library') {
+        log.ok(`${title} — already in library (lagged ownership state)`);
+        notify_game.status = 'existed';
+        db.data[user][game_id].status ||= 'existed';
+        if (db.data[user][game_id].status.startsWith('failed')) db.data[user][game_id].status = 'manual';
+        if (cfg.time) console.timeEnd('claim game');
+        continue;
+      }
       log.game(title, `claiming (${btnText})`);
       let captchaDetected = false;
       await purchaseBtn.click({ delay: 11 }); // got stuck here without delay (or mouse move), see #75, 1ms was also enough
