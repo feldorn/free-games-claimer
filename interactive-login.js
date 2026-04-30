@@ -1516,6 +1516,10 @@ const PANEL_HTML = `<!DOCTYPE html>
   .available-drawer .drawer-head:hover { color: #e0e0e0; }
   .available-drawer .drawer-head .caret { display: inline-block; width: 12px; }
   .available-drawer .drawer-body { padding: 0 14px 12px; display: grid; grid-template-columns: repeat(1, 1fr); gap: 10px; }
+  /* The .drawer-body rule above sets display:grid, which beats the UA default
+     [hidden]{display:none} on specificity — without this override, toggling
+     the caret flipped the hidden attribute but the cards stayed visible. */
+  .available-drawer .drawer-body[hidden] { display: none; }
   @media (min-width: 640px)  { .available-drawer .drawer-body { grid-template-columns: repeat(2, 1fr); } }
   @media (min-width: 960px)  { .available-drawer .drawer-body { grid-template-columns: repeat(3, 1fr); } }
   @media (min-width: 1400px) { .available-drawer .drawer-body { grid-template-columns: repeat(4, 1fr); } }
