@@ -291,46 +291,54 @@ try {
         await page.locator('button:has-text("Accept")').click();
       }).catch(_ => { });
 
-      // it then creates an iframe for the purchase
-      await page.waitForSelector('#webPurchaseContainer iframe'); // TODO needed?
-      const iframe = page.frameLocator('#webPurchaseContainer iframe');
-      // skip game if unavailable in region, https://github.com/vogler/free-games-claimer/issues/46 TODO check games for account's region
-      if (await iframe.locator(':has-text("unavailable in your region")').count() > 0) {
-        log.skip(title, 'unavailable in your region');
-        db.data[user][game_id].status = notify_game.status = 'unavailable-in-region';
-        notify_game.details = `<a href="${url}">View game</a>`;
-        if (cfg.time) console.timeEnd('claim game');
-        continue;
-      }
-
-      iframe.locator('.payment-pin-code').waitFor().then(async () => {
-        if (!cfg.eg_parentalpin) {
-          log.warn('EG_PARENTALPIN not set — enter Parental Control PIN manually');
-          notify('epic-games: EG_PARENTALPIN not set. Need to enter Parental Control PIN manually.');
-        }
-        await iframe.locator('input.payment-pin-code__input').first().pressSequentially(cfg.eg_parentalpin);
-        await iframe.locator('button:has-text("Continue")').click({ delay: 11 });
-      }).catch(_ => { });
-
-      if (cfg.debug) await page.pause();
-      if (cfg.dryrun) {
-        log.warn('dry run — skipping claim');
-        notify_game.status = 'skipped';
-        if (cfg.time) console.timeEnd('claim game');
-        continue;
-      }
-      if (cfg.interactive && !await confirm()) {
-        if (cfg.time) console.timeEnd('claim game');
-        continue;
-      }
-
-      // Playwright clicked before button was ready to handle event, https://github.com/vogler/free-games-claimer/issues/84#issuecomment-1474346591
-      await iframe.locator('button:has-text("Place Order"):not(:has(.payment-loading--loading))').click({ delay: 11 });
-
-      // I Agree button is only shown for EU accounts! https://github.com/vogler/free-games-claimer/pull/7#issuecomment-1038964872
-      const btnAgree = iframe.locator('button:has-text("I Accept")');
-      btnAgree.waitFor().then(() => btnAgree.click()).catch(_ => { }); // EU: wait for and click 'I Agree'
+      // The whole flow from "wait for purchase iframe" through "Thanks for
+      // your order!" lives in one try — Epic occasionally shows a different
+      // UI than the purchase iframe (e.g. an "already owned" modal for a
+      // listing the storefront mislabeled as Get), and a 60s timeout on
+      // waitForSelector below used to bubble up and kill the whole run.
+      // iframe is declared in the outer scope so the catch can still poll
+      // captcha state without re-entering the iframe locator.
+      let iframe;
       try {
+        // it then creates an iframe for the purchase
+        await page.waitForSelector('#webPurchaseContainer iframe'); // TODO needed?
+        iframe = page.frameLocator('#webPurchaseContainer iframe');
+        // skip game if unavailable in region, https://github.com/vogler/free-games-claimer/issues/46 TODO check games for account's region
+        if (await iframe.locator(':has-text("unavailable in your region")').count() > 0) {
+          log.skip(title, 'unavailable in your region');
+          db.data[user][game_id].status = notify_game.status = 'unavailable-in-region';
+          notify_game.details = `<a href="${url}">View game</a>`;
+          if (cfg.time) console.timeEnd('claim game');
+          continue;
+        }
+
+        iframe.locator('.payment-pin-code').waitFor().then(async () => {
+          if (!cfg.eg_parentalpin) {
+            log.warn('EG_PARENTALPIN not set — enter Parental Control PIN manually');
+            notify('epic-games: EG_PARENTALPIN not set. Need to enter Parental Control PIN manually.');
+          }
+          await iframe.locator('input.payment-pin-code__input').first().pressSequentially(cfg.eg_parentalpin);
+          await iframe.locator('button:has-text("Continue")').click({ delay: 11 });
+        }).catch(_ => { });
+
+        if (cfg.debug) await page.pause();
+        if (cfg.dryrun) {
+          log.warn('dry run — skipping claim');
+          notify_game.status = 'skipped';
+          if (cfg.time) console.timeEnd('claim game');
+          continue;
+        }
+        if (cfg.interactive && !await confirm()) {
+          if (cfg.time) console.timeEnd('claim game');
+          continue;
+        }
+
+        // Playwright clicked before button was ready to handle event, https://github.com/vogler/free-games-claimer/issues/84#issuecomment-1474346591
+        await iframe.locator('button:has-text("Place Order"):not(:has(.payment-loading--loading))').click({ delay: 11 });
+
+        // I Agree button is only shown for EU accounts! https://github.com/vogler/free-games-claimer/pull/7#issuecomment-1038964872
+        const btnAgree = iframe.locator('button:has-text("I Accept")');
+        btnAgree.waitFor().then(() => btnAgree.click()).catch(_ => { }); // EU: wait for and click 'I Agree'
         // context.setDefaultTimeout(100 * 1000); // give time to solve captcha, iframe goes blank after 60s?
         const captcha = iframe.locator('#h_captcha_challenge_checkout_free_prod iframe');
         captcha.waitFor().then(async () => { // don't await, since element may not be shown
@@ -353,7 +361,18 @@ try {
         const p = screenshot('failed', `${game_id}_${filenamify(datetime())}.png`);
         await page.screenshot({ path: p, fullPage: true });
         db.data[user][game_id].status = 'failed';
-        if (captchaDetected || await iframe.locator('#h_captcha_challenge_checkout_free_prod iframe').count().catch(() => 0) > 0) {
+        // Re-check the listing's CTA — if Epic now reports it as already
+        // owned, mark accordingly. This recovers the "Get → no iframe →
+        // already-owned modal" case where the listing was stale at click
+        // time but the library reflects reality.
+        try {
+          const cta = (await page.locator('button[data-testid="purchase-cta-button"]').first().innerText().catch(() => '')).toLowerCase();
+          if (cta === 'in library') {
+            log.ok(`${title} — actually already in library (Get button was stale)`);
+            db.data[user][game_id].status = notify_game.status = 'existed';
+          }
+        } catch { /* CTA probe is best-effort */ }
+        if (iframe && (captchaDetected || await iframe.locator('#h_captcha_challenge_checkout_free_prod iframe').count().catch(() => 0) > 0)) {
           captchaDetected = true;
           notify_game.captcha = true;
         }
