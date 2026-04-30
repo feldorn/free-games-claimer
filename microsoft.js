@@ -557,12 +557,21 @@ async function readPointsBalance(page) {
 }
 
 // Microsoft's dashboard sometimes shows a blocking modal (#popUpModal) that
-// intercepts pointer events and makes card clicks time out. Dismiss it by
-// clicking its close button if we can find one, otherwise press Escape.
+// intercepts pointer events and makes card clicks time out. Angular renders
+// several #popUpModal templates (streak-protection promo, discontinue banner,
+// autoredeem warning, etc.) — only one is visible at a time and the rest
+// carry .ng-hide. Selecting :not(.ng-hide) targets the active one; .first()
+// alone would have picked a hidden template and silently no-op'd, which is
+// exactly what was happening when every card click timed out.
 async function dismissDashboardPopup(page) {
-  const modal = page.locator('#popUpModal').first();
+  const modal = page.locator('#popUpModal:not(.ng-hide)').first();
   if (!(await modal.isVisible().catch(() => false))) return false;
-  const close = modal.locator('button[aria-label*="lose" i], button[aria-label*="ismiss" i], .closeIcon, [class*="lose" i][role="button"]').first();
+  const close = modal.locator(
+    '.dashboardPopUpModalCloseCross, ' +
+    'button[aria-label*="lose" i], button[aria-label*="ismiss" i], ' +
+    '[role="button"][aria-label*="lose" i], ' +
+    '.closeIcon, [class*="lose" i][role="button"]'
+  ).first();
   if (await close.count()) {
     await close.click({ timeout: 2000 }).catch(() => {});
   } else {
