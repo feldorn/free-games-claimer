@@ -77,28 +77,42 @@ export const notify = html => new Promise((resolve, reject) => {
 
 export const escapeHtml = unsafe => unsafe.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll('\'', '&#039;');
 
-// Captcha pause helper. Wait for the user to manually solve a captcha in the
-// noVNC view, with a timeout. Three things happen:
-//   1. Emit stdout marker `[CAPTCHA-START] service=<id> label=<text>` — the
-//      panel parser picks this up to show a banner that's visible regardless
-//      of which tab the user is on.
-//   2. Send a notification (Apprise) with a deep link to the panel that
-//      auto-focuses the noVNC iframe (?focus=captcha) — at most ONCE per
-//      service per run. Reasoning: once the user clears the first captcha
-//      the session is "trusted enough" that subsequent claims in the same
-//      run usually don't get challenged again. A second captcha in the same
-//      run is rare; if it happens, the in-panel banner still surfaces it,
-//      we just don't push a second time. This protects against spam from
-//      tight loops (e.g. 60 redeems each potentially gated).
-//   3. Poll the captchaCheck() function until it returns false (captcha gone),
-//      or the timeout elapses. Emits `[CAPTCHA-END] service=<id> reason=...`
-//      either way so the panel banner clears.
+// Captcha pause helper. Per-service state machine in process memory drives
+// whether the helper actively engages the user (notify + wait + poll) or
+// short-circuits with a deferred-form push notification so the user can
+// process the captcha manually later.
+//
+// State per service:
+//   fresh    (initial)             — engage
+//   engaged  (last solve succeeded) — engage again; user is responsive
+//   abandoned (last engagement timed out) — short-circuit; user is away
+//
+// UX rationale: present user solves the first captcha, automation almost
+// always sails through the rest of the run. Absent user gets a deep-link
+// notification per missed captcha so nothing falls silent — they can come
+// back later and process manually. Each new run resets the Map (each run
+// is a fresh node child process) so an absent user gets a fresh shot at
+// engagement next cycle.
+//
+// Markers (panel-only signal):
+//   [CAPTCHA-START] service=<id> label=<text>     — emitted only on engage
+//   [CAPTCHA-END]   service=<id> reason=...       — solved | timeout
+// Abandoned-path encounters emit no markers (no banner flicker, no log
+// noise) — just the deferred notification and a return false.
 //
 // Caller-supplied captchaCheck is intentionally site-specific — selectors
 // for AliExpress's slider, GOG's hCaptcha iframe, MS's overlays etc. all
 // differ. A central registry would just ossify; per-site checks stay close
 // to the code that knows the page's DOM.
-const _captchaNotifiedServices = new Set();
+const _captchaServiceState = new Map(); // service -> 'engaged' | 'abandoned'
+const _captchaDeepLink = () => cfg.public_url ? `${cfg.public_url}/?focus=captcha` : null;
+const _captchaNotifyBody = (service, label, kind) => {
+  const url = _captchaDeepLink();
+  const intro = kind === 'urgent'
+    ? `${escapeHtml(service)} captcha: ${escapeHtml(label)} — solve now`
+    : `${escapeHtml(service)} captcha: ${escapeHtml(label)} — solve later when you can`;
+  return url ? `${intro}<br>${url}` : `${intro}. Open the panel to solve.`;
+};
 export const awaitUserCaptchaSolve = async (page, {
   service,
   label = 'verification',
@@ -113,16 +127,20 @@ export const awaitUserCaptchaSolve = async (page, {
   if (!(await captchaCheck())) return true;
 
   const safeLabel = String(label).replace(/\s+/g, ' ').slice(0, 200);
-  console.log(`[CAPTCHA-START] service=${service} label=${safeLabel}`);
+  const state = _captchaServiceState.get(service); // undefined = fresh
 
-  if (!_captchaNotifiedServices.has(service)) {
-    _captchaNotifiedServices.add(service);
-    const url = cfg.public_url ? `${cfg.public_url}/?focus=captcha` : null;
-    const body = url
-      ? `${escapeHtml(service)} captcha: ${escapeHtml(safeLabel)}<br>Solve at ${url}`
-      : `${escapeHtml(service)} captcha: ${escapeHtml(safeLabel)} — open the panel to solve.`;
-    notify(body).catch(e => console.error(`captcha notify failed: ${e.message}`));
+  // Abandoned path — user gave up earlier. Single deferred notification so
+  // they have a record + link, then return false without blocking.
+  if (state === 'abandoned') {
+    notify(_captchaNotifyBody(service, safeLabel, 'deferred'))
+      .catch(e => console.error(`captcha notify (deferred) failed: ${e.message}`));
+    return false;
   }
+
+  // Engagement path — fresh or previously engaged. Banner + urgent notify + poll.
+  console.log(`[CAPTCHA-START] service=${service} label=${safeLabel}`);
+  notify(_captchaNotifyBody(service, safeLabel, 'urgent'))
+    .catch(e => console.error(`captcha notify (urgent) failed: ${e.message}`));
 
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -131,11 +149,18 @@ export const awaitUserCaptchaSolve = async (page, {
     try { visible = await captchaCheck(); }
     catch { visible = true; } // err on the side of waiting through transient errors
     if (!visible) {
+      _captchaServiceState.set(service, 'engaged');
       console.log(`[CAPTCHA-END] service=${service} reason=solved`);
       return true;
     }
   }
+
+  // Timed out — flip to abandoned, fire a deferred follow-up so this missed
+  // captcha doesn't disappear from the user's awareness, return false.
+  _captchaServiceState.set(service, 'abandoned');
   console.log(`[CAPTCHA-END] service=${service} reason=timeout`);
+  notify(_captchaNotifyBody(service, safeLabel, 'deferred'))
+    .catch(e => console.error(`captcha notify (deferred) failed: ${e.message}`));
   return false;
 };
 
