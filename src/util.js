@@ -83,21 +83,22 @@ export const escapeHtml = unsafe => unsafe.replaceAll('&', '&amp;').replaceAll('
 //      panel parser picks this up to show a banner that's visible regardless
 //      of which tab the user is on.
 //   2. Send a notification (Apprise) with a deep link to the panel that
-//      auto-focuses the noVNC iframe (?focus=captcha).
+//      auto-focuses the noVNC iframe (?focus=captcha) — at most ONCE per
+//      service per run. Reasoning: once the user clears the first captcha
+//      the session is "trusted enough" that subsequent claims in the same
+//      run usually don't get challenged again. A second captcha in the same
+//      run is rare; if it happens, the in-panel banner still surfaces it,
+//      we just don't push a second time. This protects against spam from
+//      tight loops (e.g. 60 redeems each potentially gated).
 //   3. Poll the captchaCheck() function until it returns false (captcha gone),
 //      or the timeout elapses. Emits `[CAPTCHA-END] service=<id> reason=...`
 //      either way so the panel banner clears.
-//
-// Notifications are deduped per-service to a single push per 30s — protects
-// users from spam if a captcha briefly clears then reappears (e.g. multi-step
-// challenge or page reload). The runner stays paused regardless.
 //
 // Caller-supplied captchaCheck is intentionally site-specific — selectors
 // for AliExpress's slider, GOG's hCaptcha iframe, MS's overlays etc. all
 // differ. A central registry would just ossify; per-site checks stay close
 // to the code that knows the page's DOM.
-const _captchaLastNotifyAt = new Map();
-const _CAPTCHA_NOTIFY_DEDUP_MS = 30 * 1000;
+const _captchaNotifiedServices = new Set();
 export const awaitUserCaptchaSolve = async (page, {
   service,
   label = 'verification',
@@ -114,9 +115,8 @@ export const awaitUserCaptchaSolve = async (page, {
   const safeLabel = String(label).replace(/\s+/g, ' ').slice(0, 200);
   console.log(`[CAPTCHA-START] service=${service} label=${safeLabel}`);
 
-  const last = _captchaLastNotifyAt.get(service) || 0;
-  if (Date.now() - last >= _CAPTCHA_NOTIFY_DEDUP_MS) {
-    _captchaLastNotifyAt.set(service, Date.now());
+  if (!_captchaNotifiedServices.has(service)) {
+    _captchaNotifiedServices.add(service);
     const url = cfg.public_url ? `${cfg.public_url}/?focus=captcha` : null;
     const body = url
       ? `${escapeHtml(service)} captcha: ${escapeHtml(safeLabel)}<br>Solve at ${url}`
