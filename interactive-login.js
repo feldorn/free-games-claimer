@@ -1542,6 +1542,9 @@ const PANEL_HTML = `<!DOCTYPE html>
   .btn-check:hover:not(:disabled) { background: #4a4a6c; }
   .btn-check-all { background: #3a3a5c; color: #ccc; }
   .btn-check-all:hover:not(:disabled) { background: #4a4a6c; }
+  .btn-show-browser { background: #3a3a5c; color: #ccc; }
+  .btn-show-browser:hover:not(:disabled) { background: #4a4a6c; }
+  .btn-show-browser.active { background: #2a4a3e; color: #4ecca3; }
   .btn-run-single { background: #2a4a3e; color: #4ecca3; }
   .btn-run-single:hover:not(:disabled) { background: #3a5a4e; color: #5edcb3; }
   .btn-run { background: #4ecca3; color: #1a1a2e; font-weight: 600; }
@@ -1611,6 +1614,7 @@ const PANEL_HTML = `<!DOCTYPE html>
     </nav>
     <div class="header-actions">
       <button class="btn btn-check-all sessions-only" onclick="checkAll()" id="btnCheckAll">Check All Sessions</button>
+      <button class="btn btn-show-browser sessions-only" onclick="toggleBrowserView()" id="btnShowBrowser" title="Open the live browser view via noVNC — useful for diagnosing card-click failures or peeking at what a script is doing.">Show browser</button>
       <button class="btn btn-run" onclick="runAll()" id="btnRunAll">Run Now</button>
     </div>
   </div>
@@ -1699,6 +1703,10 @@ const BASE_PATH = '${BASE_PATH}';
 let state = { sites: [], activeBrowser: null, allLoggedIn: false, runStatus: 'idle' };
 let busy = false;
 let showingLog = false;
+// User-toggled noVNC view via the "Show browser" header button. Independent
+// of activeBrowser/showingLog so the user can peek at the live browser
+// during a claim run (which normally swaps the iframe for the run log).
+let userShowBrowser = false;
 let logOffset = 0;
 let logPollTimer = null;
 let pendingGogCount = 0;
@@ -2674,8 +2682,19 @@ function render() {
   // "ready" message when all sessions are logged in. Leaving the main area
   // empty was confusing — there's no banner anymore, and the VNC iframe only
   // appears during active login or claim runs.
+  const btnShowBrowser = document.getElementById('btnShowBrowser');
+  if (btnShowBrowser) {
+    // Login + batch-redeem flows already mount the iframe themselves and
+    // would break if we removed it — show the button disabled with a label
+    // that matches the actual state.
+    const ownedElsewhere = !!(state.activeBrowser || state.batchRedeem);
+    btnShowBrowser.disabled = ownedElsewhere;
+    btnShowBrowser.textContent = ownedElsewhere ? 'Browser shown' : (userShowBrowser ? 'Hide browser' : 'Show browser');
+    btnShowBrowser.classList.toggle('active', userShowBrowser || ownedElsewhere);
+  }
+
   const placeholder = document.getElementById('vncPlaceholder');
-  if (placeholder && !state.activeBrowser && !state.batchRedeem && !showingLog) {
+  if (placeholder && !state.activeBrowser && !state.batchRedeem && !showingLog && !userShowBrowser) {
     placeholder.style.display = 'flex';
     const setupDone = state.allLoggedIn && state.sites.length > 0;
     if (setupDone) {
@@ -2844,6 +2863,31 @@ function hideVnc() {
   if (iframe) iframe.remove();
   const placeholder = document.getElementById('vncPlaceholder');
   if (placeholder) placeholder.style.display = 'flex';
+  // Iframe was just removed externally (login ended, batch finished). The
+  // user-toggle state must follow or the button label will lie.
+  userShowBrowser = false;
+}
+
+// Header "Show browser" toggle. Lets the user peek at the live noVNC view
+// regardless of run state — during a claim run the iframe normally gets
+// swapped out for the run log, but the user may want to see what the
+// browser is actually doing (e.g. when MS card clicks all time out).
+// No-op during active login / batch redeem — those flows own the iframe
+// and removing it here would break them.
+function toggleBrowserView() {
+  if (state.activeBrowser || state.batchRedeem) return;
+  userShowBrowser = !userShowBrowser;
+  if (userShowBrowser) {
+    showVnc(); // mounts iframe; also calls hideRunLog() which hides the log el
+  } else {
+    const container = document.getElementById('vncContainer');
+    const iframe = container.querySelector('iframe');
+    if (iframe) iframe.remove();
+    // Restore run log if a run is in progress; render() will show the
+    // placeholder otherwise.
+    if (state.runStatus === 'running') showRunLog();
+  }
+  render();
 }
 
 function showRunLog() {
