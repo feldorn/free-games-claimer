@@ -57,13 +57,19 @@ RUN apt-get update \
       /var/tmp/* \
       /tmp/* \
       /usr/share/doc/* \
-    # Ubuntu Noble's novnc 1.3.0-2 ships a broken vnc_auto.html (its JS chain
-    # imports `dragThreshold` from core/util/browser.js, which doesn't export
-    # it — SyntaxError on load). vnc.html works fine; redirect to it with
-    # autoconnect so visiting :6080 still "just works". Overwrite both the
-    # default index.html *and* vnc_auto.html itself so users who bookmarked
-    # or have a cached redirect to /vnc_auto.html also land on a working page.
-    && printf '%s\n' '<!doctype html><meta http-equiv="refresh" content="0;url=vnc.html?autoconnect=true&resize=scale">' | tee /usr/share/novnc/index.html /usr/share/novnc/vnc_auto.html > /dev/null \
+    # Ubuntu Noble's novnc 1.3.0-2 ships index.html as a symlink to
+    # vnc_auto.html, whose JS chain imports `dragThreshold` from
+    # core/util/browser.js — a symbol this build doesn't export, so visiting
+    # http://localhost:6080/ blew up with a SyntaxError. Replace the index.html
+    # symlink with a tiny meta-refresh that lands users on vnc.html (the
+    # working noVNC entry point) with autoconnect.
+    #
+    # Do NOT also overwrite vnc_auto.html: in this package it's a symlink to
+    # vnc.html, so a tee through it clobbers the real noVNC UI with the
+    # self-referential redirect and produces an infinite reload loop. Bookmarks
+    # to /vnc_auto.html still resolve through the symlink to the working
+    # vnc.html, so no separate redirect is needed.
+    && printf '%s\n' '<!doctype html><meta http-equiv="refresh" content="0;url=vnc.html?autoconnect=true&resize=scale">' > /usr/share/novnc/index.html \
     && pip install apprise --break-system-packages --no-cache-dir
 
 WORKDIR /fgc
