@@ -1,5 +1,5 @@
 import { chromium } from 'patchright';
-import { resolve, jsonDb, datetime, filenamify, prompt, notify, html_game_list, handleSIGINT, log } from './src/util.js';
+import { resolve, jsonDb, datetime, filenamify, prompt, notify, html_game_list, handleSIGINT, log, awaitUserCaptchaSolve } from './src/util.js';
 import { cfg } from './src/config.js';
 
 const screenshot = (...a) => resolve(cfg.dir.screenshots, 'steam', ...a);
@@ -147,6 +147,32 @@ async function discoverFreeGames(p) {
 
   await p.goto(URL_STEAMDB_FREE, { waitUntil: 'domcontentloaded' });
   await p.waitForTimeout(5000);
+
+  // Cloudflare interstitial detector. SteamDB sits behind Cloudflare's
+  // "Verify you are human" challenge intermittently; when it fires the
+  // page has no Steam app links so the existing scrape silently returns
+  // zero promotions and the run logs success with no claim — a regression
+  // we want to surface, not hide. Detect by body text since the challenge
+  // markup churns over Cloudflare's release cycle.
+  const isCloudflareChallenge = async () => {
+    const bodyText = await p.locator('body').innerText().catch(() => '');
+    return /just a moment|verifying you are human|checking if the site connection is secure|verify you are human/i.test(bodyText);
+  };
+
+  if (await isCloudflareChallenge()) {
+    const solved = await awaitUserCaptchaSolve(p, {
+      service: 'steam',
+      label: 'SteamDB Cloudflare challenge',
+      captchaCheck: isCloudflareChallenge,
+    });
+    if (!solved) {
+      log.warn('SteamDB still blocked by Cloudflare — skipping discovery this run');
+      return [];
+    }
+    // Cloudflare auto-redirects to the real page after the challenge passes;
+    // give it a beat to render the app list before scraping.
+    await p.waitForTimeout(2000);
+  }
 
   if (cfg.debug) {
     const pageText = await p.locator('body').innerText();
