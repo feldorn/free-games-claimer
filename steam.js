@@ -146,7 +146,19 @@ async function getGameDetails(p, url) {
 async function discoverFreeGames(p) {
   log.status('Source', 'SteamDB (steamdb.info/upcoming/free)');
 
-  await p.goto(URL_STEAMDB_FREE, { waitUntil: 'domcontentloaded' });
+  const navResp = await p.goto(URL_STEAMDB_FREE, { waitUntil: 'domcontentloaded' });
+  // 403 means Cloudflare hard-blocked the request server-side (no Private
+  // Access Token attestation, IP rep, etc.) — there is no Turnstile to
+  // solve, the user staring at a broken-widget page can't recover the
+  // session, and polling for content forever is just punishment. Bail out
+  // explicitly so the run logs a clear cause instead of the engagement
+  // loop. Same idea for any other 4xx that shouldn't be on a public page.
+  if (navResp && navResp.status() >= 400 && navResp.status() < 500) {
+    log.warn(`SteamDB returned ${navResp.status()} — Cloudflare hard-block, no manual solve will help. Skipping Steam this run.`);
+    log.warn('If this persists: try a different IP / VPN, or temporarily disable Steam in Settings.');
+    await dumpDiscoveryDiagnostic(p, `cloudflare-${navResp.status()}`);
+    return [];
+  }
   await p.waitForTimeout(5000);
 
   // Cloudflare interstitial detector — flipped to a positive-content-first
