@@ -13,6 +13,7 @@ Claims free games periodically on:
 - <img alt="logo steam" src="https://store.steampowered.com/favicon.ico" width="32" align="middle" /> [Steam](https://store.steampowered.com) — free-to-keep promotions only (not F2P or free weekends)
 - 🎯 [Microsoft Rewards](https://rewards.bing.com) — daily Bing searches and activity cards for points, with before/after balance tracking
 - 🛒 [AliExpress](https://m.aliexpress.com) — daily check-in coins (opt-in; disabled by default)
+- 🎮 [Ubisoft Connect](https://store.ubisoft.com/us/free-games) — watch-only; pings you when a new free-week promo appears (opt-in; disabled by default)
 
 Uses [patchright](https://github.com/nicbarker/patchright) (Chromium with built-in anti-detection). Runs in Docker with a virtual display and VNC access.
 
@@ -39,6 +40,16 @@ Existing users: pull the new image, open the **Settings** tab, and everything yo
 ### Added in 2.0.1
 
 - **AliExpress** restored as an opt-in service (previously deleted in the fork's 2026-03-25 cleanup). Disabled by default; enable in **Settings → Per-service → AliExpress**. Collects the daily check-in coins via mobile-site emulation and surfaces a per-service row in the Stats tab with its coin history. Needs `AE_EMAIL`/`AE_PASSWORD` only if you want unattended re-login — otherwise click Login on the AliExpress card and cookies persist.
+
+### Added in 2.0.3 — Steam discovery durability + Ubisoft watcher
+
+Two notable changes plus an Epic Games stability fix.
+
+- **Steam discovery moved off SteamDB.** SteamDB sits behind Cloudflare with Private Access Token enforcement, and the patchright Chromium can't satisfy PAT (it requires real Apple/Google attestation signing keys). SteamDB started returning 403 with no recoverable challenge — a manual solve in noVNC didn't help because the underlying request was rejected before any Turnstile widget rendered. **Discovery now uses Steam's own `search/results/?specials=1&maxprice=free` endpoint** — Steam's own infra, no Cloudflare in the way. Steam's `specials=1` filter naturally excludes free-to-play games (since they have a $0 baseline price and aren't "specials"), so the cleaner filter actually drops the per-app "free to keep vs free weekend vs free to play" parsing pass we used to need. Validated against live Free-to-Keep promotions during the migration.
+
+- **Ubisoft Connect (watch-only, opt-in).** New service that pings you via Apprise when a new free-week promo appears at `store.ubisoft.com/us/free-games`. **No login, no auto-claim** — Ubisoft free-week events fire only every few months and the AAA back-catalog they offer is something most users have already played, so a daily check + manual claim is much better juice/squeeze than building login persistence + captcha handling for a quarterly event. Enable in **Settings → Per-service → Ubisoft Connect**. First run silent (establishes baseline); subsequent runs notify only on new promo-edition titles. State persists in `data/ubisoft-watch.json`.
+
+- **Epic Games "ownership-lag" crash fix.** Epic's storefront shows a placeholder "Get" button while the ownership lookup resolves, then flips to "In Library" 1-2s later if you already own the game. The script was reading the placeholder, clicking it, and timing out 60s waiting for a purchase iframe that never appears (Epic shows an already-owned modal instead) — the uncaught timeout exited the whole script with code 1, skipping any remaining games in the queue. Three layers of defense now: a `networkidle` wait after the initial CTA-text wait, a last-second re-read just before clicking, and a CTA re-probe in the catch block that marks the game as `existed` (not `failed`) when the lag turned out to be the cause.
 
 ### Added in 2.0.2 — captcha pause + manual-solve handoff (feedback wanted)
 
@@ -191,6 +202,7 @@ Each store can use the default `EMAIL`/`PASSWORD` or be overridden individually:
 | Steam | `STEAM_EMAIL` | `STEAM_PASSWORD` | | `STEAM_MIN_RATING`, `STEAM_MIN_PRICE` |
 | Microsoft Rewards | `MS_EMAIL` | `MS_PASSWORD` | `MS_OTPKEY` | `MS_SCHEDULE_HOURS` |
 | AliExpress | `AE_EMAIL` | `AE_PASSWORD` | | `AE_ENABLED=1` (opt-in; disabled by default) |
+| Ubisoft Connect | — | — | — | `UBISOFT_ACTIVE=1` (opt-in; disabled by default). Watch-only — no login, no auto-claim. |
 
 ### Steam-Specific Options
 
@@ -199,7 +211,7 @@ Each store can use the default `EMAIL`/`PASSWORD` or be overridden individually:
 | `STEAM_MIN_RATING` | `6` | Minimum review rating (1-9). 9=Overwhelmingly Positive, 6=Mostly Positive, 1=Overwhelmingly Negative |
 | `STEAM_MIN_PRICE` | `10` | Minimum original price in USD. Filters out cheap/shovelware titles. |
 
-Steam discovers free-to-keep games via [SteamDB](https://steamdb.info/upcoming/free/) and only claims temporarily free promotions (100% off games that normally cost money). Free-to-play games and free weekend trials are excluded.
+Steam discovery uses [Steam's own search endpoint](https://store.steampowered.com/search/?specials=1&maxprice=free) (`specials=1&maxprice=free` — discounted-to-zero items). Free-to-play games and free-weekend trials are excluded automatically by Steam's specials filter. The script then checks each candidate's review rating and original price against the thresholds above before claiming. Previously discovery was via SteamDB; that source is now blocked by Cloudflare for our Chromium fingerprint, see [2.0.3](#added-in-203--steam-discovery-durability--ubisoft-watcher) for the full migration story.
 
 ### Microsoft Rewards Options
 
