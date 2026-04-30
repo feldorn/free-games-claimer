@@ -1,5 +1,5 @@
 import { chromium } from 'patchright';
-import { resolve, jsonDb, datetime, filenamify, prompt, confirm, notify, html_game_list, handleSIGINT, log, normalizeTitle } from './src/util.js';
+import { resolve, jsonDb, datetime, filenamify, prompt, confirm, notify, html_game_list, handleSIGINT, log, normalizeTitle, awaitUserCaptchaSolve } from './src/util.js';
 import { cfg } from './src/config.js';
 
 const screenshot = (...a) => resolve(cfg.dir.screenshots, 'gog', ...a);
@@ -88,10 +88,13 @@ try {
       }).catch(_ => { });
       // iframe.locator('iframe[title=reCAPTCHA]').waitFor().then(() => {
       // iframe.locator('.g-recaptcha').waitFor().then(() => {
-      iframe.locator('text=Invalid captcha').waitFor().then(() => {
+      iframe.locator('text=Invalid captcha').waitFor().then(async () => {
         log.warn('Got captcha during login — solve in browser, get a new IP or try again later');
-        notify('gog: got captcha during login. Please check.');
-        // TODO solve reCAPTCHA?
+        await awaitUserCaptchaSolve(page, {
+          service: 'gog',
+          label: 'Login captcha',
+          captchaCheck: () => iframe.locator('text=Invalid captcha').isVisible().catch(() => false),
+        });
       }).catch(_ => { });
       await page.waitForSelector(loggedInSel);
     } else {

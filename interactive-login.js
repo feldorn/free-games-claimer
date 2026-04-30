@@ -446,6 +446,10 @@ let runStatus = 'idle';
 let runSource = null; // 'panel' | 'scheduler'
 let lastRun = null; // { at, source, exitCode, status, startedAt, durationSec }
 let runStartedAt = null;
+// Set when a runner script emits [CAPTCHA-START] on stdout, cleared on
+// [CAPTCHA-END] or run process exit. Drives the captcha banner + the
+// ?focus=captcha deep link target. { service, label, since } when active.
+let captchaPending = null;
 let startupAutoCheck = null; // { current, total, siteName } while auto-check is walking sites
 
 // gog.js runs first so its Prime-Gaming-code reconcile (library + redeem-endpoint
@@ -840,7 +844,18 @@ function runAllScripts({ source = 'panel', sites = null } = {}) {
   runDone = new Promise(resolve => {
     child.stdout.on('data', data => {
       process.stdout.write(data); // keep `docker logs` useful
-      const lines = data.toString().split('\n').filter(l => l.length);
+      const text = data.toString();
+      // Captcha markers from src/util.js#awaitUserCaptchaSolve. Parsed here
+      // (not in the per-line forEach below) so multi-line buffers still match.
+      const startMatch = text.match(/\[CAPTCHA-START\] service=(\S+)\s+label=(.*?)(?:\r?\n|$)/);
+      if (startMatch) {
+        captchaPending = { service: startMatch[1], label: startMatch[2].trim(), since: datetime() };
+      }
+      const endMatch = text.match(/\[CAPTCHA-END\] service=(\S+)/);
+      if (endMatch && captchaPending && captchaPending.service === endMatch[1]) {
+        captchaPending = null;
+      }
+      const lines = text.split('\n').filter(l => l.length);
       lines.forEach(l => {
         runLog.push({ type: 'stdout', text: l, time: datetime() });
         if (runLog.length > 500) runLog.shift();
@@ -869,6 +884,7 @@ function runAllScripts({ source = 'panel', sites = null } = {}) {
       runProcess = null;
       runSource = null;
       runStartedAt = null;
+      captchaPending = null; // safety-net in case END marker was missed
       console.log(`[${datetime()}] All scripts finished (exit code ${code}).`);
       resolve(code);
     });
@@ -887,6 +903,7 @@ function runAllScripts({ source = 'panel', sites = null } = {}) {
       runProcess = null;
       runSource = null;
       runStartedAt = null;
+      captchaPending = null;
       resolve(-1);
     });
   });
@@ -1067,6 +1084,7 @@ function getState() {
     } : null,
     startupAutoCheck,
     lastRun,
+    captchaPending,
   };
 }
 
@@ -1310,6 +1328,11 @@ const PANEL_HTML = `<!DOCTYPE html>
   .compact-sessions .mini-card.not-logged-in .mini-glyph { color: #e94560; }
   .compact-sessions .mini-card.error         .mini-glyph { color: #f0c040; }
   .compact-sessions .mini-card.unknown       .mini-glyph { color: #888; }
+  .captcha-banner { background: #2a1a1e; border: 1px solid #e94560; color: #e94560; padding: 10px 14px; border-radius: 6px; margin: 6px 0; display: flex; align-items: center; gap: 12px; cursor: pointer; }
+  .captcha-banner:hover { filter: brightness(1.2); }
+  .captcha-banner .cb-icon { font-size: 18px; flex-shrink: 0; }
+  .captcha-banner .cb-text { flex: 1; font-weight: 500; line-height: 1.35; }
+  .captcha-banner .cb-cta  { font-weight: 600; opacity: 0.9; white-space: nowrap; }
   .header-top { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
   .header h1 { font-size: 18px; color: #e94560; white-space: nowrap; }
   .header-actions { display: flex; gap: 8px; margin-left: auto; flex-wrap: wrap; justify-content: flex-end; }
@@ -1637,6 +1660,7 @@ const PANEL_HTML = `<!DOCTYPE html>
       <button class="btn btn-run" onclick="runAll()" id="btnRunAll">Run Now</button>
     </div>
   </div>
+  <div class="captcha-banner" id="captchaBanner" style="display:none" onclick="focusCaptcha()" title="Open the browser to solve the pending captcha"></div>
   <div class="steps sessions-only" id="steps"></div>
   <div class="status-strip sessions-only" id="statusStrip" onclick="toggleSessionsCollapsed()" title="Click to collapse session details"></div>
   <div class="site-cards sessions-only" id="siteCards"></div>
@@ -2837,6 +2861,27 @@ function render() {
     btnHeaderCollapse.setAttribute('aria-label', t);
   }
 
+  // Captcha banner — shows on every tab when a runner has flagged a captcha.
+  // Click drops the user straight into Sessions tab + collapsed + browser shown.
+  const captchaBanner = document.getElementById('captchaBanner');
+  if (captchaBanner) {
+    if (state.captchaPending) {
+      captchaBanner.style.display = 'flex';
+      const since = state.captchaPending.since
+        ? ' · started ' + formatTimestamp(state.captchaPending.since, 'relative')
+        : '';
+      captchaBanner.innerHTML =
+        '<span class="cb-icon">⚠</span>' +
+        '<span class="cb-text">' +
+          escapeHtml(state.captchaPending.service) + ' captcha — ' +
+          escapeHtml(state.captchaPending.label) + since +
+        '</span>' +
+        '<span class="cb-cta">Open browser →</span>';
+    } else {
+      captchaBanner.style.display = 'none';
+    }
+  }
+
   // Split sites into active (main grid) and inactive (drawer below).
   const activeCards = state.sites.filter(s => s.active !== false);
   const inactiveCards = state.sites.filter(s => s.active === false);
@@ -2938,6 +2983,23 @@ function popoutBrowser() {
   window.open(buildNovncUrl(), '_blank', 'noopener');
 }
 
+// Drop the user straight onto the captcha. Used by both the in-panel banner
+// click and the ?focus=captcha deep link from notification pushes — the link
+// arrives via a phone or whatever and we want the next tap to be solving the
+// challenge, not navigating tabs.
+function focusCaptcha() {
+  if (document.body.dataset.tab !== 'sessions') switchTab('sessions');
+  if (!sessionsCollapsed) {
+    sessionsCollapsed = true;
+    localStorage.setItem('sessionsCollapsed', '1');
+  }
+  if (!userShowBrowser && !state.activeBrowser && !state.batchRedeem) {
+    userShowBrowser = true;
+    showVnc();
+  }
+  render();
+}
+
 function hideVnc() {
   const container = document.getElementById('vncContainer');
   const iframe = container.querySelector('iframe');
@@ -3029,11 +3091,28 @@ function escapeHtml(s) {
   return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
+// One-shot guard for the ?focus=captcha deep link — applied after the first
+// successful state load (so we know which tab/collapsed state is current)
+// and the URL param is then stripped so a refresh doesn't re-trigger.
+let initialUrlFocusApplied = false;
+function applyUrlFocus() {
+  if (initialUrlFocusApplied) return;
+  initialUrlFocusApplied = true;
+  const params = new URLSearchParams(location.search);
+  if (params.get('focus') === 'captcha') {
+    focusCaptcha();
+    params.delete('focus');
+    const search = params.toString();
+    history.replaceState({}, '', location.pathname + (search ? '?' + search : ''));
+  }
+}
+
 async function refreshState() {
   try {
     state = await api('GET', '/state');
     render();
     if (typeof updateBatchPolling === 'function') updateBatchPolling();
+    applyUrlFocus();
   } catch {}
 }
 
@@ -3426,6 +3505,7 @@ const server = http.createServer(async (req, res) => {
         runLog.push({ type: 'system', text: 'Scripts stopped by user.', time: datetime() });
         runStatus = 'stopped';
         runProcess = null;
+        captchaPending = null;
         sendJson(res, { success: true });
       } else {
         sendJson(res, { success: false, error: 'No scripts are running.' });
