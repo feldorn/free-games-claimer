@@ -578,6 +578,7 @@ async function clickEveryPendingActivityCard(page) {
   await dismissDashboardPopup(page);
   const cards = await page.locator(BING_REWARDS_ACTIVITY_CARD_SELECTOR).elementHandles();
   log.status('Activity cards found', cards.length);
+  let savedDiag = false;
   for (let i = 0; i < cards.length; i++) {
     log.progressStart(`Clicking card #${i + 1}: ...`);
     try {
@@ -591,6 +592,18 @@ async function clickEveryPendingActivityCard(page) {
       } catch (e2) {
         log.progressEnd(' SKIP');
         log.warn(`Card #${i + 1} click failed: ${e2.message.split('\n')[0]}`);
+        if (!savedDiag) {
+          savedDiag = true;
+          const ts = new Date().toISOString().replace(/[:.]/g, '-');
+          const base = `ms-card-fail-${ts}`;
+          try {
+            await page.screenshot({ path: dataDir(`${base}.png`), fullPage: true });
+            writeFileSync(dataDir(`${base}.html`), await page.content());
+            log.warn(`Saved diagnostic: data/${base}.{png,html}`);
+          } catch (diagErr) {
+            log.warn(`Failed to save diagnostic: ${diagErr.message.split('\n')[0]}`);
+          }
+        }
         continue;
       }
     }
