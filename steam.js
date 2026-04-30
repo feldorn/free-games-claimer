@@ -149,27 +149,26 @@ async function discoverFreeGames(p) {
   await p.goto(URL_STEAMDB_FREE, { waitUntil: 'domcontentloaded' });
   await p.waitForTimeout(5000);
 
-  // Cloudflare interstitial detector. SteamDB sits behind Cloudflare's
-  // "Verify you are human" challenge intermittently; when it fires the
-  // page has no Steam app links so the existing scrape silently returns
-  // zero promotions and the run logs success with no claim — a regression
-  // we want to surface, not hide. We check several signals because the
-  // challenge markup churns over Cloudflare's release cycle: title,
-  // body text, hostname (cloudflare-hosted error pages), and known
-  // challenge-widget DOM ids/classes (Turnstile / cf-chl).
+  // Cloudflare interstitial detector — flipped to a positive-content-first
+  // check after observing the previous version loop on user-solved Turnstile
+  // challenges: SteamDB keeps the challenge iframe / widget DOM mounted
+  // after the user passes, so a "challenge-widget present" check kept
+  // returning true forever. Better signal: do we see the actual SteamDB
+  // upcoming-free content yet? If yes, we're past the challenge regardless
+  // of any leftover widget plumbing. Only fall back to negative signals
+  // (URL, title, body text) when content is absent.
   const isCloudflareChallenge = async () => {
     try {
-      const title = await p.title().catch(() => '');
-      if (/just a moment|attention required|access denied/i.test(title)) return true;
+      // Positive: real content present means we're past the challenge.
+      const contentLinks = await p.locator('a[href*="store.steampowered.com/app/"]').count().catch(() => 0);
+      if (contentLinks > 0) return false;
+      // We're stuck somewhere — figure out if it's CF specifically.
       const url = p.url();
       if (/challenges\.cloudflare\.com|__cf_chl_/.test(url)) return true;
-      const widgetCount = await p.locator(
-        '#cf-challenge-running, #challenge-running, #challenge-form, .cf-browser-verification, ' +
-        'iframe[src*="challenges.cloudflare.com"], iframe[src*="cf-chl"], [data-cf-turnstile-response]'
-      ).count().catch(() => 0);
-      if (widgetCount > 0) return true;
+      const title = await p.title().catch(() => '');
+      if (/just a moment|attention required|access denied/i.test(title)) return true;
       const bodyText = (await p.locator('body').innerText().catch(() => '')).toLowerCase();
-      return /just a moment|verifying you are human|checking if the site connection is secure|verify you are human|please complete the security check|attention required/.test(bodyText);
+      return /verifying you are human|checking if the site connection is secure|please complete the security check|just a moment/.test(bodyText);
     } catch { return false; }
   };
 
