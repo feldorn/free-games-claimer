@@ -1298,7 +1298,17 @@ const PANEL_HTML = `<!DOCTYPE html>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #1a1a2e; color: #e0e0e0; height: 100vh; display: flex; flex-direction: column; }
 
-  .header { background: #16213e; padding: 12px 20px; border-bottom: 2px solid #0f3460; flex-shrink: 0; }
+  .header { background: #16213e; padding: 12px 20px 14px; border-bottom: 2px solid #0f3460; flex-shrink: 0; position: relative; }
+  .header-collapse { position: absolute; right: 10px; bottom: 2px; background: transparent; border: none; color: #a0b4d4; opacity: 0.6; cursor: pointer; padding: 2px 6px; font-size: 13px; line-height: 1; font-family: inherit; }
+  .header-collapse:hover { opacity: 1; color: #e0e0e0; }
+  .compact-sessions { display: none; flex-wrap: wrap; gap: 6px; padding: 4px 0 0; }
+  body[data-tab="sessions"] .compact-sessions.shown { display: flex; }
+  .compact-sessions .mini-card { display: inline-flex; align-items: center; gap: 5px; background: #1e2a47; padding: 3px 9px; border-radius: 4px; font-size: 12px; color: #a0b4d4; }
+  .compact-sessions .mini-card .mini-glyph { font-weight: 600; }
+  .compact-sessions .mini-card.logged-in     .mini-glyph { color: #4ecca3; }
+  .compact-sessions .mini-card.not-logged-in .mini-glyph { color: #e94560; }
+  .compact-sessions .mini-card.error         .mini-glyph { color: #f0c040; }
+  .compact-sessions .mini-card.unknown       .mini-glyph { color: #888; }
   .header-top { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
   .header h1 { font-size: 18px; color: #e94560; white-space: nowrap; }
   .header-actions { display: flex; gap: 8px; margin-left: auto; flex-wrap: wrap; justify-content: flex-end; }
@@ -1499,8 +1509,6 @@ const PANEL_HTML = `<!DOCTYPE html>
   .status-strip.info { background: #12203a; color: #a0b4d4; }
   .status-strip .strip-primary   { font-weight: 500; }
   .status-strip .strip-secondary { margin-left: auto; opacity: 0.72; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .status-strip .strip-collapse  { background: transparent; border: none; color: inherit; opacity: 0.7; cursor: pointer; padding: 0 4px; font-size: 14px; line-height: 1; font-family: inherit; margin-left: 8px; }
-  .status-strip .strip-collapse:hover { opacity: 1; }
 
   .site-cards { display: grid; grid-template-columns: repeat(1, 1fr); gap: 10px; }
   @media (min-width: 640px)  { .site-cards { grid-template-columns: repeat(2, 1fr); } }
@@ -1633,6 +1641,8 @@ const PANEL_HTML = `<!DOCTYPE html>
   <div class="available-drawer sessions-only" id="availableDrawer" style="display:none"></div>
   <div class="sessions-only" id="batchRedeemInfo" style="display:none; margin-top: 10px;"></div>
   <div class="sessions-only" id="activeSession" style="display:none"></div>
+  <div class="compact-sessions sessions-only" id="compactSessions"></div>
+  <button class="header-collapse sessions-only" id="btnHeaderCollapse" onclick="toggleSessionsCollapsed()" title="Collapse session details" aria-label="Collapse session details">▴</button>
 </div>
 <div class="main-area" id="mainArea">
   <div class="tab-panel" data-panel="sessions">
@@ -2785,17 +2795,44 @@ function render() {
     stripText = 'Click "Check All Sessions" to get started';
   }
 
-  if (stripText) {
+  if (stripText && !sessionsCollapsed) {
     strip.style.display = 'flex';
     strip.className = 'status-strip sessions-only ' + stripKind;
-    const collapseGlyph = sessionsCollapsed ? '▾' : '▴';
-    const collapseTitle = sessionsCollapsed ? 'Expand session details' : 'Collapse session details';
     strip.innerHTML =
       '<span class="strip-primary">' + stripText + '</span>' +
-      (stripSecondary ? '<span class="strip-secondary">' + stripSecondary + '</span>' : '') +
-      '<button class="strip-collapse" onclick="toggleSessionsCollapsed()" title="' + collapseTitle + '" aria-label="' + collapseTitle + '">' + collapseGlyph + '</button>';
+      (stripSecondary ? '<span class="strip-secondary">' + stripSecondary + '</span>' : '');
   } else {
     strip.style.display = 'none';
+  }
+
+  // Compact session row — replaces the full cards strip when collapsed.
+  // One mini-card per active service: name + status glyph (✓ / ✕ / ? / !).
+  const compact = document.getElementById('compactSessions');
+  if (compact) {
+    if (sessionsCollapsed) {
+      compact.classList.add('shown');
+      const glyphFor = s =>
+        s.status === 'logged_in'      ? '✓' :
+        s.status === 'not_logged_in'  ? '✕' :
+        s.status === 'error'          ? '!' :
+                                        '?';
+      compact.innerHTML = activeSites.map(s =>
+        '<span class="mini-card ' + s.status + '" title="' + s.name + ': ' + s.status.replace('_', ' ') + '">' +
+          escapeHtml(s.name) +
+          '<span class="mini-glyph">' + glyphFor(s) + '</span>' +
+        '</span>'
+      ).join('');
+    } else {
+      compact.classList.remove('shown');
+      compact.innerHTML = '';
+    }
+  }
+  const btnHeaderCollapse = document.getElementById('btnHeaderCollapse');
+  if (btnHeaderCollapse) {
+    btnHeaderCollapse.textContent = sessionsCollapsed ? '▾' : '▴';
+    const t = sessionsCollapsed ? 'Expand session details' : 'Collapse session details';
+    btnHeaderCollapse.title = t;
+    btnHeaderCollapse.setAttribute('aria-label', t);
   }
 
   // Split sites into active (main grid) and inactive (drawer below).
