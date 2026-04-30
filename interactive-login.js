@@ -1499,6 +1499,8 @@ const PANEL_HTML = `<!DOCTYPE html>
   .status-strip.info { background: #12203a; color: #a0b4d4; }
   .status-strip .strip-primary   { font-weight: 500; }
   .status-strip .strip-secondary { margin-left: auto; opacity: 0.72; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .status-strip .strip-collapse  { background: transparent; border: none; color: inherit; opacity: 0.7; cursor: pointer; padding: 0 4px; font-size: 14px; line-height: 1; font-family: inherit; margin-left: 8px; }
+  .status-strip .strip-collapse:hover { opacity: 1; }
 
   .site-cards { display: grid; grid-template-columns: repeat(1, 1fr); gap: 10px; }
   @media (min-width: 640px)  { .site-cards { grid-template-columns: repeat(2, 1fr); } }
@@ -1713,6 +1715,19 @@ let drawerExpanded = localStorage.getItem('drawerSeen') !== '1';
 function toggleAvailableDrawer() {
   drawerExpanded = !drawerExpanded;
   localStorage.setItem('drawerSeen', '1');
+  render();
+}
+
+// User-controlled collapse for the entire sessions strip below the status
+// line — hides session cards, the available-services drawer, batch redeem
+// info, and the active-session row, leaving just the status strip visible
+// as a one-line summary so the VNC iframe / run log gets full vertical
+// space below. Persisted across reloads.
+let sessionsCollapsed = localStorage.getItem('sessionsCollapsed') === '1';
+
+function toggleSessionsCollapsed() {
+  sessionsCollapsed = !sessionsCollapsed;
+  localStorage.setItem('sessionsCollapsed', sessionsCollapsed ? '1' : '0');
   render();
 }
 
@@ -2648,9 +2663,11 @@ function render() {
 
   // Once all sessions are OK the stepper is no longer actionable — the strip
   // below communicates current state more compactly. Also hide stepper + cards
-  // during an active login so the VNC iframe has more room.
-  steps.style.display = (state.allLoggedIn || state.activeBrowser) ? 'none' : 'flex';
-  cards.style.display = state.activeBrowser ? 'none' : 'grid';
+  // during an active login (so the VNC iframe has more room) or whenever the
+  // user has clicked the chevron in the status strip to collapse the session
+  // panel manually.
+  steps.style.display = (state.allLoggedIn || state.activeBrowser || sessionsCollapsed) ? 'none' : 'flex';
+  cards.style.display = (state.activeBrowser || sessionsCollapsed) ? 'none' : 'grid';
 
   const isRunning = state.runStatus === 'running';
   const disabled = busy || !!state.activeBrowser || isRunning;
@@ -2767,9 +2784,12 @@ function render() {
   if (stripText) {
     strip.style.display = 'flex';
     strip.className = 'status-strip sessions-only ' + stripKind;
+    const collapseGlyph = sessionsCollapsed ? '▾' : '▴';
+    const collapseTitle = sessionsCollapsed ? 'Expand session details' : 'Collapse session details';
     strip.innerHTML =
       '<span class="strip-primary">' + stripText + '</span>' +
-      (stripSecondary ? '<span class="strip-secondary">' + stripSecondary + '</span>' : '');
+      (stripSecondary ? '<span class="strip-secondary">' + stripSecondary + '</span>' : '') +
+      '<button class="strip-collapse" onclick="toggleSessionsCollapsed()" title="' + collapseTitle + '" aria-label="' + collapseTitle + '">' + collapseGlyph + '</button>';
   } else {
     strip.style.display = 'none';
   }
@@ -2803,7 +2823,7 @@ function render() {
   // "Available services" drawer — inactive sites with a single Enable button.
   const drawer = document.getElementById('availableDrawer');
   if (drawer) {
-    if (inactiveCards.length === 0) {
+    if (inactiveCards.length === 0 || sessionsCollapsed) {
       drawer.style.display = 'none';
     } else {
       drawer.style.display = 'block';
