@@ -1,12 +1,11 @@
 import { chromium } from 'patchright';
 import { writeFileSync } from 'node:fs';
-import { resolve, jsonDb, datetime, filenamify, prompt, notify, html_game_list, handleSIGINT, log, dataDir, awaitUserCaptchaSolve } from './src/util.js';
+import { resolve, jsonDb, datetime, filenamify, prompt, notify, html_game_list, handleSIGINT, log, dataDir } from './src/util.js';
 import { cfg } from './src/config.js';
 
 const screenshot = (...a) => resolve(cfg.dir.screenshots, 'steam', ...a);
 
 const URL_STORE = 'https://store.steampowered.com';
-const URL_STEAMDB_FREE = 'https://steamdb.info/upcoming/free/';
 const URL_LOGIN = `${URL_STORE}/login/`;
 
 const RATING_MAP = {
@@ -144,157 +143,103 @@ async function getGameDetails(p, url) {
 }
 
 async function discoverFreeGames(p) {
-  log.status('Source', 'SteamDB (steamdb.info/upcoming/free)');
+  log.status('Source', 'Steam search (specials, max price free)');
+  return await discoverViaSteamSearch(p);
+}
 
-  const navResp = await p.goto(URL_STEAMDB_FREE, { waitUntil: 'domcontentloaded' });
-  // 403 means Cloudflare hard-blocked the request server-side (no Private
-  // Access Token attestation, IP rep, etc.) — there is no Turnstile to
-  // solve, the user staring at a broken-widget page can't recover the
-  // session, and polling for content forever is just punishment. Bail out
-  // explicitly so the run logs a clear cause instead of the engagement
-  // loop. Same idea for any other 4xx that shouldn't be on a public page.
-  if (navResp && navResp.status() >= 400 && navResp.status() < 500) {
-    log.warn(`SteamDB returned ${navResp.status()} — Cloudflare hard-block, no manual solve will help. Skipping Steam this run.`);
-    log.warn('If this persists: try a different IP / VPN, or temporarily disable Steam in Settings.');
-    await dumpDiscoveryDiagnostic(p, `cloudflare-${navResp.status()}`);
+// Steam's own search infinite-scroll endpoint. Returns JSON with a
+// results_html fragment we parse for the free-to-keep promotions.
+//
+// Why not SteamDB anymore: SteamDB sits behind Cloudflare with Private
+// Access Token enforcement, which the patchright Chromium can't satisfy
+// (PAT requires real Apple/Google attestation signing). We were getting
+// 403 Forbidden with no recoverable challenge.
+//
+// Why "specials=1&maxprice=free": specials=1 only includes discounted
+// games (so pure free-to-play games with $0 baseline are excluded for
+// free), and maxprice=free narrows to discounts-to-zero. The result is
+// exactly the "Free to Keep" set the script wants — no separate filter
+// pass needed on the listing.
+async function discoverViaSteamSearch(p) {
+  const SEARCH_URL = 'https://store.steampowered.com/search/results/?query&specials=1&maxprice=free&infinite=1&count=200';
+  let respText, status;
+  try {
+    const resp = await p.request.get(SEARCH_URL, { timeout: 30000 });
+    status = resp.status();
+    respText = await resp.text();
+  } catch (e) {
+    log.warn(`Steam search request failed: ${e.message.split('\n')[0]}`);
     return [];
   }
-  await p.waitForTimeout(5000);
-
-  // Cloudflare interstitial detector — flipped to a positive-content-first
-  // check after observing the previous version loop on user-solved Turnstile
-  // challenges: SteamDB keeps the challenge iframe / widget DOM mounted
-  // after the user passes, so a "challenge-widget present" check kept
-  // returning true forever. Better signal: do we see the actual SteamDB
-  // upcoming-free content yet? If yes, we're past the challenge regardless
-  // of any leftover widget plumbing. Only fall back to negative signals
-  // (URL, title, body text) when content is absent.
-  const isCloudflareChallenge = async () => {
-    try {
-      // Positive: real content present means we're past the challenge.
-      const contentLinks = await p.locator('a[href*="store.steampowered.com/app/"]').count().catch(() => 0);
-      if (contentLinks > 0) return false;
-      // We're stuck somewhere — figure out if it's CF specifically.
-      const url = p.url();
-      if (/challenges\.cloudflare\.com|__cf_chl_/.test(url)) return true;
-      const title = await p.title().catch(() => '');
-      if (/just a moment|attention required|access denied/i.test(title)) return true;
-      const bodyText = (await p.locator('body').innerText().catch(() => '')).toLowerCase();
-      return /verifying you are human|checking if the site connection is secure|please complete the security check|just a moment/.test(bodyText);
-    } catch { return false; }
-  };
-
-  if (await isCloudflareChallenge()) {
-    const solved = await awaitUserCaptchaSolve(p, {
-      service: 'steam',
-      label: 'SteamDB Cloudflare challenge',
-      captchaCheck: isCloudflareChallenge,
-    });
-    if (!solved) {
-      log.warn('SteamDB still blocked by Cloudflare — skipping discovery this run');
-      await dumpDiscoveryDiagnostic(p, 'cloudflare-timeout');
-      return [];
-    }
-    // Cloudflare auto-redirects to the real page after the challenge passes;
-    // give it a beat to render the app list before scraping.
-    await p.waitForTimeout(2000);
+  if (status >= 400) {
+    log.warn(`Steam search returned HTTP ${status} — skipping discovery`);
+    saveSearchResponse(respText, `http-${status}`);
+    return [];
   }
 
-  if (cfg.debug) {
-    const pageText = await p.locator('body').innerText();
-    console.log('SteamDB page text (first 2000 chars):', pageText.substring(0, 2000));
+  let data;
+  try { data = JSON.parse(respText); }
+  catch {
+    log.warn('Steam search returned non-JSON response — skipping discovery');
+    saveSearchResponse(respText, 'invalid-json');
+    return [];
   }
 
-  const storeLinks = await p.locator('a[href*="store.steampowered.com/app/"]').all();
-  const seen = new Set();
+  if (data.success !== 1 || typeof data.results_html !== 'string') {
+    log.warn(`Steam search response missing results_html (success=${data.success})`);
+    saveSearchResponse(respText, 'unexpected-shape');
+    return [];
+  }
+
+  // Parse each <a> result. Defense in depth: also confirm data-discount="100"
+  // on each row so anything that snuck through with a different shape is
+  // rejected — we want -100% off (the "Free to Keep" promotion pattern),
+  // not a 99%-off-but-rounds-to-zero curiosity.
+  const rowRegex = /<a\b[^>]*?data-ds-appid="(\d+)"[\s\S]*?<span class="title">([^<]+)<\/span>[\s\S]*?data-discount="(\d+)"[\s\S]*?<\/a>/g;
   const games = [];
-
-  for (const link of storeLinks) {
-    try {
-      const href = await link.getAttribute('href');
-      const appMatch = href.match(/\/app\/(\d+)/);
-      if (!appMatch) continue;
-      const appId = appMatch[1];
-      if (seen.has(appId)) continue;
-
-      let cardEl = link;
-      let cardText = '';
-      for (let depth = 0; depth < 12; depth++) {
-        cardEl = cardEl.locator('..');
-        try {
-          cardText = await cardEl.innerText({ timeout: 2000 });
-        } catch { break; }
-        const cardLower = cardText.toLowerCase();
-        if (cardLower.includes('free to keep') || cardLower.includes('play for free') || cardLower.includes('free weekend')) {
-          break;
-        }
-      }
-
-      const cardLower = cardText.toLowerCase();
-      if (!cardLower.includes('free to keep')) continue;
-      if (cardLower.includes('play for free') || cardLower.includes('free weekend')) continue;
-      if (cardLower.includes('potentially upcoming')) continue;
-
-      seen.add(appId);
-
-      let name = null;
-      const lines = cardText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
-      const skipPatterns = /^(free to keep|play for free|free weekend|view store|install|started|expires|ends|in \d|today|tomorrow|\d{1,2}\s+\w+\s+\d{4})/i;
-      for (const line of lines) {
-        if (line.match(/^https?:\/\//)) continue;
-        if (line.match(skipPatterns)) continue;
-        if (line.length >= 2 && line.length <= 200) {
-          name = line;
-          break;
-        }
-      }
-      if (!name) name = `App ${appId}`;
-
-      let endDate = null;
-      for (const line of lines) {
-        const lineLower = line.toLowerCase();
-        if (lineLower.includes('expires') || lineLower.includes('ends')) {
-          const fullMatch = line.match(/(\d{1,2}\s+\w+\s+\d{4})\s*[\u2013\u2014\-\u2015–—]*\s*([\d:]+\s*UTC)/);
-          if (fullMatch) { endDate = `${fullMatch[1]} ${fullMatch[2]}`; break; }
-          const dateMatch = line.match(/(\d{1,2}\s+\w+\s+\d{4})/);
-          if (dateMatch) { endDate = dateMatch[1]; break; }
-          const relMatch = line.match(/(in\s+\d+\s+\w+|tomorrow|today)/i);
-          if (relMatch) { endDate = relMatch[1]; break; }
-        }
-      }
-
-      games.push({
-        appId,
-        name,
-        url: `https://store.steampowered.com/app/${appId}/`,
-        endDate,
-      });
-    } catch (e) {
-      if (cfg.debug) console.error('Error parsing SteamDB entry:', e.message);
-    }
+  const seen = new Set();
+  let m;
+  while ((m = rowRegex.exec(data.results_html))) {
+    const appId = m[1];
+    if (seen.has(appId)) continue;
+    if (parseInt(m[3], 10) !== 100) continue;
+    seen.add(appId);
+    games.push({
+      appId,
+      name: m[2].trim(),
+      url: `https://store.steampowered.com/app/${appId}/`,
+      // endDate is not on the search results page — the previous SteamDB-
+      // scraped value was purely informational for log output, not a
+      // claim-pipeline input, so dropping it is fine.
+      endDate: null,
+    });
   }
 
-  if (cfg.debug) console.log(`  Found ${games.length} free-to-keep promotion(s) on SteamDB`);
-  // Empty result + no detected challenge = something else broke. Dump the
-  // page so we can see whether SteamDB returned an unexpected layout, an
-  // error page, a different gating mechanism, etc. The dump lets us widen
-  // the detector heuristics next iteration without requiring the user to
-  // reproduce live in noVNC.
-  if (games.length === 0) {
-    await dumpDiscoveryDiagnostic(p, 'zero-promotions');
+  if (cfg.debug) console.log(`  Parsed ${games.length} free-to-keep promotion(s) from Steam search (total_count=${data.total_count})`);
+  if (games.length === 0 && data.total_count === 0) {
+    log.info('No free-to-keep promotions on Steam right now');
+  } else if (games.length === 0) {
+    // Steam reported hits but our regex extracted none — selectors may have
+    // shifted. Save the raw response so the next code change has source to
+    // pattern-match against.
+    log.warn(`Steam search reported ${data.total_count} hits but parser extracted 0 — selectors may have changed`);
+    saveSearchResponse(respText, 'parser-mismatch');
   }
   return games;
 }
 
-async function dumpDiscoveryDiagnostic(p, reason) {
+// Persist a copy of an unexpected Steam search response to data/ so we can
+// inspect it after the fact without needing to reproduce live. Cap the size
+// because results_html can be megabytes when total_count is large.
+function saveSearchResponse(text, reason) {
+  if (typeof text !== 'string' || !text.length) return;
   try {
     const ts = new Date().toISOString().replace(/[:.]/g, '-');
-    const base = `steam-discover-${reason}-${ts}`;
-    await p.screenshot({ path: dataDir(`${base}.png`), fullPage: true });
-    writeFileSync(dataDir(`${base}.html`), await p.content());
-    log.warn(`Saved Steam-discovery diagnostic: data/${base}.{png,html}`);
+    const base = `steam-discover-${reason}-${ts}.json`;
+    writeFileSync(dataDir(base), text.slice(0, 200000));
+    log.warn(`Saved Steam search response: data/${base}`);
   } catch (e) {
-    log.warn(`Failed to save Steam-discovery diagnostic: ${e.message.split('\n')[0]}`);
+    log.warn(`Failed to save Steam search response: ${e.message.split('\n')[0]}`);
   }
 }
 
