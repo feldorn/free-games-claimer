@@ -40,6 +40,16 @@ Existing users: pull the new image, open the **Settings** tab, and everything yo
 
 - **AliExpress** restored as an opt-in service (previously deleted in the fork's 2026-03-25 cleanup). Disabled by default; enable in **Settings → Per-service → AliExpress**. Collects the daily check-in coins via mobile-site emulation and surfaces a per-service row in the Stats tab with its coin history. Needs `AE_EMAIL`/`AE_PASSWORD` only if you want unattended re-login — otherwise click Login on the AliExpress card and cookies persist.
 
+### Added in 2.0.2 — captcha pause + manual-solve handoff (feedback wanted)
+
+When a runner script hits a captcha that needs a human, the run no longer just fails — it now pauses, pings you, and hands off to noVNC for a manual solve. See [Captcha pause](#captcha-pause) below for the full flow. **This is brand new and currently wired into GOG's login captcha; we want feedback** on the timeout window, the notification copy, and edge cases before we generalize it to AliExpress's slider, hCaptcha, and friends. File issues at [feldorn/free-games-claimer/issues](https://github.com/feldorn/free-games-claimer/issues) or comment on a recent captcha-related issue.
+
+Other small panel improvements that landed alongside:
+
+- **Show browser** button on the Sessions tab header (with **Pop out ↗** sibling) — peek at the live noVNC view during a run instead of only during interactive logins.
+- **Sessions panel collapse** — click the chevron in the bottom-right of the header (or the status strip itself) to fold the cards down to a one-line row of mini-cards (`name ✓` / `name ✕`). Useful on phones / when watching the browser full-screen.
+- **MS Bing-search delay** is now configurable via `MS_SEARCH_DELAY_MAX_SEC` / **Settings → Microsoft Rewards** — drops a typical run from ~90 minutes to whatever you want at your own bot-detection risk.
+
 ---
 
 ## Quick Start (Docker)
@@ -203,7 +213,7 @@ Microsoft Rewards collects daily points by running a desktop Bing session (33–
 Notifications are sent via [apprise](https://github.com/caronc/apprise) for:
 - Successfully claimed games
 - Failed claims
-- Login issues (expired sessions, captchas)
+- Login issues (expired sessions, captchas — see [Captcha pause](#captcha-pause))
 
 Set `NOTIFY` to one or more apprise service URLs. Examples:
 
@@ -219,6 +229,61 @@ NOTIFY='pover://user@token' 'tgram://bottoken/ChatID'
 ```
 
 See [apprise documentation](https://github.com/caronc/apprise#supported-notifications) for all supported services.
+
+---
+
+## Captcha pause
+
+> **New in 2.0.2 — feedback wanted.** Wired into GOG's login captcha so far; AliExpress slider and others to follow as we iterate.
+
+When a script hits a captcha it can't auto-solve, it pauses for up to **10 minutes** waiting for you to solve it manually in the noVNC view, then either resumes (if you solved it) or moves on (if you didn't show up). The behaviour is per-service and adapts to whether you've been responding.
+
+### What you see
+
+A push notification arrives on whatever apprise targets are configured (`NOTIFY` env). The body includes the service, a short label for what's blocking, and a **deep link** to the panel:
+
+```
+gog captcha: Login captcha — solve now
+https://your-panel.example.com/?focus=captcha
+```
+
+Tap the link → the panel opens directly to the Sessions tab with the side cards collapsed and the live noVNC iframe mounted, so the next thing you do is solve the slider / hCaptcha / whatever appeared. Solve it → the script detects the captcha is gone (it polls the page once a second) and resumes.
+
+For this to work the panel must be reachable from your phone; set `PUBLIC_URL` (or `panel.publicUrl` in Settings) to the externally-reachable URL of the panel. Without it the notification still fires but won't include a clickable link.
+
+If you're already on the panel when the captcha hits, a red banner appears at the top of *every tab* with the same click target. You don't have to be on Sessions tab to notice.
+
+### What you get if you don't show up
+
+If you don't solve within 10 minutes, the script gives up and **continues with the rest of the run**. You also get a *second* notification — the deferred form — that says "solve later when you can" with the same deep link, so the missed captcha doesn't disappear from your awareness:
+
+```
+gog captcha: Login captcha — solve later when you can
+https://your-panel.example.com/?focus=captcha
+```
+
+The deep link still works any time later — clicking it just won't have anything to solve unless another captcha is currently active.
+
+### Per-service behaviour
+
+State is tracked per service (gog, epic, microsoft, …) and is independent across services. The relevant rules:
+
+- **First captcha for a service in this run** → engagement: notification + 10-minute wait + poll.
+- **Subsequent captcha, same service, after you solved the previous one** → engagement again (you've proven responsive — we'll keep asking).
+- **Subsequent captcha, same service, after you missed the previous one** → no wait; deferred notification only. The run keeps moving so an absent user isn't holding up the rest of the queue.
+- **Different service, fresh start** — independent of the above. GOG being abandoned doesn't affect Epic getting its first chance at engagement.
+- **Next run** (scheduled or manual) — fresh state for every service. An absent user gets a new shot next cycle.
+
+### Where it's wired in (2.0.2)
+
+- **GOG** — login captcha (replaced the previous fire-and-forget `notify` with the pause/poll helper).
+
+To add it to another script, see `awaitUserCaptchaSolve(page, opts)` in `src/util.js`. The caller supplies a `captchaCheck` async function that returns `true` while the captcha is on screen — so the helper can poll any site-specific selector.
+
+### Known limitations
+
+- Manual solve via noVNC works for sites that gate on **behaviour** (slide gesture, click challenge, etc.). Sites that gate on **fingerprint** (e.g. AliExpress in our testing) will reject the human-solved slide too because the bot detector fires on the container's browser fingerprint, not the slide itself. For those, manual login from a real desktop is the workaround until the fingerprint side gets attention.
+- The poll watches for the captcha element to *disappear* and treats that as "solved". Refreshing the page or navigating away also clears the element, so technically a false positive is possible — in practice the surrounding code re-checks login state right after, so a false positive just means we proceed to that check.
 
 ---
 
