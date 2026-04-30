@@ -19,6 +19,12 @@ Claims (or watches) free games periodically on:
 
 Uses [patchright](https://github.com/nicbarker/patchright) (Chromium with built-in anti-detection). Runs in Docker with a virtual display and VNC access — solve captchas, MFA, and one-time logins through the embedded noVNC viewer in the panel.
 
+<p align="center">
+<a href="assets/panel-sessions.png" target="_blank"><img alt="Control panel — Sessions tab" src="assets/panel-sessions.png" width="800"/></a>
+<br/>
+<em>Control panel — Sessions tab. Click for full size.</em>
+</p>
+
 ---
 
 ## What's new in 2.0
@@ -355,6 +361,12 @@ setup is complete, so the main area is free for whichever tool you're in.
 
 ### Sessions tab (default)
 
+<p align="center">
+<a href="assets/panel-show-browser.png" target="_blank"><img alt="Show browser — embedded noVNC view of an active claim run" src="assets/panel-show-browser.png" width="800"/></a>
+<br/>
+<em>Show browser — embedded noVNC view with all session cards collapsed to mini-tiles. Click for full size.</em>
+</p>
+
 Responsive grid of cards — one per site (Prime, Epic, GOG, Steam, MS Rewards,
 MS Mobile, AliExpress). Grid layout auto-adapts between 1/2/3/4 columns
 depending on viewport width.
@@ -401,6 +413,12 @@ and wait for you.
 
 ### Stats tab
 
+<p align="center">
+<a href="assets/panel-stats.png" target="_blank"><img alt="Stats tab — KPI tiles, per-service table, 30-day chart, recent claims" src="assets/panel-stats.png" width="800"/></a>
+<br/>
+<em>Stats tab — KPI tiles, per-service table, 30-day chart, recent claims. Click for full size.</em>
+</p>
+
 Derived entirely from the existing per-service JSON DBs plus
 `data/microsoft-rewards.json` (see [Data Storage](#data-storage)). No new
 instrumentation was added to the claim scripts beyond the MS balance
@@ -438,6 +456,12 @@ when you switch tabs. Independent of the Sessions tab — you can leave the
 noVNC visible on Sessions while a run's log streams here.
 
 ### Settings tab
+
+<p align="center">
+<a href="assets/panel-settings.png" target="_blank"><img alt="Settings tab — Services accordion with per-service flags" src="assets/panel-settings.png" width="800"/></a>
+<br/>
+<em>Settings tab — Services accordion. Every runtime flag <code>src/config.js</code> reads is editable in-app. Click for full size.</em>
+</p>
 
 Full in-app configuration. Four sections (Scheduler, Notifications, Services,
 Advanced) accessible via a left rail so changing a single field takes one
