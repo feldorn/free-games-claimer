@@ -472,19 +472,21 @@ const CLAIM_SCRIPT_ORDER = [
   { id: 'epic-games',       script: 'epic-games.js' },
   { id: 'steam',            script: 'steam.js' },
   { id: 'aliexpress',       script: 'aliexpress.js' },
+  { id: 'ubisoft',          script: 'ubisoft.js' }, // watch-only: notifies on new free games, no claim flow
   { id: 'microsoft',        script: 'microsoft.js', linkedWith: 'microsoft-mobile' }, // omitted from "manual" runs by default
 ];
 
 function activeServices() {
   const svc = describeConfig().effective.services || {};
+  const optInIds = new Set(['aliexpress', 'ubisoft']); // opt-in services default off
   const isActive = id => {
     const s = svc[id];
     if (s && typeof s.active === 'boolean') return s.active;
-    return id !== 'aliexpress'; // defaults: all traditional services active, AliExpress off
+    return !optInIds.has(id);
   };
   return new Set(Object.keys({
     'prime-gaming': 1, 'epic-games': 1, 'gog': 1, 'steam': 1,
-    'microsoft': 1, 'microsoft-mobile': 1, 'aliexpress': 1,
+    'microsoft': 1, 'microsoft-mobile': 1, 'aliexpress': 1, 'ubisoft': 1,
   }).filter(isActive));
 }
 
@@ -2021,6 +2023,7 @@ const SERVICE_ROWS = [
       { hint: 'Upper bound for the random pause before each Bing search. Default 180 mimics a human pace; lower values shorten runs significantly (~60 searches × this/2 avg = total search time) but increase the risk of MS flagging the account as a bot.' }],
   ]},
   { id: 'aliexpress', title: 'AliExpress', fields: [] },
+  { id: 'ubisoft', title: 'Ubisoft Connect', subtitle: 'Watch-only: pings you when a new free game appears at store.ubisoft.com/us/free-games. No login, no auto-claim — go grab it manually.', fields: [] },
 ];
 
 function serviceRow(entry) {

@@ -62,6 +62,7 @@ export const CONFIG_SCHEMA = [
   { path: 'services.microsoft.active',          env: 'MS_ACTIVE',        type: 'boolean', default: true,  coerce: toBool },
   { path: 'services.microsoft-mobile.active',   env: 'MS_MOBILE_ACTIVE', type: 'boolean', default: true,  coerce: toBool },
   { path: 'services.aliexpress.active',         env: 'AE_ACTIVE',        type: 'boolean', default: false, coerce: toBool },
+  { path: 'services.ubisoft.active',            env: 'UBISOFT_ACTIVE',   type: 'boolean', default: false, coerce: toBool },
 ];
 
 const schemaByPath = new Map(CONFIG_SCHEMA.map(f => [f.path, f]));
