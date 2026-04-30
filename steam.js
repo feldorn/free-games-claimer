@@ -1,5 +1,6 @@
 import { chromium } from 'patchright';
-import { resolve, jsonDb, datetime, filenamify, prompt, notify, html_game_list, handleSIGINT, log, awaitUserCaptchaSolve } from './src/util.js';
+import { writeFileSync } from 'node:fs';
+import { resolve, jsonDb, datetime, filenamify, prompt, notify, html_game_list, handleSIGINT, log, dataDir, awaitUserCaptchaSolve } from './src/util.js';
 import { cfg } from './src/config.js';
 
 const screenshot = (...a) => resolve(cfg.dir.screenshots, 'steam', ...a);
@@ -152,11 +153,24 @@ async function discoverFreeGames(p) {
   // "Verify you are human" challenge intermittently; when it fires the
   // page has no Steam app links so the existing scrape silently returns
   // zero promotions and the run logs success with no claim — a regression
-  // we want to surface, not hide. Detect by body text since the challenge
-  // markup churns over Cloudflare's release cycle.
+  // we want to surface, not hide. We check several signals because the
+  // challenge markup churns over Cloudflare's release cycle: title,
+  // body text, hostname (cloudflare-hosted error pages), and known
+  // challenge-widget DOM ids/classes (Turnstile / cf-chl).
   const isCloudflareChallenge = async () => {
-    const bodyText = await p.locator('body').innerText().catch(() => '');
-    return /just a moment|verifying you are human|checking if the site connection is secure|verify you are human/i.test(bodyText);
+    try {
+      const title = await p.title().catch(() => '');
+      if (/just a moment|attention required|access denied/i.test(title)) return true;
+      const url = p.url();
+      if (/challenges\.cloudflare\.com|__cf_chl_/.test(url)) return true;
+      const widgetCount = await p.locator(
+        '#cf-challenge-running, #challenge-running, #challenge-form, .cf-browser-verification, ' +
+        'iframe[src*="challenges.cloudflare.com"], iframe[src*="cf-chl"], [data-cf-turnstile-response]'
+      ).count().catch(() => 0);
+      if (widgetCount > 0) return true;
+      const bodyText = (await p.locator('body').innerText().catch(() => '')).toLowerCase();
+      return /just a moment|verifying you are human|checking if the site connection is secure|verify you are human|please complete the security check|attention required/.test(bodyText);
+    } catch { return false; }
   };
 
   if (await isCloudflareChallenge()) {
@@ -167,6 +181,7 @@ async function discoverFreeGames(p) {
     });
     if (!solved) {
       log.warn('SteamDB still blocked by Cloudflare — skipping discovery this run');
+      await dumpDiscoveryDiagnostic(p, 'cloudflare-timeout');
       return [];
     }
     // Cloudflare auto-redirects to the real page after the challenge passes;
@@ -249,7 +264,27 @@ async function discoverFreeGames(p) {
   }
 
   if (cfg.debug) console.log(`  Found ${games.length} free-to-keep promotion(s) on SteamDB`);
+  // Empty result + no detected challenge = something else broke. Dump the
+  // page so we can see whether SteamDB returned an unexpected layout, an
+  // error page, a different gating mechanism, etc. The dump lets us widen
+  // the detector heuristics next iteration without requiring the user to
+  // reproduce live in noVNC.
+  if (games.length === 0) {
+    await dumpDiscoveryDiagnostic(p, 'zero-promotions');
+  }
   return games;
+}
+
+async function dumpDiscoveryDiagnostic(p, reason) {
+  try {
+    const ts = new Date().toISOString().replace(/[:.]/g, '-');
+    const base = `steam-discover-${reason}-${ts}`;
+    await p.screenshot({ path: dataDir(`${base}.png`), fullPage: true });
+    writeFileSync(dataDir(`${base}.html`), await p.content());
+    log.warn(`Saved Steam-discovery diagnostic: data/${base}.{png,html}`);
+  } catch (e) {
+    log.warn(`Failed to save Steam-discovery diagnostic: ${e.message.split('\n')[0]}`);
+  }
 }
 
 try {
