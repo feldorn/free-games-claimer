@@ -582,24 +582,25 @@ async function dismissDashboardPopup(page) {
 }
 
 async function clickEveryPendingActivityCard(page) {
-  log.info('Clicking pending activity cards');
   await page.goto(BING_REWARDS_URL, { waitUntil: 'load' });
   await dismissDashboardPopup(page);
   const cards = await page.locator(BING_REWARDS_ACTIVITY_CARD_SELECTOR).elementHandles();
-  log.status('Activity cards found', cards.length);
+  log.info(`Clicking pending activity cards (${cards.length} found)`);
   let savedDiag = false;
   for (let i = 0; i < cards.length; i++) {
-    log.progressStart(`Clicking card #${i + 1}: ...`);
+    let clicked = false;
     try {
       await cards[i].click({ timeout: 15000 });
+      clicked = true;
     } catch (e) {
       // Popup may have appeared between cards — dismiss and retry once.
       const dismissed = await dismissDashboardPopup(page);
-      log.progressAppend(dismissed ? ' popup dismissed, retrying...' : ' retrying...');
       try {
         await cards[i].click({ timeout: 15000 });
+        clicked = true;
+        if (dismissed) log.info(`Card #${i + 1}: popup dismissed, retry succeeded.`);
+        else log.info(`Card #${i + 1}: retry succeeded.`);
       } catch (e2) {
-        log.progressEnd(' SKIP');
         log.warn(`Card #${i + 1} click failed: ${e2.message.split('\n')[0]}`);
         if (!savedDiag) {
           savedDiag = true;
@@ -616,10 +617,17 @@ async function clickEveryPendingActivityCard(page) {
         continue;
       }
     }
-    const ms = randomMs(15);
-    log.progressAppend(` Sleep: ${(ms / 1000).toFixed(1)}s ...`);
-    await delay(ms);
-    log.progressEnd(' done');
+    if (!clicked) continue;
+    const isLast = i === cards.length - 1;
+    if (isLast) {
+      log.info(`Card #${i + 1} done.`);
+    } else {
+      // Sleep is announced before it happens — refers to the upcoming pause
+      // between this card and the next click, not a sleep already completed.
+      const ms = randomMs(15);
+      log.info(`Card #${i + 1} done. Clicking card #${i + 2}. Will sleep ${(ms / 1000).toFixed(1)}s.`);
+      await delay(ms);
+    }
   }
 }
 
