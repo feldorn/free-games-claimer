@@ -49,6 +49,14 @@ Other small panel improvements that landed alongside:
 - **Show browser** button on the Sessions tab header (with **Pop out ↗** sibling) — peek at the live noVNC view during a run instead of only during interactive logins.
 - **Sessions panel collapse** — click the chevron in the bottom-right of the header (or the status strip itself) to fold the cards down to a one-line row of mini-cards (`name ✓` / `name ✕`). Useful on phones / when watching the browser full-screen.
 - **MS Bing-search delay** is now configurable via `MS_SEARCH_DELAY_MAX_SEC` / **Settings → Microsoft Rewards** — drops a typical run from ~90 minutes to whatever you want at your own bot-detection risk.
+- **State-aware Sessions placeholder** — the four-step setup tutorial that used to greet every visit (with a misleading "click Check All Sessions" step that's already automatic) is replaced with a context message: "checking sessions (n/N)" during startup auto-check, "N of M sessions need login" if any are red, the existing "Run Now / scheduler" line when all are green.
+
+Bug fixes in 2.0.2:
+
+- **noVNC refresh loop** at `:6080/` — `vnc_auto.html` is a symlink to `vnc.html` in noVNC 1.3.0-2, so the previous Dockerfile `tee` clobbered the real noVNC UI with our self-referential meta-refresh and produced an infinite loop. Closes [#8](https://github.com/feldorn/free-games-claimer/issues/8).
+- **MS Rewards activity cards** were timing out for everyone after Microsoft started rendering multiple `#popUpModal` templates (streak-protection, autoredeem warning, etc.) and toggling `ng-hide` to show one. The dismiss helper picked `.first()` and almost always grabbed a hidden one — silent no-op while the visible streak-protection modal blocked every card click. Now scoped to `:not(.ng-hide)`.
+- **MS log format** collapsed from three lines per card / search to one. With ~16 cards and ~60 searches per run, drops ~150 lines of churn from each MS run log.
+- **"Available services" drawer caret** wasn't actually toggling — JS state was correct but `.drawer-body { display: grid }` beat the UA-default `[hidden] { display: none }` on specificity, so the cards stayed laid out regardless of the hidden attribute.
 
 ---
 
@@ -351,11 +359,27 @@ depending on viewport width.
   anything stays in the session.
 - **Check button** re-runs the session probe without opening a visible
   browser.
-- During an active login the stepper and cards auto-hide so the noVNC
-  viewport gets the full remaining vertical space.
-- The top-of-tab status strip rolls up "All N sessions OK", "Login needed
-  for X", "Run in progress", and startup auto-check into one row, with
-  "Next run in 1h 15m · Last run 3h ago (success, 4m)" on the right.
+- **Run button** (per-card) triggers a single-service claim run. For
+  Microsoft Rewards this also passes `MS_SKIP_WINDOW=1` so a manual test
+  click doesn't sleep until the next scheduled MS window.
+- **Show browser** (header) mounts the live noVNC iframe on demand,
+  regardless of run state — peek at what a script is actually doing during
+  a claim run, not only during interactive logins. **Pop out ↗** sibling
+  appears once the iframe is mounted and opens the same view in a new tab
+  for full-screen / second-monitor use.
+- **Status strip** rolls up "All N sessions OK", "Login needed for X",
+  "Run in progress", and startup auto-check into one row, with "Next run
+  in 1h 15m · Last run 3h ago (success, 4m)" on the right.
+- **Captcha banner** appears at the very top of every tab (not only
+  Sessions) when a runner has flagged a pending captcha — see
+  [Captcha pause](#captcha-pause) for the flow.
+- **Collapse caret** in the bottom-right corner of the header folds the
+  full session-cards strip down to a single row of mini-cards
+  (`Prime Gaming ✓` / `GOG ✕` / etc.) so the noVNC iframe / run log gets
+  full vertical space. Click the caret, the status strip itself, or the
+  mini-card row to toggle. Persisted across reloads.
+- During an active login the stepper and full cards auto-hide regardless
+  of the user-collapse state, so the noVNC viewport gets the room it needs.
 
 **Batch Redeem** surfaces automatically when Prime Gaming has delivered GOG
 codes that weren't successfully redeemed (captcha-gated, script interrupted,
