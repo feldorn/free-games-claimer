@@ -1545,6 +1545,8 @@ const PANEL_HTML = `<!DOCTYPE html>
   .btn-show-browser { background: #3a3a5c; color: #ccc; }
   .btn-show-browser:hover:not(:disabled) { background: #4a4a6c; }
   .btn-show-browser.active { background: #2a4a3e; color: #4ecca3; }
+  .btn-popout-browser { background: #3a3a5c; color: #ccc; }
+  .btn-popout-browser:hover:not(:disabled) { background: #4a4a6c; }
   .btn-run-single { background: #2a4a3e; color: #4ecca3; }
   .btn-run-single:hover:not(:disabled) { background: #3a5a4e; color: #5edcb3; }
   .btn-run { background: #4ecca3; color: #1a1a2e; font-weight: 600; }
@@ -1615,6 +1617,7 @@ const PANEL_HTML = `<!DOCTYPE html>
     <div class="header-actions">
       <button class="btn btn-check-all sessions-only" onclick="checkAll()" id="btnCheckAll">Check All Sessions</button>
       <button class="btn btn-show-browser sessions-only" onclick="toggleBrowserView()" id="btnShowBrowser" title="Open the live browser view via noVNC — useful for diagnosing card-click failures or peeking at what a script is doing.">Show browser</button>
+      <button class="btn btn-popout-browser sessions-only" onclick="popoutBrowser()" id="btnPopoutBrowser" title="Open the noVNC view in a new tab for full-screen viewing.">Pop out ↗</button>
       <button class="btn btn-run" onclick="runAll()" id="btnRunAll">Run Now</button>
     </div>
   </div>
@@ -2644,9 +2647,10 @@ function render() {
 
   // Once all sessions are OK the stepper is no longer actionable — the strip
   // below communicates current state more compactly. Also hide stepper + cards
-  // during an active login so the VNC iframe has more room.
-  steps.style.display = (state.allLoggedIn || state.activeBrowser) ? 'none' : 'flex';
-  cards.style.display = state.activeBrowser ? 'none' : 'grid';
+  // during an active login or while the user is watching the browser so the
+  // VNC iframe has more room.
+  steps.style.display = (state.allLoggedIn || state.activeBrowser || userShowBrowser) ? 'none' : 'flex';
+  cards.style.display = (state.activeBrowser || userShowBrowser) ? 'none' : 'grid';
 
   const isRunning = state.runStatus === 'running';
   const disabled = busy || !!state.activeBrowser || isRunning;
@@ -2837,6 +2841,21 @@ function render() {
   }
 }
 
+// Build the noVNC URL appropriate for the current deployment. Used both by
+// the embedded iframe and the "Pop out" new-tab button so they stay in sync.
+// Through a reverse proxy (BASE_PATH set) noVNC is proxied at BASE_PATH/novnc/
+// and the WebSocket path must be told to noVNC explicitly — by default it
+// assumes "/websockify" at the origin root, which won't exist when proxied at
+// a subfolder. For direct access (no BASE_PATH) the container's noVNC port is
+// reachable at the same host.
+function buildNovncUrl() {
+  if (BASE_PATH) {
+    const wsPath = BASE_PATH.replace(/^\\//, '') + '/novnc/websockify';
+    return BASE_PATH + '/novnc/vnc.html?autoconnect=true&resize=scale&path=' + encodeURIComponent(wsPath);
+  }
+  return location.protocol + '//' + location.hostname + ':' + NOVNC_PORT + '/vnc.html?autoconnect=true&resize=scale';
+}
+
 function showVnc() {
   hideRunLog();
   const container = document.getElementById('vncContainer');
@@ -2844,18 +2863,13 @@ function showVnc() {
   if (placeholder) placeholder.style.display = 'none';
   if (!container.querySelector('iframe')) {
     const iframe = document.createElement('iframe');
-    // Through a reverse proxy (BASE_PATH set) noVNC is proxied at \${BASE_PATH}/novnc/.
-    // We must also tell noVNC where to open its WebSocket — by default it assumes
-    // "/websockify" at the origin root, which won't exist when proxied at a subfolder.
-    // For direct access (no BASE_PATH) the container's noVNC port is reachable at the same host.
-    if (BASE_PATH) {
-      const wsPath = BASE_PATH.replace(/^\\//, '') + '/novnc/websockify';
-      iframe.src = BASE_PATH + '/novnc/vnc.html?autoconnect=true&resize=scale&path=' + encodeURIComponent(wsPath);
-    } else {
-      iframe.src = location.protocol + '//' + location.hostname + ':' + NOVNC_PORT + '/vnc.html?autoconnect=true&resize=scale';
-    }
+    iframe.src = buildNovncUrl();
     container.appendChild(iframe);
   }
+}
+
+function popoutBrowser() {
+  window.open(buildNovncUrl(), '_blank', 'noopener');
 }
 
 function hideVnc() {
