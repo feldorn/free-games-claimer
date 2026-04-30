@@ -2921,9 +2921,10 @@ function toggleBrowserView() {
     const container = document.getElementById('vncContainer');
     const iframe = container.querySelector('iframe');
     if (iframe) iframe.remove();
-    // Restore run log if a run is in progress; render() will show the
-    // placeholder otherwise.
-    if (state.runStatus === 'running') showRunLog();
+    // Don't auto-restore the run log here — earlier versions did, but a user
+    // peeking at the browser mid-run then closing got jarring "log bleed-
+    // through" on the Sessions tab. The Logs tab is one click away if they
+    // want it; render() falls through to the placeholder.
   }
   render();
 }
