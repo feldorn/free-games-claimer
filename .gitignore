@@ -2,6 +2,8 @@ node_modules/
 data/
 *.env
 megalinter-reports/
+# Local-only scratchpad for pending-redeem notes; never commit.
+FEEDBACK
 
 # Replit-specific files
 .replit
