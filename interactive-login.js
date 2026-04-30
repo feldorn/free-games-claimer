@@ -2761,8 +2761,8 @@ function render() {
       // don't repeat it here. Just explain what this empty space is for.
       placeholder.innerHTML = wrap(
         'Click <b style="color:#e0e0e0">Run Now</b> to trigger an immediate claim, or let the scheduler (if enabled) handle it.<br><br>' +
-        'The browser login view will appear here when you click <b style="color:#e0e0e0">Login</b> on any session card; ' +
-        'the claim log appears here during a run.'
+        'Click <b style="color:#e0e0e0">Login</b> on a session card or <b style="color:#e0e0e0">Show browser</b> in the header to mount the live browser view here. ' +
+        'Run output streams in the <b style="color:#e0e0e0">Logs</b> tab.'
       );
     } else {
       const activeSites = state.sites.filter(s => s.active !== false);
