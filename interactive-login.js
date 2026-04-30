@@ -1704,15 +1704,16 @@ let logOffset = 0;
 let logPollTimer = null;
 let pendingGogCount = 0;
 
+// Drawer expand state lives in JS rather than the DOM because render() rebuilds
+// availableDrawer.innerHTML on every poll — pre-this fix, clicking the caret
+// flipped the DOM but the next render reset it from a stale localStorage flag,
+// so the drawer "did nothing" for the user.
+let drawerExpanded = localStorage.getItem('drawerSeen') !== '1';
+
 function toggleAvailableDrawer() {
-  const body = document.querySelector('#availableDrawer .drawer-body');
-  const head = document.querySelector('#availableDrawer .drawer-head');
-  if (!body || !head) return;
-  const nowOpen = body.hasAttribute('hidden');
-  if (nowOpen) body.removeAttribute('hidden'); else body.setAttribute('hidden', '');
-  head.setAttribute('aria-expanded', String(nowOpen));
-  const caret = head.querySelector('.caret'); if (caret) caret.textContent = nowOpen ? '▾' : '▸';
+  drawerExpanded = !drawerExpanded;
   localStorage.setItem('drawerSeen', '1');
+  render();
 }
 
 async function enableService(id) {
@@ -2647,10 +2648,9 @@ function render() {
 
   // Once all sessions are OK the stepper is no longer actionable — the strip
   // below communicates current state more compactly. Also hide stepper + cards
-  // during an active login or while the user is watching the browser so the
-  // VNC iframe has more room.
-  steps.style.display = (state.allLoggedIn || state.activeBrowser || userShowBrowser) ? 'none' : 'flex';
-  cards.style.display = (state.activeBrowser || userShowBrowser) ? 'none' : 'grid';
+  // during an active login so the VNC iframe has more room.
+  steps.style.display = (state.allLoggedIn || state.activeBrowser) ? 'none' : 'flex';
+  cards.style.display = state.activeBrowser ? 'none' : 'grid';
 
   const isRunning = state.runStatus === 'running';
   const disabled = busy || !!state.activeBrowser || isRunning;
@@ -2681,6 +2681,13 @@ function render() {
     btnShowBrowser.disabled = ownedElsewhere;
     btnShowBrowser.textContent = ownedElsewhere ? 'Browser shown' : (userShowBrowser ? 'Hide browser' : 'Show browser');
     btnShowBrowser.classList.toggle('active', userShowBrowser || ownedElsewhere);
+  }
+  const btnPopoutBrowser = document.getElementById('btnPopoutBrowser');
+  if (btnPopoutBrowser) {
+    // Pop out only makes sense as a follow-up to Show browser — it'd be noise
+    // (or worse, a dead link in degraded networks) if always visible.
+    const iframeMounted = !!(userShowBrowser || state.activeBrowser || state.batchRedeem);
+    btnPopoutBrowser.style.display = iframeMounted ? '' : 'none';
   }
 
   const placeholder = document.getElementById('vncPlaceholder');
@@ -2800,11 +2807,7 @@ function render() {
       drawer.style.display = 'none';
     } else {
       drawer.style.display = 'block';
-      // localStorage gates whether the drawer opens expanded the first time.
-      // Once the user interacts (expand or enable), it stays collapsed on
-      // subsequent visits.
-      const interacted = localStorage.getItem('drawerSeen') === '1';
-      const expanded = !interacted;
+      const expanded = drawerExpanded;
       const cardsHtml = inactiveCards.map(s =>
         '<div class="site-card card-inactive">' +
           '<div class="site-card-header">' +
