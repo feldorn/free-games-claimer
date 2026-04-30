@@ -649,14 +649,13 @@ async function executeBingSearch(page, searchTerm, preEnterMs) {
 async function executeBingSearches(page, searchTerms) {
   const maxDelay = cfg.ms_search_delay_max;
   const initMs = randomMs(maxDelay);
-  log.progressInfo(`Executing ${searchTerms.length} Bing searches ... Sleep: ${(initMs / 1000).toFixed(1)}s ...`);
+  log.info(`Executing ${searchTerms.length} Bing searches. Sleeping ${(initMs / 1000).toFixed(1)}s before first search.`);
   await delay(initMs);
-  log.progressEnd(' ready');
   for (let i = 0; i < searchTerms.length; i++) {
     const term = searchTerms[i];
     const preEnterMs = randomMs(10);
-    const interMs = i < searchTerms.length - 1 ? randomMs(maxDelay) : 0;
-    log.progressStart(`Search #${i + 1}: "${term}" ...`);
+    const isLast = i === searchTerms.length - 1;
+    const interMs = isLast ? 0 : randomMs(maxDelay);
     let ok = false;
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
@@ -664,21 +663,23 @@ async function executeBingSearches(page, searchTerms) {
         ok = true;
         break;
       } catch (e) {
+        const msg = e.message.split('\n')[0];
         if (attempt < 3) {
-          log.progressAppend(` retry ${attempt + 1}...`);
+          log.warn(`Search #${i + 1} attempt ${attempt} failed; retrying. ${msg}`);
         } else {
-          log.progressEnd(' SKIP');
-          log.warn(`Search failed after 3 attempts: ${e.message}`);
+          log.warn(`Search #${i + 1} failed after 3 attempts: ${msg}`);
         }
       }
     }
     if (!ok) continue;
-    log.progressAppend(` Sleep: ${(preEnterMs / 1000).toFixed(1)}s`);
-    if (interMs > 0) {
-      log.progressAppend(` ... Sleep: ${(interMs / 1000).toFixed(1)}s`);
+    if (isLast) {
+      log.info(`Search #${i + 1} done: "${term}".`);
+    } else {
+      // "Will sleep" announces the upcoming inter-search pause before the
+      // next query, not a delay already completed.
+      log.info(`Search #${i + 1} done: "${term}". Will sleep ${(interMs / 1000).toFixed(1)}s.`);
       await delay(interMs);
     }
-    log.progressEnd(' ... done');
   }
 }
 
