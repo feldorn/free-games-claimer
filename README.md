@@ -1,12 +1,14 @@
-# free-games-claimer
+# Feldorn's Free Games Claimer
 
 <p align="center">
-<img alt="logo-free-games-claimer" src="https://user-images.githubusercontent.com/493741/214588518-a4c89998-127e-4a8c-9b1e-ee4a9d075715.png" />
+<img alt="Feldorn's Free Games Claimer" src="assets/logo.png" width="280" />
 </p>
 
-Fork of [vogler/free-games-claimer](https://github.com/vogler/free-games-claimer) (dev branch) with a full-featured control panel, in-app settings, claim-history stats, and Microsoft Rewards points tracking.
+A self-hosted scheduler that claims free games and rewards across multiple storefronts on its own. Logs in once via your browser session, then keeps watch — daily checks, captcha-aware pause-and-notify when a human is needed, in-app stats showing what got claimed, what's pending, and how your Microsoft Rewards points are trending.
 
-Claims free games periodically on:
+Originally derived from [vogler/free-games-claimer](https://github.com/vogler/free-games-claimer) (dev branch). The control panel, in-app settings UI, claim-history stats, scheduler with hot-reload, AliExpress reintegration, captcha pause + manual-solve handoff, the Steam discovery migration, and the Ubisoft watcher are all additions in this fork — see [MODIFICATIONS.md](MODIFICATIONS.md) for the per-commit story.
+
+Claims (or watches) free games periodically on:
 - <img alt="logo prime-gaming" src="https://github.com/user-attachments/assets/7627a108-20c6-4525-a1d8-5d221ee89d6e" width="32" align="middle" /> [Amazon Prime Gaming](https://gaming.amazon.com)
 - <img alt="logo epic-games" src="https://github.com/user-attachments/assets/82e9e9bf-b6ac-4f20-91db-36d2c8429cb6" width="32" align="middle" /> [Epic Games Store](https://www.epicgames.com/store/free-games)
 - <img alt="logo gog" src="https://github.com/user-attachments/assets/49040b50-ee14-4439-8e3c-e93cafd7c3a5" width="32" align="middle" /> [GOG](https://www.gog.com)
@@ -15,9 +17,7 @@ Claims free games periodically on:
 - 🛒 [AliExpress](https://m.aliexpress.com) — daily check-in coins (opt-in; disabled by default)
 - 🎮 [Ubisoft Connect](https://store.ubisoft.com/us/free-games) — watch-only; pings you when a new free-week promo appears (opt-in; disabled by default)
 
-Uses [patchright](https://github.com/nicbarker/patchright) (Chromium with built-in anti-detection). Runs in Docker with a virtual display and VNC access.
-
-See [MODIFICATIONS.md](MODIFICATIONS.md) for the full history of changes from the upstream dev branch.
+Uses [patchright](https://github.com/nicbarker/patchright) (Chromium with built-in anti-detection). Runs in Docker with a virtual display and VNC access — solve captchas, MFA, and one-time logins through the embedded noVNC viewer in the panel.
 
 ---
 

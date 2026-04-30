@@ -1,7 +1,9 @@
 import http from 'node:http';
 import { spawn, execFile } from 'node:child_process';
-import { watch } from 'node:fs';
+import { watch, readFileSync, existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+const __panelDirname = path.dirname(fileURLToPath(import.meta.url));
 import { chromium, devices } from 'patchright';
 import { datetime, notify, jsonDb, normalizeTitle } from './src/util.js';
 import { cfg } from './src/config.js';
@@ -34,7 +36,9 @@ function isAuthenticated(req) {
 
 const LOGIN_HTML = `<!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Login - Free Games Claimer</title>
+<title>Sign in — Feldorn's Free Games Claimer</title>
+<link rel="icon" type="image/x-icon" href="${BASE_PATH}/favicon.ico">
+<link rel="icon" type="image/png" sizes="32x32" href="${BASE_PATH}/assets/icon-32.png">
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #1a1a2e; color: #e0e0e0; height: 100vh; display: flex; align-items: center; justify-content: center; }
@@ -1313,12 +1317,19 @@ const PANEL_HTML = `<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Free Games Claimer - Login Panel</title>
+<title>Feldorn's Free Games Claimer</title>
+<link rel="icon" type="image/x-icon" href="${BASE_PATH}/favicon.ico">
+<link rel="icon" type="image/png" sizes="16x16" href="${BASE_PATH}/assets/icon-16.png">
+<link rel="icon" type="image/png" sizes="32x32" href="${BASE_PATH}/assets/icon-32.png">
+<link rel="icon" type="image/png" sizes="192x192" href="${BASE_PATH}/assets/icon-192.png">
+<link rel="apple-touch-icon" sizes="192x192" href="${BASE_PATH}/assets/icon-192.png">
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #1a1a2e; color: #e0e0e0; height: 100vh; display: flex; flex-direction: column; }
 
   .header { background: #16213e; padding: 12px 20px 14px; border-bottom: 2px solid #0f3460; flex-shrink: 0; position: relative; }
+  .header h1 { display: flex; align-items: center; gap: 10px; }
+  .header h1 img { height: 32px; width: 32px; flex-shrink: 0; }
   .header-collapse { position: absolute; right: 10px; bottom: 2px; background: transparent; border: none; color: #a0b4d4; opacity: 0.6; cursor: pointer; padding: 2px 6px; font-size: 13px; line-height: 1; font-family: inherit; }
   .header-collapse:hover { opacity: 1; color: #e0e0e0; }
   .compact-sessions { display: none; flex-wrap: wrap; gap: 6px; padding: 4px 0 0; }
@@ -1646,7 +1657,7 @@ const PANEL_HTML = `<!DOCTYPE html>
 <body data-tab="sessions">
 <div class="header">
   <div class="header-top">
-    <h1>Free Games Claimer</h1>
+    <h1><img src="${BASE_PATH}/assets/icon-64.png" alt=""><span>Feldorn's Free Games Claimer</span></h1>
     <nav class="tab-nav">
       <button class="tab active" data-tab="sessions" onclick="switchTab('sessions')">Sessions</button>
       <button class="tab" data-tab="stats" onclick="switchTab('stats')">Stats</button>
@@ -3542,6 +3553,29 @@ const server = http.createServer(async (req, res) => {
       clearFinishedBatchRedeem();
       sendJson(res, { success: true });
       return;
+    }
+
+    // Static asset serving — branding (logo + favicon set). Path-allowlisted
+    // to /assets/ + /favicon.ico to avoid traversal; we never serve arbitrary
+    // files. Browser tab favicon hits /favicon.ico without the prefix on
+    // some browsers, so we map both.
+    if (req.method === 'GET') {
+      let assetPath = null;
+      if (req.url === '/favicon.ico') assetPath = 'favicon.ico';
+      else if (req.url.startsWith('/assets/')) {
+        const rel = req.url.slice('/assets/'.length).split('?')[0];
+        if (rel && !rel.includes('..') && !rel.includes('/')) assetPath = rel;
+      }
+      if (assetPath) {
+        const full = path.join(__panelDirname, 'assets', assetPath);
+        if (existsSync(full)) {
+          const ext = path.extname(assetPath).toLowerCase();
+          const ct = { '.png': 'image/png', '.ico': 'image/x-icon', '.svg': 'image/svg+xml', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg' }[ext] || 'application/octet-stream';
+          res.writeHead(200, { 'Content-Type': ct, 'Cache-Control': 'public, max-age=86400' });
+          res.end(readFileSync(full));
+          return;
+        }
+      }
     }
 
     res.writeHead(404);
