@@ -1302,7 +1302,8 @@ const PANEL_HTML = `<!DOCTYPE html>
   .header-collapse { position: absolute; right: 10px; bottom: 2px; background: transparent; border: none; color: #a0b4d4; opacity: 0.6; cursor: pointer; padding: 2px 6px; font-size: 13px; line-height: 1; font-family: inherit; }
   .header-collapse:hover { opacity: 1; color: #e0e0e0; }
   .compact-sessions { display: none; flex-wrap: wrap; gap: 6px; padding: 4px 0 0; }
-  body[data-tab="sessions"] .compact-sessions.shown { display: flex; }
+  body[data-tab="sessions"] .compact-sessions.shown { display: flex; cursor: pointer; }
+  .compact-sessions.shown:hover .mini-card { filter: brightness(1.15); }
   .compact-sessions .mini-card { display: inline-flex; align-items: center; gap: 5px; background: #1e2a47; padding: 3px 9px; border-radius: 4px; font-size: 12px; color: #a0b4d4; }
   .compact-sessions .mini-card .mini-glyph { font-weight: 600; }
   .compact-sessions .mini-card.logged-in     .mini-glyph { color: #4ecca3; }
@@ -1502,7 +1503,8 @@ const PANEL_HTML = `<!DOCTYPE html>
   .step.waiting { background: #2a2a4e; color: #f0c040; }
   .step-arrow { color: #555; }
 
-  .status-strip { display: none; align-items: center; gap: 10px; padding: 6px 12px; font-size: 13px; line-height: 1.35; border-radius: 6px; margin-bottom: 8px; }
+  .status-strip { display: none; align-items: center; gap: 10px; padding: 6px 12px; font-size: 13px; line-height: 1.35; border-radius: 6px; margin-bottom: 8px; cursor: pointer; }
+  .status-strip:hover { filter: brightness(1.1); }
   .status-strip.ok   { background: #0e2a1f; color: #4ecca3; }
   .status-strip.warn { background: #2a2a1e; color: #f0c040; }
   .status-strip.err  { background: #2a1a1e; color: #e94560; }
@@ -1636,12 +1638,12 @@ const PANEL_HTML = `<!DOCTYPE html>
     </div>
   </div>
   <div class="steps sessions-only" id="steps"></div>
-  <div class="status-strip sessions-only" id="statusStrip"></div>
+  <div class="status-strip sessions-only" id="statusStrip" onclick="toggleSessionsCollapsed()" title="Click to collapse session details"></div>
   <div class="site-cards sessions-only" id="siteCards"></div>
   <div class="available-drawer sessions-only" id="availableDrawer" style="display:none"></div>
   <div class="sessions-only" id="batchRedeemInfo" style="display:none; margin-top: 10px;"></div>
   <div class="sessions-only" id="activeSession" style="display:none"></div>
-  <div class="compact-sessions sessions-only" id="compactSessions"></div>
+  <div class="compact-sessions sessions-only" id="compactSessions" onclick="toggleSessionsCollapsed()" title="Click to expand session details"></div>
   <button class="header-collapse sessions-only" id="btnHeaderCollapse" onclick="toggleSessionsCollapsed()" title="Collapse session details" aria-label="Collapse session details">▴</button>
 </div>
 <div class="main-area" id="mainArea">
