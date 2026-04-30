@@ -1629,17 +1629,7 @@ const PANEL_HTML = `<!DOCTYPE html>
   <div class="tab-panel" data-panel="sessions">
     <div class="vnc-container" id="vncContainer">
       <div class="vnc-placeholder" id="vncPlaceholder">
-        <div>
-          <div style="font-size: 20px; margin-bottom: 16px; color: #e94560; font-weight: 600;">How to set up your login sessions</div>
-          <div style="text-align: left; max-width: 520px; margin: 0 auto;">
-            <b>Step 1:</b> Click <b>Check All Sessions</b> above to see which sites need login.<br><br>
-            <b>Step 2:</b> For each site showing <span style="color: #e94560;">red</span>, click its <b>Login</b> button.<br>
-            &nbsp;&nbsp;&nbsp;&nbsp;A browser will appear here. Log in manually (handle captchas, MFA, etc.).<br>
-            &nbsp;&nbsp;&nbsp;&nbsp;When done, click <span class="highlight">"I\'m Logged In"</span> to verify and save the session.<br><br>
-            <b>Step 3:</b> Once all sites show <span class="highlight">green</span>, click <b>Run Now</b> to verify claiming works.<br><br>
-            <b>Step 4:</b> You're done — the scheduler (if <span style="color: #f0c040;">LOOP</span> is set) runs claims automatically. Come back to this panel when a session expires.
-          </div>
-        </div>
+        <div style="max-width:520px;font-size:14px;line-height:1.7;color:#a0b4d4">Loading…</div>
       </div>
     </div>
   </div>
@@ -1710,10 +1700,6 @@ let userShowBrowser = false;
 let logOffset = 0;
 let logPollTimer = null;
 let pendingGogCount = 0;
-
-// Snapshot the initial setup-instructions HTML so render() can restore it
-// after swapping in the shorter "all sessions verified" message.
-const DEFAULT_PLACEHOLDER_HTML = document.getElementById('vncPlaceholder')?.innerHTML || '';
 
 function toggleAvailableDrawer() {
   const body = document.querySelector('#availableDrawer .drawer-body');
@@ -2696,18 +2682,33 @@ function render() {
   const placeholder = document.getElementById('vncPlaceholder');
   if (placeholder && !state.activeBrowser && !state.batchRedeem && !showingLog && !userShowBrowser) {
     placeholder.style.display = 'flex';
-    const setupDone = state.allLoggedIn && state.sites.length > 0;
-    if (setupDone) {
+    const wrap = inner => '<div style="max-width:520px;font-size:14px;line-height:1.7;color:#a0b4d4">' + inner + '</div>';
+    if (state.startupAutoCheck) {
+      placeholder.innerHTML = wrap('Checking sessions (' + state.startupAutoCheck.current + '/' + state.startupAutoCheck.total + ')…');
+    } else if (state.allLoggedIn && state.sites.length > 0) {
       // Status strip in the header already communicates "all sessions OK" —
       // don't repeat it here. Just explain what this empty space is for.
-      placeholder.innerHTML =
-        '<div style="max-width:520px;font-size:14px;line-height:1.7;color:#a0b4d4">' +
-        '  Click <b style="color:#e0e0e0">Run Now</b> to trigger an immediate claim, or let the scheduler (if enabled) handle it.<br><br>' +
-        '  The browser login view will appear here when you click <b style="color:#e0e0e0">Login</b> on any session card;' +
-        '  the claim log appears here during a run.' +
-        '</div>';
+      placeholder.innerHTML = wrap(
+        'Click <b style="color:#e0e0e0">Run Now</b> to trigger an immediate claim, or let the scheduler (if enabled) handle it.<br><br>' +
+        'The browser login view will appear here when you click <b style="color:#e0e0e0">Login</b> on any session card; ' +
+        'the claim log appears here during a run.'
+      );
     } else {
-      placeholder.innerHTML = DEFAULT_PLACEHOLDER_HTML;
+      const activeSites = state.sites.filter(s => s.active !== false);
+      const need = activeSites.filter(s => s.status === 'not_logged_in').length;
+      const total = activeSites.length;
+      if (need > 0) {
+        placeholder.innerHTML = wrap(
+          '<b style="color:#e94560">' + need + ' of ' + total + ' session' + (total === 1 ? '' : 's') + ' need' + (need === 1 ? 's' : '') + ' login.</b><br><br>' +
+          'Click <b style="color:#e0e0e0">Login</b> on a red card — the browser will appear here so you can sign in (captchas, MFA, etc.).<br>' +
+          'When done, click <span class="highlight">"I\\'m Logged In"</span> to save the session.'
+        );
+      } else {
+        // Sites haven't all settled yet (some 'unknown' or 'error') and the
+        // startupAutoCheck flag isn't set — render a neutral message rather
+        // than the stale tutorial that used to live here.
+        placeholder.innerHTML = wrap('Checking sessions…');
+      }
     }
   }
 
