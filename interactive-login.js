@@ -3751,7 +3751,7 @@ process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 
 server.listen(PANEL_PORT, async () => {
-  console.log(`[${datetime()}] Free Games Claimer — panel + scheduler`);
+  console.log(`[${datetime()}] Free Games Claimer ${APP_VERSION ? 'v' + APP_VERSION + ' ' : ''}— panel + scheduler`);
   console.log(`[${datetime()}] Control panel: http://localhost:${PANEL_PORT}${BASE_PATH}`);
   if (cfg.public_url) console.log(`[${datetime()}] Public URL:    ${PUBLIC_URL}`);
   console.log(`[${datetime()}] noVNC viewer:  http://localhost:${NOVNC_PORT}${BASE_PATH ? ` (proxied at ${BASE_PATH}/novnc/)` : ''}`);
