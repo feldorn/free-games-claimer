@@ -1440,8 +1440,13 @@ const PANEL_HTML = `<!DOCTYPE html>
     outline: none; border-color: #4ecca3;
   }
   .setting-input textarea { min-height: 60px; resize: vertical; font-family: 'Menlo', 'Consolas', monospace; font-size: 12px; }
-  .setting-checkbox { display: inline-flex; align-items: center; gap: 8px; color: #e0e0e0; font-size: 13px; cursor: pointer; }
-  .setting-checkbox input { width: 16px; height: 16px; cursor: pointer; }
+  /* Variant C: boolean fields render as one inline cluster (checkbox-left + label),
+     not the default label/input two-column grid — the whole row is one click target. */
+  .setting.setting-bool { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 0; }
+  .setting.setting-bool .setting-bool-cluster { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; color: #e0e0e0; font-size: 13px; line-height: 1.4; }
+  .setting.setting-bool .setting-bool-cluster input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; margin: 0; flex-shrink: 0; }
+  .setting.setting-bool .setting-revert { margin-top: 0; margin-left: auto; }
+  .setting.setting-bool .setting-help-popover { flex-basis: 100%; }
   .setting-revert { background: transparent; border: 1px solid #233454; border-radius: 4px; padding: 5px 10px; color: #8aa0c2; cursor: pointer; font-size: 11px; white-space: nowrap; margin-top: 3px; }
   .setting-revert:hover:not(:disabled) { background: #1a2a48; color: #e0e0e0; border-color: #2a3a5a; }
   .setting-revert:disabled { opacity: 0.25; cursor: not-allowed; }
@@ -1926,10 +1931,27 @@ function fieldRow(path, label, extra) {
     ? '<div class="setting-help-popover open">' + popoverBody + '</div>'
     : '';
 
-  let inputHtml;
+  const revertBtn = overridden
+    ? '<button type="button" class="setting-revert" onclick="revertSettingValue(\\'' + path + '\\')">Revert</button>'
+    : '';
+
+  // Variant C — booleans render as one inline cluster (checkbox-left + label),
+  // not the label/input two-column grid. The (i) button stays outside <label>
+  // so clicking help doesn't toggle the checkbox.
   if (f.type === 'boolean') {
-    inputHtml = '<label class="setting-checkbox"><input type="checkbox" ' + (value ? 'checked' : '') + ' onchange="setSettingValue(\\'' + path + '\\', this.checked)"></label>';
-  } else if (extra.options) {
+    return '<div class="setting setting-bool" data-path="' + path + '">' +
+      '<label class="setting-bool-cluster">' +
+        '<input type="checkbox" ' + (value ? 'checked' : '') + ' onchange="setSettingValue(\\'' + path + '\\', this.checked)">' +
+        '<span>' + escapeHtml(label) + dot + '</span>' +
+      '</label>' +
+      infoBtn +
+      revertBtn +
+      popover +
+    '</div>';
+  }
+
+  let inputHtml;
+  if (extra.options) {
     const options = extra.options.map(o => '<option value="' + o.value + '"' + (String(value) === String(o.value) ? ' selected' : '') + '>' + escapeHtml(o.label) + '</option>').join('');
     const cast = f.type === 'number' ? 'Number(this.value)' : 'this.value';
     inputHtml = '<select onchange="setSettingValue(\\'' + path + '\\', ' + cast + ')">' + options + '</select>';
@@ -1943,9 +1965,6 @@ function fieldRow(path, label, extra) {
     inputHtml = '<input type="text" value="' + escapeHtml(value || '') + '" oninput="setSettingValue(\\'' + path + '\\', this.value)">';
   }
 
-  const revertBtn = overridden
-    ? '<button type="button" class="setting-revert" onclick="revertSettingValue(\\'' + path + '\\')">Revert</button>'
-    : '';
   return '<div class="setting" data-path="' + path + '">' +
     '<div class="setting-label">' + escapeHtml(label) + dot + infoBtn + '</div>' +
     '<div class="setting-input">' + inputHtml + '</div>' +
