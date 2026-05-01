@@ -196,6 +196,8 @@ that's also on the Settings tab can be edited there at runtime instead.
 | `TIMEOUT` | `60` | Timeout in seconds for page actions |
 | `LOGIN_TIMEOUT` | `180` | Timeout in seconds for login |
 | `DEBUG` | `0` | Set to `1` for verbose debug output |
+| `PUID` | | **Opt-in non-root mode.** When set, the entrypoint reconciles a runtime user `fgc` with this UID, chowns `/fgc/data`, and drops privileges via `gosu`. Unset = container runs as root (default, unchanged). See [Running as a non-root user](#running-as-a-non-root-user) below. |
+| `PGID` | `$PUID` | GID to pair with `PUID`. Defaults to the same value if only `PUID` is set. |
 
 ### Per-Store Credentials
 
@@ -568,6 +570,45 @@ cookie flow already handles the steady state.
 - **Everything else** (notifications, per-service flags, advanced flags)
   is re-read by the claim scripts at the top of each run, so saving takes
   effect on the next claim run. No restart required.
+
+---
+
+## Running as a non-root user
+
+The container defaults to running as root, unchanged from the upstream image.
+Set `PUID` (and optionally `PGID`) to opt into a non-root runtime — the entrypoint
+will reconcile a `fgc` user with those IDs, chown `/fgc/data` and the runtime
+user's home dirs, then drop privileges via `gosu` before starting TurboVNC and
+the panel.
+
+```yaml
+environment:
+  - PUID=1000
+  - PGID=1000
+```
+
+When this is the way you want to run, files created in your bind-mounted volume
+(`data/browser/`, `data/*.json`, etc.) will be owned by `1000:1000` on the host
+instead of root, so backups and direct edits don't need sudo.
+
+### Migrating an existing volume
+
+If you've been running the root-default and later set `PUID`, the existing
+contents of `data/` are still root-owned. The first start with `PUID` set will
+chown `data/` to the new IDs. After that, normal operation resumes.
+
+If you flip back and forth between root and non-root modes, expect a chown pass
+each time. To freeze ownership, pick a mode and stick with it.
+
+### Caveats
+
+- Don't combine `PUID`/`PGID` with the docker-compose `user:` directive.
+  When `user:` is set, the container starts as that user immediately and our
+  entrypoint's root-only block is skipped — no chown happens. Pick one mechanism.
+- The browser binaries live at `/usr/local/share/ms-playwright` (set via
+  `PLAYWRIGHT_BROWSERS_PATH`) instead of `/root/.cache`. They're world-readable.
+  If you've extended the image and assumed the old `/root/.cache/ms-playwright`
+  path, update accordingly.
 
 ---
 

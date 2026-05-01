@@ -2,6 +2,45 @@
 
 set -eo pipefail # exit on error, error on any fail in pipe (not just last cmd); add -x to print each cmd; see gist bash_strict_mode.md
 
+# --- Optional non-root mode (opt-in via PUID/PGID) ----------------------
+# When PUID is set and we're currently root, reconcile a runtime user `fgc`
+# with the requested UID/GID, fix ownership of writable paths, then re-exec
+# self as that user via gosu. Subsequent execution skips this block (id -u
+# is no longer 0). When PUID is unset, this block is skipped entirely and
+# the container runs as root exactly like prior releases — no behavior
+# change for existing deploys until they opt in by setting PUID.
+if [ "$(id -u)" = "0" ] && [ -n "$PUID" ]; then
+  PGID="${PGID:-$PUID}"
+  # Reconcile group + user. -o allows non-unique IDs which keeps things
+  # simple if PUID/PGID collide with existing system accounts.
+  if getent group fgc >/dev/null; then
+    groupmod -o -g "$PGID" fgc
+  else
+    groupadd -o -g "$PGID" fgc
+  fi
+  if id fgc >/dev/null 2>&1; then
+    usermod -o -u "$PUID" -g "$PGID" fgc >/dev/null
+  else
+    useradd -o -u "$PUID" -g "$PGID" -s /bin/bash -m -d /home/fgc fgc
+  fi
+  # Stale X11 / VNC files from a previous run may be owned by a different
+  # UID — clean them while we still have root.
+  rm -f /tmp/.X1-lock /tmp/.X11-unix/X1
+  rm -rf /home/fgc/.vnc/*.pid /home/fgc/.vnc/*.log 2>/dev/null || true
+  # Make sure paths the runtime user needs to write are owned by them.
+  mkdir -p /fgc/data /home/fgc/.vnc /home/fgc/.cache
+  chown -R "$PUID:$PGID" /fgc/data /home/fgc
+  # The browser cache is read-only at runtime (binaries only), but make
+  # sure the runtime user can traverse and read it. The Dockerfile already
+  # chmod a+rX'd it; this is belt-and-braces.
+  if [ -d "${PLAYWRIGHT_BROWSERS_PATH:-/usr/local/share/ms-playwright}" ]; then
+    chmod -R a+rX "${PLAYWRIGHT_BROWSERS_PATH:-/usr/local/share/ms-playwright}" 2>/dev/null || true
+  fi
+  echo "  Running as: fgc (uid=$PUID gid=$PGID) — non-root mode"
+  exec gosu fgc "$0" "$@"
+fi
+# -----------------------------------------------------------------------
+
 echo "══════════════════════════════════════════════════"
 echo "  Free Games Claimer"
 if [ -n "$COMMIT" ]; then

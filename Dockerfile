@@ -28,6 +28,10 @@ RUN apt-get update \
       tini \
       nodejs \
       dos2unix \
+      # gosu enables clean privilege-drop in docker-entrypoint.sh when
+      # PUID/PGID are set (opt-in non-root mode). When those are unset, gosu
+      # is unused and the container runs as root exactly like before.
+      gosu \
       # apprise is installed below via `pip install --break-system-packages`
       # rather than apt's apprise package (1.7.2 vs upstream 1.9.3) or pipx
       # (overkill for a single package, and needs $PATH tweaking).
@@ -75,8 +79,18 @@ RUN apt-get update \
 WORKDIR /fgc
 COPY package*.json ./
 
+# Install patchright's Chromium to a system-wide location instead of the
+# default ~/.cache/ms-playwright. This is required for the optional non-root
+# mode (entrypoint drops privileges to PUID/PGID) — the runtime user needs
+# to be able to read the browser binaries, and a path under /root is mode
+# 700 by default. PLAYWRIGHT_BROWSERS_PATH is honored both at install time
+# and at runtime by patchright/playwright, so root mode resolves to the
+# same location and continues working.
+ENV PLAYWRIGHT_BROWSERS_PATH=/usr/local/share/ms-playwright
+
 # --no-shell to avoid installing chromium_headless_shell (307MB) since headless mode could be detected without patching the browser itself
-RUN npm install --ignore-scripts && npx patchright install chromium --no-shell && du -h -d1 ~/.cache/ms-playwright
+RUN npm install --ignore-scripts && npx patchright install chromium --no-shell && du -h -d1 "$PLAYWRIGHT_BROWSERS_PATH" \
+    && chmod -R a+rX "$PLAYWRIGHT_BROWSERS_PATH"
 
 COPY . .
 
