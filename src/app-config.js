@@ -32,9 +32,10 @@ export const CONFIG_SCHEMA = [
   { path: 'scheduler.msScheduleHours', env: 'MS_SCHEDULE_HOURS', type: 'number',  default: 0, coerce: v => Number(v) || 0 },
   { path: 'scheduler.msScheduleStart', env: 'MS_SCHEDULE_START', type: 'number',  default: 8, coerce: v => Number(v) || 0 },
   // notifications + panel URL
-  { path: 'notifications.notify',      env: 'NOTIFY',       type: 'string', default: '' },
-  { path: 'notifications.notifyTitle', env: 'NOTIFY_TITLE', type: 'string', default: '' },
-  { path: 'panel.publicUrl',           env: 'PUBLIC_URL',   type: 'string', default: '' },
+  { path: 'notifications.notify',            env: 'NOTIFY',                     type: 'string',  default: '' },
+  { path: 'notifications.notifyTitle',       env: 'NOTIFY_TITLE',               type: 'string',  default: '' },
+  { path: 'notifications.attachScreenshots', env: 'NOTIFY_ATTACH_SCREENSHOTS',  type: 'boolean', default: true, coerce: toBoolDefaultTrue },
+  { path: 'panel.publicUrl',                 env: 'PUBLIC_URL',                 type: 'string',  default: '' },
   // advanced / debug
   { path: 'advanced.dryrun',          env: 'DRYRUN',        type: 'boolean', default: false, coerce: toBool },
   { path: 'advanced.record',          env: 'RECORD',        type: 'boolean', default: false, coerce: toBool },

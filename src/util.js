@@ -85,10 +85,14 @@ export const notify = (html, opts = {}) => {
     if (cfg.debug) console.debug('notify: NOTIFY is not set!');
     return Promise.resolve();
   }
-  // Resolve attachment path (if any) before invoking apprise.
+  // Resolve attachment path (if any) before invoking apprise. Explicit
+  // opts.screenshot always wins; attachLatestScreenshot is the autopilot
+  // path and is gated by cfg.notify_attach_screenshots so users can opt
+  // out of attachments globally (privacy / bandwidth / target limits).
+  const wantLatest = opts.attachLatestScreenshot && cfg.notify_attach_screenshots !== false;
   const attachPromise = opts.screenshot
     ? Promise.resolve(opts.screenshot)
-    : opts.attachLatestScreenshot
+    : wantLatest
       ? findLatestScreenshot().catch(() => null)
       : Promise.resolve(null);
   return attachPromise.then(attachPath => new Promise((resolve, reject) => {

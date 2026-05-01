@@ -47,6 +47,7 @@ export const cfg = {
   public_url: (pnl.publicUrl || '').replace(/\/+$/, ''),
   notify: notif.notify || undefined, // apprise notification services
   notify_title: notif.notifyTitle || undefined, // apprise notification title
+  notify_attach_screenshots: notif.attachScreenshots ?? true, // attach latest screenshot to failure notifications
   // scheduler (moved out of interactive-login.js so Settings can override)
   loop: sched.loopSeconds ?? 0,
   ms_schedule_hours: sched.msScheduleHours ?? 0,

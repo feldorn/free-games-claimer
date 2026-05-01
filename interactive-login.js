@@ -2104,6 +2104,8 @@ function paintSettings() {
       fieldRow('notifications.notify', 'Apprise URL(s)',
         { multiline: true, hint: 'One URL per line (or comma-separated). Examples: pover://token@user, tgram://botid/chatid.' }) +
       fieldRow('notifications.notifyTitle', 'Title prefix') +
+      fieldRow('notifications.attachScreenshots', 'Attach screenshot to failures',
+        { hint: 'When a claim fails, attach the most recent .png from data/screenshots/ to the notification. Off if you prefer to keep notifications text-only (privacy or bandwidth).' }) +
       fieldRow('panel.publicUrl', 'Public URL',
         { hint: 'External URL used in notifications so tap-targets land on the panel.' });
   } else if (currentSettingsSection === 'services') {
