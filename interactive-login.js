@@ -1450,9 +1450,11 @@ const PANEL_HTML = `<!DOCTYPE html>
   .svc-toggle input[type="checkbox"]:checked + .svc-toggle-track .svc-toggle-thumb { left: 16px; background: #fff; }
   .svc-toggle:hover .svc-toggle-track { box-shadow: 0 0 0 3px rgba(78, 204, 163, 0.12); }
   /* Expanded sub-settings: 2px accent left border + indent so the parent/child
-     relationship is visually obvious instead of flat. Indent matches the
-     caret column in .svc-expand so the border sits under the caret. */
-  .svc-body { display: none; margin-left: 18px; padding: 6px 12px 16px 18px; border-left: 2px solid rgba(78, 204, 163, 0.35); }
+     relationship is visually obvious. Border sits ~under the caret (toggle
+     32 + gap 16 + expand-padding 12 + half-caret 7 = 67px), and content
+     padding aligns the body with the service name (caret-col 14 + col-gap 12
+     past the border = 86px). */
+  .svc-body { display: none; margin-left: 66px; padding: 6px 12px 16px 18px; border-left: 2px solid rgba(78, 204, 163, 0.35); }
   .svc-body.open { display: block; }
   .svc-body .svc-subtitle { font-size: 12px; color: #8aa0c2; margin: 0 0 12px; font-style: italic; }
   /* Strategy A layout: label takes only the space it needs and the control
