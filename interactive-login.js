@@ -1424,9 +1424,19 @@ const PANEL_HTML = `<!DOCTYPE html>
   .svc-expand .svc-summary { grid-row: 2; grid-column: 2; font-size: 12.5px; color: #8aa0c2; line-height: 1.4; }
   .svc-row.inactive .svc-name { color: #c0c8d8; font-weight: 500; }
   .svc-row.inactive .svc-summary { color: #6a7e9e; }
-  .svc-active { flex-shrink: 0; display: inline-flex; align-items: center; gap: 6px; color: #8aa0c2; font-size: 12px; cursor: pointer; padding-right: 14px; }
-  .svc-active input { width: 14px; height: 14px; cursor: pointer; }
-  .svc-body { padding: 6px 16px 16px 38px; display: none; }
+  /* Per-service master toggle — a real switch, not a checkbox. Different
+     semantic from sub-boolean settings inside the expanded body. */
+  .svc-toggle { position: relative; display: inline-flex; align-items: center; cursor: pointer; padding: 0 14px; flex-shrink: 0; }
+  .svc-toggle input[type="checkbox"] { position: absolute; opacity: 0; pointer-events: none; }
+  .svc-toggle-track { width: 32px; height: 18px; background: #233454; border-radius: 9px; position: relative; transition: background 0.15s; flex-shrink: 0; }
+  .svc-toggle-thumb { width: 14px; height: 14px; background: #c0c8d8; border-radius: 50%; position: absolute; top: 2px; left: 2px; transition: left 0.15s, background 0.15s; }
+  .svc-toggle input[type="checkbox"]:checked + .svc-toggle-track { background: #4ecca3; }
+  .svc-toggle input[type="checkbox"]:checked + .svc-toggle-track .svc-toggle-thumb { left: 16px; background: #fff; }
+  .svc-toggle:hover .svc-toggle-track { box-shadow: 0 0 0 3px rgba(78, 204, 163, 0.12); }
+  /* Expanded sub-settings: 2px accent left border + indent so the parent/child
+     relationship is visually obvious instead of flat. Indent matches the
+     caret column in .svc-expand so the border sits under the caret. */
+  .svc-body { display: none; margin-left: 18px; padding: 6px 12px 16px 18px; border-left: 2px solid rgba(78, 204, 163, 0.35); }
   .svc-body.open { display: block; }
   .svc-body .svc-subtitle { font-size: 12px; color: #8aa0c2; margin: 0 0 12px; font-style: italic; }
   .setting { display: grid; grid-template-columns: minmax(180px, 220px) 1fr auto; gap: 16px; align-items: start; padding: 12px 0; border-bottom: 1px solid #1a2a48; }
@@ -2140,9 +2150,10 @@ function serviceRow(entry) {
         '</span>' +
         '<span class="svc-summary">' + escapeHtml(serviceSummary(entry.id)) + '</span>' +
       '</button>' +
-      '<label class="svc-active">' +
+      '<label class="svc-toggle" title="' + (active ? 'Active' : 'Inactive') + '" aria-label="' + (active ? 'Disable' : 'Enable') + ' ' + escapeHtml(entry.title) + '">' +
         '<input type="checkbox" ' + (active ? 'checked' : '') +
-          ' onchange="setActiveService(\\'' + entry.id + '\\', this.checked)">Active' +
+          ' onchange="setActiveService(\\'' + entry.id + '\\', this.checked)">' +
+        '<span class="svc-toggle-track"><span class="svc-toggle-thumb"></span></span>' +
       '</label>' +
     '</div>' +
     body +
