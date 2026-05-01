@@ -80,13 +80,16 @@ self-host ergonomics.
 
 - **GOG catalog watch (notify-only).** In addition to the existing
   homepage spotlight-giveaway claim flow, `gog.js` now queries GOG's
-  catalog API for items currently discounted to 100% off (Heartlight-style
-  one-off promos that don't show up on the homepage banner) and pings you
-  via apprise with the game URL so you can grab them manually. State lives
-  in `data/gog-catalog-watch.json`; same slug only re-notifies after a
-  30-day silence so a multi-day promo doesn't spam you. Closes
-  feldorn-fork issue [#9](https://github.com/feldorn/free-games-claimer/issues/9)
-  (the GOG half).
+  catalog API for free games not surfaced on the homepage banner — the
+  Heartlight-type cases where a paid game becomes free with GOG's
+  curated `freegame` tag rather than a discount flag. Baseline-diff
+  pattern, same as the Ubisoft watcher: first run after upgrade silently
+  records the current free-games list (~60 entries, including long-time
+  permafree titles like Witcher 3 REDkit and GWENT), subsequent runs
+  notify only on **new** additions to GOG's free-games tag. State lives
+  in `data/gog-catalog-watch.json`. Closes feldorn-fork issue
+  [#9](https://github.com/feldorn/free-games-claimer/issues/9) (the GOG
+  half).
 
 ### Added in 2.0.3 — Steam discovery durability + Ubisoft watcher
 
