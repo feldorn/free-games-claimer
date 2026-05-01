@@ -1372,6 +1372,11 @@ const PANEL_HTML = `<!DOCTYPE html>
   .settings-rail .rail-btn:hover { background: #1a2a48; color: #e0e0e0; }
   .settings-rail .rail-btn.active { background: rgba(78, 204, 163, 0.08); color: #fff; border-left-color: #4ecca3; font-weight: 600; }
   .settings-pane { overflow-y: auto; padding: 24px 32px 24px; }
+  /* Cap the settings content to a comfortable form width (Strategy A from the
+     UX brief). Stretching label/control pairs across the full 1900px panel
+     hurts pairing — eye has to track too far. 720px matches GitHub/Linear/
+     Stripe-style settings pages. */
+  .settings-pane > * { max-width: 720px; }
   .settings-pane-title { font-size: 11px; color: #8aa0c2; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 16px; display: flex; align-items: center; gap: 12px; }
   .settings-pane-title .spacer { flex: 1; }
 
@@ -1420,8 +1425,10 @@ const PANEL_HTML = `<!DOCTYPE html>
   /* Per-service accordion */
   .svc-row { border-top: 1px solid #1a2a48; }
   .svc-row:first-of-type { border-top: none; }
-  .svc-head { display: flex; align-items: stretch; gap: 12px; }
-  .svc-expand { flex: 1; display: grid; grid-template-columns: 14px 1fr; grid-template-rows: auto auto; column-gap: 12px; row-gap: 2px; padding: 12px 12px; cursor: pointer; background: transparent; border: none; color: inherit; font-family: inherit; text-align: left; transition: background 0.12s, box-shadow 0.12s; }
+  /* Strategy A: the expand button sizes to its content (no flex:1) so the
+     master toggle lands ~16px after the count pill, not the far-right edge. */
+  .svc-head { display: flex; align-items: center; gap: 16px; }
+  .svc-expand { display: grid; grid-template-columns: 14px 1fr; grid-template-rows: auto auto; column-gap: 12px; row-gap: 2px; padding: 12px 12px; cursor: pointer; background: transparent; border: none; color: inherit; font-family: inherit; text-align: left; transition: background 0.12s, box-shadow 0.12s; }
   .svc-row.expandable .svc-expand:hover { background: rgba(78, 204, 163, 0.05); box-shadow: inset 3px 0 0 #4ecca3; }
   .svc-expand[disabled] { cursor: default; }
   .svc-expand .svc-caret { grid-row: 1 / 3; grid-column: 1; align-self: center; color: #8aa0c2; font-size: 13px; }
@@ -1435,7 +1442,7 @@ const PANEL_HTML = `<!DOCTYPE html>
   .svc-row.inactive .svc-summary { color: #6a7e9e; }
   /* Per-service master toggle — a real switch, not a checkbox. Different
      semantic from sub-boolean settings inside the expanded body. */
-  .svc-toggle { position: relative; display: inline-flex; align-items: center; cursor: pointer; padding: 0 14px; flex-shrink: 0; }
+  .svc-toggle { position: relative; display: inline-flex; align-items: center; cursor: pointer; flex-shrink: 0; }
   .svc-toggle input[type="checkbox"] { position: absolute; opacity: 0; pointer-events: none; }
   .svc-toggle-track { width: 32px; height: 18px; background: #233454; border-radius: 9px; position: relative; transition: background 0.15s; flex-shrink: 0; }
   .svc-toggle-thumb { width: 14px; height: 14px; background: #c0c8d8; border-radius: 50%; position: absolute; top: 2px; left: 2px; transition: left 0.15s, background 0.15s; }
@@ -1448,26 +1455,41 @@ const PANEL_HTML = `<!DOCTYPE html>
   .svc-body { display: none; margin-left: 18px; padding: 6px 12px 16px 18px; border-left: 2px solid rgba(78, 204, 163, 0.35); }
   .svc-body.open { display: block; }
   .svc-body .svc-subtitle { font-size: 12px; color: #8aa0c2; margin: 0 0 12px; font-style: italic; }
-  .setting { display: grid; grid-template-columns: minmax(180px, 220px) 1fr auto; gap: 16px; align-items: start; padding: 12px 0; border-bottom: 1px solid #1a2a48; }
+  /* Strategy A layout: label takes only the space it needs and the control
+     sits ~24px to its right. No more stretched grid pushing controls to a
+     far-edge column. flex-wrap allows revert + popover to wrap onto extra
+     rows when needed. */
+  .setting { display: flex; align-items: center; gap: 24px; padding: 12px 0; border-bottom: 1px solid #1a2a48; flex-wrap: wrap; }
   .setting:last-child { border-bottom: none; }
-  /* Microsoft Rewards labels are noticeably longer than other services'.
-     Widen the label column inside service bodies so labels don't push the
-     input column out of alignment with the rest of the page. */
-  .svc-body .setting { grid-template-columns: minmax(220px, 280px) 1fr auto; }
+  .setting > .setting-label { flex: 0 0 auto; white-space: nowrap; min-width: 0; }
+  .setting > .setting-input { flex: 0 0 auto; }
+  .setting > .setting-help-popover { flex-basis: 100%; }
+  /* Below 640px: labels wrap naturally and controls drop below.
+     Boolean Variant C keeps its checkbox-left inline layout. */
+  @media (max-width: 640px) {
+    .setting:not(.setting-bool) { flex-direction: column; align-items: flex-start; gap: 8px; }
+    .setting:not(.setting-bool) > .setting-label { white-space: normal; }
+  }
   /* Grouped fields: small-caps subheader replaces the per-field hairline so
      related settings (Timeouts, Debug, Viewport, etc.) read as one cluster. */
   .setting-group { margin-bottom: 24px; }
   .setting-group:last-child { margin-bottom: 0; }
   .setting-group-head { font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: #6a7e9e; margin: 0 0 4px; padding-bottom: 6px; border-bottom: 1px solid #1a2a48; }
   .setting-group .setting { border-bottom: none; padding: 8px 0; }
-  .setting-label { font-size: 13px; color: #e0e0e0; padding-top: 7px; line-height: 1.4; }
+  .setting-label { font-size: 13px; color: #e0e0e0; line-height: 1.4; }
   .setting-env { font-size: 11px; color: #8aa0c2; font-family: 'Menlo', 'Consolas', monospace; margin-left: 6px; }
   .setting-dot { width: 6px; height: 6px; border-radius: 50%; background: #4ecca3; display: inline-block; margin-left: 6px; vertical-align: middle; }
   .setting-hint { font-size: 11px; color: #8aa0c2; margin-top: 3px; line-height: 1.4; font-style: italic; }
   .setting-input { display: flex; align-items: center; gap: 8px; }
   .setting-input input[type="number"], .setting-input input[type="text"], .setting-input select, .setting-input textarea {
-    width: 100%; background: #0d1830; color: #e0e0e0; border: 1px solid #233454; border-radius: 4px; padding: 6px 8px; font-size: 13px; font-family: inherit;
+    background: #0d1830; color: #e0e0e0; border: 1px solid #233454; border-radius: 4px; padding: 6px 8px; font-size: 13px; font-family: inherit;
   }
+  /* Default widths by control type — Strategy A's flex layout means inputs
+     don't auto-fill a stretched column anymore, so each gets a sensible
+     content-width that matches the typical input length. */
+  .setting-input input[type="text"] { width: 320px; max-width: 100%; }
+  .setting-input textarea { width: 480px; max-width: 100%; }
+  .setting-input select { min-width: 120px; }
   /* Numeric inputs: cap width and right-align so "60" doesn't share the same
      stretched width as a long Apprise URL. The unit suffix sits to the right. */
   .setting-input input[type="number"] { width: 110px; flex: 0 0 auto; text-align: right; }
