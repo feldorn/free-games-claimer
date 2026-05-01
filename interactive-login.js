@@ -1381,7 +1381,7 @@ const PANEL_HTML = `<!DOCTYPE html>
   .settings-rail .rail-btn { display: block; width: 100%; text-align: left; padding: 9px 18px; background: transparent; border: none; border-left: 3px solid transparent; color: #a0b4d4; font-size: 13px; cursor: pointer; font-family: inherit; }
   .settings-rail .rail-btn:hover { background: #1a2a48; color: #e0e0e0; }
   .settings-rail .rail-btn.active { background: rgba(78, 204, 163, 0.08); color: #fff; border-left-color: #4ecca3; font-weight: 600; }
-  .settings-rail-version { margin-top: auto; padding: 12px 18px 4px; font-size: 11px; color: #6a7e9d; font-variant-numeric: tabular-nums; letter-spacing: 0.04em; }
+  .settings-rail-version { margin-top: auto; padding: 12px 18px 4px; font-size: 13px; color: #6a7e9d; font-variant-numeric: tabular-nums; }
   .settings-pane { overflow-y: auto; padding: 24px 32px 24px; }
   /* Cap the settings content to a comfortable form width (Strategy A from the
      UX brief). Stretching label/control pairs across the full 1900px panel
