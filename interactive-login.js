@@ -1396,12 +1396,20 @@ const PANEL_HTML = `<!DOCTYPE html>
   .env-view-body { flex: 1; overflow-y: auto; padding: 0 32px 24px; }
 
   /* Field chrome */
-  /* Label uses normal text flow so the (i) icon glues to the last word via
-     .setting-label-tail (white-space: nowrap). Previously the label was a flex
-     container, which let the icon wrap to its own line below the text. */
+  /* Label uses normal text flow; the (i) icon glues to the last word via an
+     inline-flex tail (atomic unit, can't break internally). gap handles the
+     spacing so the icons null out their own margin-left inside the tail to
+     avoid doubled-up spacing. */
   .setting .setting-help-popover { grid-column: 1 / -1; }
-  .setting-label-tail { white-space: nowrap; }
-  .setting-input .input-prefix { color: #8aa0c2; padding-right: 2px; }
+  .setting-label-tail { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; vertical-align: baseline; }
+  .setting-label-tail .setting-info { flex-shrink: 0; margin-left: 0; }
+  .setting-label-tail .setting-dot { flex-shrink: 0; margin-left: 0; }
+  /* Currency / unit prefix sits inside the input box (absolute-positioned)
+     instead of as a separate flex item — so the $ visually attaches to the
+     value rather than floating in its own micro-column. */
+  .setting-input .input-with-prefix { position: relative; display: inline-block; flex: 0 0 auto; }
+  .setting-input .input-with-prefix .input-prefix { position: absolute; left: 8px; top: 50%; transform: translateY(-50%); color: #8aa0c2; font-size: 13px; pointer-events: none; }
+  .setting-input .input-with-prefix input[type="number"] { padding-left: 22px; }
   .setting-info { background: transparent; border: 1px solid #233454; color: #8aa0c2; width: 18px; height: 18px; border-radius: 50%; font-size: 11px; cursor: pointer; padding: 0; line-height: 1; margin-left: 6px; display: inline-flex; align-items: center; justify-content: center; vertical-align: middle; }
   .setting-info:hover { background: #1a2a48; color: #e0e0e0; border-color: #2a3a5a; }
   .setting-info.open { background: #0f3460; color: #fff; border-color: #4ecca3; }
@@ -1417,6 +1425,7 @@ const PANEL_HTML = `<!DOCTYPE html>
   .svc-row.expandable .svc-expand:hover { background: rgba(78, 204, 163, 0.05); box-shadow: inset 3px 0 0 #4ecca3; }
   .svc-expand[disabled] { cursor: default; }
   .svc-expand .svc-caret { grid-row: 1 / 3; grid-column: 1; align-self: center; color: #8aa0c2; font-size: 13px; }
+  .svc-expand .svc-caret.svc-caret-disabled { opacity: 0.3; }
   .svc-expand .svc-name-line { grid-row: 1; grid-column: 2; display: flex; align-items: baseline; gap: 10px; }
   .svc-expand .svc-name { font-size: 15px; font-weight: 600; color: #ffffff; letter-spacing: 0.01em; }
   .svc-expand .svc-count { font-size: 11px; color: #6a7e9e; font-weight: 400; letter-spacing: 0.02em; padding: 2px 7px; border: 1px solid #233454; border-radius: 10px; line-height: 1; }
@@ -1441,6 +1450,10 @@ const PANEL_HTML = `<!DOCTYPE html>
   .svc-body .svc-subtitle { font-size: 12px; color: #8aa0c2; margin: 0 0 12px; font-style: italic; }
   .setting { display: grid; grid-template-columns: minmax(180px, 220px) 1fr auto; gap: 16px; align-items: start; padding: 12px 0; border-bottom: 1px solid #1a2a48; }
   .setting:last-child { border-bottom: none; }
+  /* Microsoft Rewards labels are noticeably longer than other services'.
+     Widen the label column inside service bodies so labels don't push the
+     input column out of alignment with the rest of the page. */
+  .svc-body .setting { grid-template-columns: minmax(220px, 280px) 1fr auto; }
   /* Grouped fields: small-caps subheader replaces the per-field hairline so
      related settings (Timeouts, Debug, Viewport, etc.) read as one cluster. */
   .setting-group { margin-bottom: 24px; }
@@ -2023,10 +2036,13 @@ function fieldRow(path, label, extra) {
     inputHtml = '<select onchange="setSettingValue(\\'' + path + '\\', ' + cast + ')">' + options + '</select>';
   } else if (f.type === 'number') {
     const v = value == null ? '' : value;
-    const prefix = extra.prefix ? '<span class="input-prefix">' + escapeHtml(extra.prefix) + '</span>' : '';
     const suffixText = extra.unit ? unitSuffix(extra.unit, value) : '';
     const suffix = suffixText ? '<span class="input-suffix">' + escapeHtml(suffixText) + '</span>' : '';
-    inputHtml = prefix + '<input type="number" value="' + v + '" oninput="setSettingValue(\\'' + path + '\\', this.value === \\'\\' ? null : Number(this.value))">' + suffix;
+    const inputEl = '<input type="number" value="' + v + '" oninput="setSettingValue(\\'' + path + '\\', this.value === \\'\\' ? null : Number(this.value))">';
+    const inputCore = extra.prefix
+      ? '<span class="input-with-prefix"><span class="input-prefix">' + escapeHtml(extra.prefix) + '</span>' + inputEl + '</span>'
+      : inputEl;
+    inputHtml = inputCore + suffix;
   } else if (extra.multiline) {
     inputHtml = '<textarea oninput="setSettingValue(\\'' + path + '\\', this.value)">' + escapeHtml(value || '') + '</textarea>';
   } else {
@@ -2143,7 +2159,7 @@ function serviceRow(entry) {
   return '<div class="svc-row' + (active ? '' : ' inactive') + (expandable ? ' expandable' : '') + '">' +
     '<div class="svc-head">' +
       '<button type="button" class="svc-expand" ' + onclick + (expandable ? '' : ' disabled') + '>' +
-        '<span class="svc-caret">' + (expandable ? caret : '·') + '</span>' +
+        '<span class="svc-caret' + (expandable ? '' : ' svc-caret-disabled') + '">' + caret + '</span>' +
         '<span class="svc-name-line">' +
           '<span class="svc-name">' + escapeHtml(entry.title) + '</span>' +
           (expandable ? countLabel : '') +
