@@ -1396,10 +1396,13 @@ const PANEL_HTML = `<!DOCTYPE html>
   .env-view-body { flex: 1; overflow-y: auto; padding: 0 32px 24px; }
 
   /* Field chrome */
-  .setting .setting-label { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  /* Label uses normal text flow so the (i) icon glues to the last word via
+     .setting-label-tail (white-space: nowrap). Previously the label was a flex
+     container, which let the icon wrap to its own line below the text. */
   .setting .setting-help-popover { grid-column: 1 / -1; }
+  .setting-label-tail { white-space: nowrap; }
   .setting-input .input-prefix { color: #8aa0c2; padding-right: 2px; }
-  .setting-info { background: transparent; border: 1px solid #233454; color: #8aa0c2; width: 18px; height: 18px; border-radius: 50%; font-size: 11px; cursor: pointer; padding: 0; line-height: 1; margin-left: 6px; display: inline-flex; align-items: center; justify-content: center; }
+  .setting-info { background: transparent; border: 1px solid #233454; color: #8aa0c2; width: 18px; height: 18px; border-radius: 50%; font-size: 11px; cursor: pointer; padding: 0; line-height: 1; margin-left: 6px; display: inline-flex; align-items: center; justify-content: center; vertical-align: middle; }
   .setting-info:hover { background: #1a2a48; color: #e0e0e0; border-color: #2a3a5a; }
   .setting-info.open { background: #0f3460; color: #fff; border-color: #4ecca3; }
   .setting-help-popover { margin-top: 4px; padding: 8px 10px; background: #0d1830; border: 1px solid #233454; border-radius: 6px; font-size: 12px; color: #a0b4d4; line-height: 1.5; display: none; }
@@ -1935,16 +1938,25 @@ function fieldRow(path, label, extra) {
     ? '<button type="button" class="setting-revert" onclick="revertSettingValue(\\'' + path + '\\')">Revert</button>'
     : '';
 
+  // Glue the (i) icon (and overridden-dot) to the last word of the label so
+  // they wrap together rather than orphaning onto a new line below the text.
+  const labelStr = String(label);
+  const lastSpace = labelStr.lastIndexOf(' ');
+  const labelHead = lastSpace > 0 ? labelStr.slice(0, lastSpace + 1) : '';
+  const labelTail = lastSpace > 0 ? labelStr.slice(lastSpace + 1) : labelStr;
+  const labelHtml = escapeHtml(labelHead) +
+    '<span class="setting-label-tail">' + escapeHtml(labelTail) + dot + infoBtn + '</span>';
+
   // Variant C — booleans render as one inline cluster (checkbox-left + label),
-  // not the label/input two-column grid. The (i) button stays outside <label>
-  // so clicking help doesn't toggle the checkbox.
+  // not the label/input two-column grid. The (i) button lives inside <label>:
+  // HTML5 suppresses label activation when clicking interactive descendants,
+  // so the help popover opens without toggling the checkbox.
   if (f.type === 'boolean') {
     return '<div class="setting setting-bool" data-path="' + path + '">' +
       '<label class="setting-bool-cluster">' +
         '<input type="checkbox" ' + (value ? 'checked' : '') + ' onchange="setSettingValue(\\'' + path + '\\', this.checked)">' +
-        '<span>' + escapeHtml(label) + dot + '</span>' +
+        '<span>' + escapeHtml(labelHead) + '<span class="setting-label-tail">' + escapeHtml(labelTail) + dot + infoBtn + '</span></span>' +
       '</label>' +
-      infoBtn +
       revertBtn +
       popover +
     '</div>';
@@ -1966,7 +1978,7 @@ function fieldRow(path, label, extra) {
   }
 
   return '<div class="setting" data-path="' + path + '">' +
-    '<div class="setting-label">' + escapeHtml(label) + dot + infoBtn + '</div>' +
+    '<div class="setting-label">' + labelHtml + '</div>' +
     '<div class="setting-input">' + inputHtml + '</div>' +
     revertBtn +
     popover +
