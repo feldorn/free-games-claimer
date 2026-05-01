@@ -47,6 +47,37 @@ Existing users: pull the new image, open the **Settings** tab, and everything yo
 
 - **AliExpress** restored as an opt-in service (previously deleted in the fork's 2026-03-25 cleanup). Disabled by default; enable in **Settings → Per-service → AliExpress**. Collects the daily check-in coins via mobile-site emulation and surfaces a per-service row in the Stats tab with its coin history. Needs `AE_EMAIL`/`AE_PASSWORD` only if you want unattended re-login — otherwise click Login on the AliExpress card and cookies persist.
 
+### Added in 2.0.4 — non-root docker, screenshot-on-failure attachments, panel-API healthcheck
+
+Three small-but-asked-for improvements, mostly closing the loop on
+self-host ergonomics.
+
+- **Opt-in non-root runtime via `PUID`/`PGID`.** Set them in the env and the
+  entrypoint reconciles a runtime user `fgc` with those IDs, chowns
+  `/fgc/data`, and drops privileges via `gosu` before TurboVNC and the panel
+  start. Files created in your bind-mount or volume end up owned by the
+  intended user instead of root. Default behavior unchanged when the vars
+  are unset — the entrypoint's root-only block is skipped entirely, no
+  surprise migration. Closes upstream
+  [#525](https://github.com/vogler/free-games-claimer/issues/525) +
+  [#468](https://github.com/vogler/free-games-claimer/issues/468); see
+  [Running as a non-root user](#running-as-a-non-root-user) below.
+
+- **Failure notifications now attach the most recent screenshot.** When a
+  claim script crashes, `notify()` looks for the newest `.png` under
+  `data/screenshots/` written since this run started and passes it to
+  apprise via `-a`. Pushover, Discord webhooks, Telegram, etc. render the
+  attachment inline. Useful when the failure is visual (captcha, broken
+  layout, unexpected modal). Off-switch via `NOTIFY_ATTACH_SCREENSHOTS=0`
+  or **Settings → Notifications → Attach screenshot to failures** for
+  privacy / bandwidth-conscious deploys.
+
+- **Panel-API healthcheck.** Docker `HEALTHCHECK` now hits
+  `http://localhost:7080/api/state` instead of `:6080`. A passing check
+  means the panel can actually serve its state, not just that noVNC's HTTP
+  listener accepts connections — more diagnostic, same `unless-stopped`
+  recovery semantics.
+
 ### Added in 2.0.3 — Steam discovery durability + Ubisoft watcher
 
 Two notable changes plus an Epic Games stability fix.
