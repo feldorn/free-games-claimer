@@ -1273,12 +1273,18 @@ async function getStatsDaily(days = 30) {
   for (let i = days - 1; i >= 0; i--) {
     const d = new Date(today);
     d.setDate(d.getDate() - i);
-    buckets.push({ date: localDateKey(d), count: 0 });
+    buckets.push({ date: localDateKey(d), count: 0, items: [] });
   }
   const byDate = Object.fromEntries(buckets.map(b => [b.date, b]));
   for (const c of claims) {
     const key = localDateKey(c.at);
-    if (byDate[key]) byDate[key].count++;
+    if (!byDate[key]) continue;
+    byDate[key].count++;
+    byDate[key].items.push({
+      service: c.service,
+      serviceName: (SITES[c.service] && SITES[c.service].name) || c.service,
+      title: c.title,
+    });
   }
   return buckets;
 }
@@ -2490,10 +2496,18 @@ function renderDailyChart(daily) {
   const yMax = Math.max(step, Math.ceil(rawMax / step) * step);
   const yTicks = [];
   for (let v = 0; v <= yMax; v += step) yTicks.push('<span>' + v + '</span>');
+  // Native tooltip uses &#10; for line breaks so each "Service: Title" lands on
+  // its own row. Each line is escaped first; the entity is appended after so
+  // it survives as a real newline when the browser parses the title attribute.
+  const escAttr = s => String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const bars = daily.map(d => {
     const pct = (d.count / yMax) * 100;
     const cls = d.count === 0 ? ' zero' : '';
-    return '<div class="bar' + cls + '" style="height:' + pct + '%" title="' + d.date + ': ' + d.count + '"></div>';
+    const lines = [d.date + ': ' + d.count].concat(
+      (d.items || []).map(it => (it.serviceName || it.service) + ': ' + it.title)
+    );
+    const tip = lines.map(escAttr).join('&#10;');
+    return '<div class="bar' + cls + '" style="height:' + pct + '%" title="' + tip + '"></div>';
   }).join('');
   // Weekly ticks anchored at today's right edge. Empty xtick slots keep each
   // bar column aligned with its flex cell (preserving 1:1 bar<->label mapping).
