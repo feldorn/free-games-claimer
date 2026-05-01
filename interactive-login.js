@@ -1439,6 +1439,10 @@ const PANEL_HTML = `<!DOCTYPE html>
   .setting-input input[type="number"], .setting-input input[type="text"], .setting-input select, .setting-input textarea {
     width: 100%; background: #0d1830; color: #e0e0e0; border: 1px solid #233454; border-radius: 4px; padding: 6px 8px; font-size: 13px; font-family: inherit;
   }
+  /* Numeric inputs: cap width and right-align so "60" doesn't share the same
+     stretched width as a long Apprise URL. The unit suffix sits to the right. */
+  .setting-input input[type="number"] { width: 110px; flex: 0 0 auto; text-align: right; }
+  .setting-input .input-suffix { color: #8aa0c2; font-size: 12px; white-space: nowrap; }
   .setting-input input[type="number"]:focus, .setting-input input[type="text"]:focus, .setting-input select:focus, .setting-input textarea:focus {
     outline: none; border-color: #4ecca3;
   }
@@ -1874,6 +1878,30 @@ function toggleFieldHelp(path) {
   paintSettings();
 }
 
+// Formats a numeric field value into a human-readable conversion shown as
+// an inline suffix next to the input ("60 [seconds] = 1m"). Returns '' when
+// no useful conversion exists (e.g. zero/negative, or units that don't divide
+// cleanly), so the suffix slot stays empty rather than showing "= 0m".
+function unitSuffix(unit, value) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return '';
+  if (unit === 'seconds') {
+    if (n % 86400 === 0) return '= ' + (n / 86400) + 'd';
+    if (n % 3600 === 0)  return '= ' + (n / 3600) + 'h';
+    if (n % 60 === 0)    return '= ' + (n / 60) + 'm';
+    return '';
+  }
+  if (unit === 'hours') {
+    if (n % 24 === 0)    return '= ' + (n / 24) + 'd';
+    return '';
+  }
+  if (unit === 'days') {
+    if (n >= 7 && n % 7 === 0) return '= ' + (n / 7) + 'w';
+    return '';
+  }
+  return '';
+}
+
 function toggleServiceBody(id) {
   if (openServices.has(id)) openServices.delete(id); else openServices.add(id);
   paintSettings();
@@ -1970,7 +1998,9 @@ function fieldRow(path, label, extra) {
   } else if (f.type === 'number') {
     const v = value == null ? '' : value;
     const prefix = extra.prefix ? '<span class="input-prefix">' + escapeHtml(extra.prefix) + '</span>' : '';
-    inputHtml = prefix + '<input type="number" value="' + v + '" oninput="setSettingValue(\\'' + path + '\\', this.value === \\'\\' ? null : Number(this.value))">';
+    const suffixText = extra.unit ? unitSuffix(extra.unit, value) : '';
+    const suffix = suffixText ? '<span class="input-suffix">' + escapeHtml(suffixText) + '</span>' : '';
+    inputHtml = prefix + '<input type="number" value="' + v + '" oninput="setSettingValue(\\'' + path + '\\', this.value === \\'\\' ? null : Number(this.value))">' + suffix;
   } else if (extra.multiline) {
     inputHtml = '<textarea oninput="setSettingValue(\\'' + path + '\\', this.value)">' + escapeHtml(value || '') + '</textarea>';
   } else {
@@ -2039,7 +2069,7 @@ const SERVICE_ROWS = [
     ['services.prime-gaming.claimDlc',     'Claim in-game DLC content',
       { hint: 'Amazon removed the in-game content tab from Prime Gaming — this toggle is currently a no-op. The script skips cleanly when the tab is missing; will resume claiming if/when Amazon brings it back.' }],
     ['services.prime-gaming.timeLeftDays', 'Skip if more than N days remain to claim',
-      { hint: 'Leave blank to claim everything regardless of how long is left.' }],
+      { unit: 'days', hint: 'Leave blank to claim everything regardless of how long is left.' }],
   ]},
   { id: 'epic-games', title: 'Epic Games', fields: [
     ['services.epic-games.claimMobile', 'Claim mobile games'],
@@ -2058,11 +2088,11 @@ const SERVICE_ROWS = [
   // only affect the Microsoft Rewards run, not the global loop.
   { id: 'microsoft', title: 'Microsoft Rewards', subtitle: 'Runs both desktop and mobile sessions in one script.', fields: [
     ['scheduler.msScheduleHours', 'Schedule window width (hours)',
-      { hint: 'Width of the daily Microsoft Rewards window, anchored to the start time. 0 runs immediately without anchoring.' }],
+      { unit: 'hours', hint: 'Width of the daily Microsoft Rewards window, anchored to the start time. 0 runs immediately without anchoring.' }],
     ['scheduler.msScheduleStart', 'Schedule window start (local time)',
       { options: HOURS_OF_DAY }],
     ['services.microsoft.searchDelayMaxSec', 'Max delay between Bing searches (seconds)',
-      { hint: 'Upper bound for the random pause before each Bing search. Default 180 mimics a human pace; lower values shorten runs significantly (~60 searches × this/2 avg = total search time) but increase the risk of MS flagging the account as a bot.' }],
+      { unit: 'seconds', hint: 'Upper bound for the random pause before each Bing search. Default 180 mimics a human pace; lower values shorten runs significantly (~60 searches × this/2 avg = total search time) but increase the risk of MS flagging the account as a bot.' }],
   ]},
   { id: 'aliexpress', title: 'AliExpress', fields: [] },
   { id: 'ubisoft', title: 'Ubisoft Connect', subtitle: 'Watch-only: pings you when a new free game appears at store.ubisoft.com/us/free-games. No login, no auto-claim — go grab it manually.', fields: [] },
@@ -2109,23 +2139,10 @@ function paintSettings() {
 
   let html = '';
   if (currentSettingsSection === 'scheduler') {
-    // Show the loop interval in human-readable units under the number input
-    // so "86400" isn't the only thing the user sees.
-    let loopHuman = '';
-    const loopSec = draftValue('scheduler.loopSeconds') || 0;
-    if (loopSec > 0) {
-      let pretty;
-      if (loopSec % 86400 === 0)      pretty = (loopSec / 86400) + 'd';
-      else if (loopSec % 3600 === 0)  pretty = (loopSec / 3600) + 'h';
-      else if (loopSec % 60 === 0)    pretty = (loopSec / 60) + 'm';
-      else                            pretty = loopSec + 's';
-      loopHuman = '<div class="setting-hint" style="margin:-6px 0 8px 4px">= ' + pretty + '</div>';
-    }
     html =
       '<div class="settings-pane-title">Scheduler</div>' +
       fieldRow('scheduler.loopSeconds', 'Loop interval (seconds)',
-        { hint: 'Time between scheduled runs. 0 disables the loop. Microsoft Rewards has its own window — set it under Services → Microsoft Rewards.' }) +
-      loopHuman;
+        { unit: 'seconds', hint: 'Time between scheduled runs. 0 disables the loop. Microsoft Rewards has its own window — set it under Services → Microsoft Rewards.' });
   } else if (currentSettingsSection === 'notifications') {
     html =
       '<div class="settings-pane-title">Notifications' +
@@ -2150,8 +2167,8 @@ function paintSettings() {
     // then viewport.
     html =
       '<div class="settings-pane-title">Advanced</div>' +
-      fieldRow('advanced.timeoutSec',      'Default timeout (seconds)',        { hint: 'Applies to Playwright page operations.' }) +
-      fieldRow('advanced.loginTimeoutSec', 'Login timeout (seconds)',          { hint: 'Separate timeout used during the login flow.' }) +
+      fieldRow('advanced.timeoutSec',      'Default timeout (seconds)',        { unit: 'seconds', hint: 'Applies to Playwright page operations.' }) +
+      fieldRow('advanced.loginTimeoutSec', 'Login timeout (seconds)',          { unit: 'seconds', hint: 'Separate timeout used during the login flow.' }) +
       fieldRow('advanced.dryrun',          'Dry run — skip actual claiming',   { hint: 'Runs the claim pipeline without actually claiming anything. Useful for testing.' }) +
       fieldRow('advanced.record',          'Record HAR + video for debugging', { hint: 'Writes per-run .webm + .har to data/record/. Heavier runs.' }) +
       fieldRow('advanced.width',           'Browser viewport width') +
