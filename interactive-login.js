@@ -1431,6 +1431,12 @@ const PANEL_HTML = `<!DOCTYPE html>
   .svc-body .svc-subtitle { font-size: 12px; color: #8aa0c2; margin: 0 0 12px; font-style: italic; }
   .setting { display: grid; grid-template-columns: minmax(180px, 220px) 1fr auto; gap: 16px; align-items: start; padding: 12px 0; border-bottom: 1px solid #1a2a48; }
   .setting:last-child { border-bottom: none; }
+  /* Grouped fields: small-caps subheader replaces the per-field hairline so
+     related settings (Timeouts, Debug, Viewport, etc.) read as one cluster. */
+  .setting-group { margin-bottom: 24px; }
+  .setting-group:last-child { margin-bottom: 0; }
+  .setting-group-head { font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: #6a7e9e; margin: 0 0 4px; padding-bottom: 6px; border-bottom: 1px solid #1a2a48; }
+  .setting-group .setting { border-bottom: none; padding: 8px 0; }
   .setting-label { font-size: 13px; color: #e0e0e0; padding-top: 7px; line-height: 1.4; }
   .setting-env { font-size: 11px; color: #8aa0c2; font-family: 'Menlo', 'Consolas', monospace; margin-left: 6px; }
   .setting-dot { width: 6px; height: 6px; border-radius: 50%; background: #4ecca3; display: inline-block; margin-left: 6px; vertical-align: middle; }
@@ -1940,6 +1946,16 @@ function isServiceActiveForUI(id) {
   return !!draftValue('services.' + id + '.active');
 }
 
+// Wrap a set of fieldRow strings in a labeled group with a small-caps
+// subheader. Used on Advanced + Notifications to break the page into
+// logical clusters (Timeouts, Debug, Viewport, …) instead of one long list.
+function settingGroup(title, body) {
+  return '<div class="setting-group">' +
+    '<div class="setting-group-head">' + escapeHtml(title) + '</div>' +
+    body +
+  '</div>';
+}
+
 // Build the HTML for one settings row. Help + env-var name live inside a
 // popover opened by the ⓘ button; Revert only renders when the field is
 // overridden relative to env/default.
@@ -2149,13 +2165,17 @@ function paintSettings() {
         '<span class="spacer"></span>' +
         '<button class="btn btn-check-all" onclick="testNotify()" id="btnTestNotify">Send test</button>' +
       '</div>' +
-      fieldRow('notifications.notify', 'Apprise URL(s)',
-        { multiline: true, hint: 'One URL per line (or comma-separated). Examples: pover://token@user, tgram://botid/chatid.' }) +
-      fieldRow('notifications.notifyTitle', 'Title prefix') +
-      fieldRow('notifications.attachScreenshots', 'Attach screenshot to failures',
-        { hint: 'When a claim fails, attach the most recent .png from data/screenshots/ to the notification. Off if you prefer to keep notifications text-only (privacy or bandwidth).' }) +
-      fieldRow('panel.publicUrl', 'Public URL',
-        { hint: 'External URL used in notifications so tap-targets land on the panel.' });
+      settingGroup('Destinations',
+        fieldRow('notifications.notify', 'Apprise URL(s)',
+          { multiline: true, hint: 'One URL per line (or comma-separated). Examples: pover://token@user, tgram://botid/chatid.' }) +
+        fieldRow('notifications.notifyTitle', 'Title prefix') +
+        fieldRow('notifications.attachScreenshots', 'Attach screenshot to failures',
+          { hint: 'When a claim fails, attach the most recent .png from data/screenshots/ to the notification. Off if you prefer to keep notifications text-only (privacy or bandwidth).' })
+      ) +
+      settingGroup('Panel link',
+        fieldRow('panel.publicUrl', 'Public URL',
+          { hint: 'External URL used in notifications so tap-targets land on the panel.' })
+      );
   } else if (currentSettingsSection === 'services') {
     html = '<div class="settings-pane-title">Services</div>' +
       '<div class="svc-list">' +
@@ -2167,12 +2187,18 @@ function paintSettings() {
     // then viewport.
     html =
       '<div class="settings-pane-title">Advanced</div>' +
-      fieldRow('advanced.timeoutSec',      'Default timeout (seconds)',        { unit: 'seconds', hint: 'Applies to Playwright page operations.' }) +
-      fieldRow('advanced.loginTimeoutSec', 'Login timeout (seconds)',          { unit: 'seconds', hint: 'Separate timeout used during the login flow.' }) +
-      fieldRow('advanced.dryrun',          'Dry run — skip actual claiming',   { hint: 'Runs the claim pipeline without actually claiming anything. Useful for testing.' }) +
-      fieldRow('advanced.record',          'Record HAR + video for debugging', { hint: 'Writes per-run .webm + .har to data/record/. Heavier runs.' }) +
-      fieldRow('advanced.width',           'Browser viewport width') +
-      fieldRow('advanced.height',          'Browser viewport height');
+      settingGroup('Timeouts',
+        fieldRow('advanced.timeoutSec',      'Default timeout (seconds)', { unit: 'seconds', hint: 'Applies to Playwright page operations.' }) +
+        fieldRow('advanced.loginTimeoutSec', 'Login timeout (seconds)',   { unit: 'seconds', hint: 'Separate timeout used during the login flow.' })
+      ) +
+      settingGroup('Debug',
+        fieldRow('advanced.dryrun', 'Dry run — skip actual claiming',     { hint: 'Runs the claim pipeline without actually claiming anything. Useful for testing.' }) +
+        fieldRow('advanced.record', 'Record HAR + video for debugging',   { hint: 'Writes per-run .webm + .har to data/record/. Heavier runs.' })
+      ) +
+      settingGroup('Viewport',
+        fieldRow('advanced.width',  'Browser viewport width') +
+        fieldRow('advanced.height', 'Browser viewport height')
+      );
   }
 
   view.innerHTML = html;
