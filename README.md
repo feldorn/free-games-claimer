@@ -78,6 +78,16 @@ self-host ergonomics.
   listener accepts connections — more diagnostic, same `unless-stopped`
   recovery semantics.
 
+- **GOG catalog watch (notify-only).** In addition to the existing
+  homepage spotlight-giveaway claim flow, `gog.js` now queries GOG's
+  catalog API for items currently discounted to 100% off (Heartlight-style
+  one-off promos that don't show up on the homepage banner) and pings you
+  via apprise with the game URL so you can grab them manually. State lives
+  in `data/gog-catalog-watch.json`; same slug only re-notifies after a
+  30-day silence so a multi-day promo doesn't spam you. Closes
+  feldorn-fork issue [#9](https://github.com/feldorn/free-games-claimer/issues/9)
+  (the GOG half).
+
 ### Added in 2.0.3 — Steam discovery durability + Ubisoft watcher
 
 Two notable changes plus an Epic Games stability fix.
@@ -728,6 +738,7 @@ All data is stored in the `data/` directory (mounted as a Docker volume):
 | `data/epic-games.json` | Claimed/seen Epic Games titles |
 | `data/prime-gaming.json` | Claimed Prime Gaming titles, redeemed codes |
 | `data/gog.json` | Claimed GOG titles |
+| `data/gog-catalog-watch.json` | GOG catalog watch — slug-keyed state for the 100%-off-promo notification loop. Each entry stores `{title, url, firstSeen, lastSeenAt}`; re-notify fires when `lastSeenAt` ages past 30 days. Only relevant if you're seeing GOG-catalog notifications. |
 | `data/steam.json` | Claimed Steam titles |
 | `data/microsoft-rewards.json` | MS Rewards run history — `{at, session, before, after, earned}` per run (capped at 500 entries). Feeds the Stats tab's points KPIs. |
 | `data/aliexpress.json` | AliExpress daily coin-collect history — `{at, balance, streak, tomorrow, collected, earned}` per run (capped at 500). Drives the AliExpress row in the Stats tab. Only written when the service is enabled. |

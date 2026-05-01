@@ -219,6 +219,73 @@ try {
     }
   }
 
+  // Catalog watch — discover GOG games temporarily discounted to 100% off
+  // ("free in the regular store"). Different from the spotlight giveaway
+  // above: those are explicit banner promos with a one-click claim flow we
+  // can drive end-to-end. Catalog freebies are price-discounted-to-zero
+  // entries on individual store pages where the claim UI varies enough
+  // ("Add to library", "Buy with 0.00", multi-step cart) that we just
+  // notify the user with the URL and let them grab it manually with one
+  // tap. Same juice/squeeze framing as the Ubisoft Connect watcher.
+  // Failures here are logged and skipped — never block the rest of the run.
+  try {
+    const watchDb = await jsonDb('gog-catalog-watch.json', {});
+    const catalogUrl = 'https://catalog.gog.com/v1/catalog?price=between:0,0&discounted=true&order=desc:discount&limit=20';
+    const products = await page.evaluate(async u => {
+      const r = await fetch(u, { credentials: 'omit' });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const j = await r.json();
+      return j?.products || [];
+    }, catalogUrl);
+    // Defensive filter: require an active discount (excludes always-free
+    // demos / public-domain catalogue entries that also report price 0).
+    const free = products.filter(p =>
+      Number(p?.price?.final) === 0 &&
+      p?.price?.discount && String(p.price.discount).includes('-'),
+    );
+    // Re-notify if a slug hasn't been seen in this long (covers the case
+    // where a game was free, promo ended, then went free again months
+    // later as part of a fresh promo). 30d is comfortably longer than any
+    // single GOG promo (typically 7-14d) and shorter than typical gaps
+    // between repeat promos.
+    const RENOTIFY_AFTER_MS = 30 * 86400 * 1000;
+    const now = Date.now();
+    const newPromos = [];
+    for (const p of free) {
+      const slug = p?.slug;
+      if (!slug || typeof slug !== 'string') continue;
+      const existing = watchDb.data[slug];
+      if (existing?.lastSeenAt && (now - existing.lastSeenAt) < RENOTIFY_AFTER_MS) {
+        // Same promo, still active — bump lastSeenAt and skip notify.
+        existing.lastSeenAt = now;
+        continue;
+      }
+      const promoUrl = `https://www.gog.com/en/game/${slug}`;
+      watchDb.data[slug] = {
+        title: p.title,
+        url: promoUrl,
+        firstSeen: datetime(),
+        lastSeenAt: now,
+      };
+      newPromos.push({ title: p.title, url: promoUrl });
+    }
+    await watchDb.write();
+    if (newPromos.length) {
+      log.info(`Catalog watch — ${newPromos.length} new free promo(s): ${newPromos.map(g => g.title).join(', ')}`);
+      // Bare URLs (no <a href>) so Pushover's HTML-stripping doesn't drop
+      // the link entirely. <br> separators render across apprise targets.
+      const lines = newPromos.map(g => `${g.title} — ${g.url}`).join('<br>');
+      await notify(`GOG: ${newPromos.length} free promo${newPromos.length > 1 ? 's' : ''} in catalog<br>${lines}`);
+    } else if (free.length) {
+      log.info(`Catalog watch — ${free.length} free item(s) found, all previously notified`);
+    } else {
+      log.info('Catalog watch — no free promos in catalog');
+    }
+  } catch (e) {
+    log.warn(`Catalog watch skipped — ${e.message}`);
+    if (cfg.debug) console.error(e);
+  }
+
   // Reconcile Prime Gaming's pending GOG codes against the authenticated user's library.
   // Prime only knows whether a code was *delivered*, not whether it was *redeemed* —
   // many codes end up already-used (redeemed manually or by an earlier script version).
