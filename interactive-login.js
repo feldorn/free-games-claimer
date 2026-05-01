@@ -14,6 +14,10 @@ const NOVNC_PORT = process.env.NOVNC_PORT || 6080;
 const PANEL_PASSWORD = process.env.PANEL_PASSWORD || process.env.VNC_PASSWORD || '';
 const BASE_PATH = cfg.base_path; // e.g. "/free-games" when behind a subfolder proxy, or ""
 const PUBLIC_URL = cfg.public_url || `http://localhost:${PANEL_PORT}${BASE_PATH}`;
+const APP_VERSION = (() => {
+  try { return JSON.parse(readFileSync(path.join(__panelDirname, 'package.json'), 'utf8')).version || ''; }
+  catch { return ''; }
+})();
 
 import crypto from 'node:crypto';
 const sessionTokens = new Set();
@@ -1373,10 +1377,11 @@ const PANEL_HTML = `<!DOCTYPE html>
   body[data-tab="environment"] .tab-panel[data-panel="environment"] { display: flex; flex: 1; flex-direction: column; }
 
   .settings-layout { flex: 1; display: grid; grid-template-columns: 180px 1fr; min-height: 0; }
-  .settings-rail { background: #12213a; border-right: 1px solid #233454; padding: 14px 0; overflow-y: auto; }
+  .settings-rail { background: #12213a; border-right: 1px solid #233454; padding: 14px 0; overflow-y: auto; display: flex; flex-direction: column; }
   .settings-rail .rail-btn { display: block; width: 100%; text-align: left; padding: 9px 18px; background: transparent; border: none; border-left: 3px solid transparent; color: #a0b4d4; font-size: 13px; cursor: pointer; font-family: inherit; }
   .settings-rail .rail-btn:hover { background: #1a2a48; color: #e0e0e0; }
   .settings-rail .rail-btn.active { background: rgba(78, 204, 163, 0.08); color: #fff; border-left-color: #4ecca3; font-weight: 600; }
+  .settings-rail-version { margin-top: auto; padding: 12px 18px 4px; font-size: 11px; color: #6a7e9d; font-variant-numeric: tabular-nums; letter-spacing: 0.04em; }
   .settings-pane { overflow-y: auto; padding: 24px 32px 24px; }
   /* Cap the settings content to a comfortable form width (Strategy A from the
      UX brief). Stretching label/control pairs across the full 1900px panel
@@ -1394,9 +1399,10 @@ const PANEL_HTML = `<!DOCTYPE html>
 
   @media (max-width: 720px) {
     .settings-layout { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
-    .settings-rail { display: flex; overflow-x: auto; gap: 4px; padding: 8px 12px; border-right: none; border-bottom: 1px solid #233454; }
+    .settings-rail { display: flex; flex-direction: row; overflow-x: auto; gap: 4px; padding: 8px 12px; border-right: none; border-bottom: 1px solid #233454; }
     .settings-rail .rail-btn { width: auto; flex-shrink: 0; white-space: nowrap; border-left: none; border-bottom: 3px solid transparent; border-radius: 6px; padding: 6px 12px; }
     .settings-rail .rail-btn.active { border-left-color: transparent; border-bottom-color: #4ecca3; }
+    .settings-rail-version { margin-top: 0; margin-left: auto; align-self: center; padding: 0 8px; }
     .settings-pane { padding: 16px; }
   }
 
@@ -1796,6 +1802,7 @@ const PANEL_HTML = `<!DOCTYPE html>
         <button class="rail-btn"        data-section="notifications" onclick="selectSettingsSection('notifications')">Notifications</button>
         <button class="rail-btn"        data-section="services"      onclick="selectSettingsSection('services')">Services</button>
         <button class="rail-btn"        data-section="advanced"      onclick="selectSettingsSection('advanced')">Advanced</button>
+        <div class="settings-rail-version" title="App version (from package.json)">v${APP_VERSION}</div>
       </nav>
       <div class="settings-pane" id="settingsView">Loading…</div>
     </div>
