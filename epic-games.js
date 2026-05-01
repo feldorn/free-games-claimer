@@ -2,7 +2,7 @@ import { chromium } from 'patchright';
 import { authenticator } from 'otplib';
 import path from 'path';
 import { existsSync, writeFileSync } from 'fs';
-import { resolve, jsonDb, datetime, filenamify, prompt, confirm, notify, html_game_list, handleSIGINT, log } from './src/util.js';
+import { resolve, jsonDb, datetime, filenamify, prompt, confirm, notify, html_game_list, handleSIGINT, closeContextSafely, log } from './src/util.js';
 import { cfg } from './src/config.js';
 import { getMobileGames } from './src/epic-games-mobile.js';
 
@@ -510,4 +510,4 @@ try {
 }
 if (cfg.debug) writeFileSync(path.resolve(cfg.dir.browser, 'cookies.json'), JSON.stringify(await context.cookies()));
 if (page.video()) log.info(`Recorded video — ${await page.video().path()}`);
-await context.close();
+await closeContextSafely(context);

@@ -21,10 +21,24 @@ export const datetimeUTC = (d = new Date()) => d.toISOString().replace('T', ' ')
 export const datetime = (d = new Date()) => datetimeUTC(new Date(d.getTime() - d.getTimezoneOffset() * 60000));
 export const filenamify = s => s.replaceAll(':', '.').replace(/[^a-z0-9 _\-.]/gi, '_'); // alternative: https://www.npmjs.com/package/filenamify - On Unix-like systems, / is reserved. On Windows, <>:"/\|?* along with trailing periods are reserved.
 
+// Race context.close() with a timeout. Some sites (e.g. Epic Store) keep service workers and
+// long-poll websockets alive, which withholds the renderer's close-ack and hangs context.close()
+// indefinitely. Page-level finalization (video, HAR) has already flushed by the time we get here,
+// so on timeout we warn and let the process exit.
+export const closeContextSafely = async (context, timeoutMs = 15000) => {
+  const closed = await Promise.race([
+    context.close().then(() => true, () => true),
+    new Promise(r => setTimeout(() => r(false), timeoutMs)),
+  ]);
+  if (!closed) console.warn(`context.close() timed out after ${timeoutMs}ms — forcing exit (likely a stuck service worker)`);
+  return closed;
+};
+
 export const handleSIGINT = (context = null) => process.on('SIGINT', async () => { // e.g. when killed by Ctrl-C
   console.error('\nInterrupted by SIGINT. Exit!'); // Exception shows where the script was:\n'); // killed before catch in docker...
   process.exitCode = 130; // 128+SIGINT to indicate to parent that process was killed
-  if (context) await context.close(); // in order to save recordings also on SIGINT, we need to disable Playwright's handleSIGINT and close the context ourselves
+  if (context) await closeContextSafely(context); // in order to save recordings also on SIGINT, we need to disable Playwright's handleSIGINT and close the context ourselves
+  process.exit(process.exitCode);
 });
 
 // used prompts before, but couldn't cancel prompt
