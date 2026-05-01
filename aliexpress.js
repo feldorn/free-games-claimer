@@ -3,7 +3,7 @@
 // If you run it standalone on the CLI, it always executes; the activation
 // gate lives in interactive-login.js.
 import { chromium } from 'patchright';
-import { datetime, filenamify, prompt, handleSIGINT, jsonDb } from './src/util.js';
+import { datetime, filenamify, prompt, handleSIGINT, jsonDb, awaitUserCaptchaSolve } from './src/util.js';
 import { cfg } from './src/config.js';
 import { FingerprintInjector } from 'fingerprint-injector';
 import { FingerprintGenerator } from 'fingerprint-generator';
@@ -86,7 +86,48 @@ const auth = async url => {
     await login.locator('button:has-text("Sign in")').click();
     const error = login.locator('.nfm-login-input-error-text');
     error.waitFor().then(async _ => console.error('Login error (please restart):', await error.innerText())).catch(_ => console.log('No login error.'));
-    await page.waitForURL(u => u.toString().startsWith('https://www.aliexpress.com/'));
+    // AWSC slider can appear after Sign in. Race success-URL vs slider-trigger.
+    // If the slider wins, wrap the wait in awaitUserCaptchaSolve so the panel
+    // surfaces a banner + notification. If unsolved within the helper's 10min
+    // window, throw CAPTCHA_BLOCKED rather than falling through and stacking
+    // a second timeout in pre_auth.coins' waitForResponse.
+    const successUrl = u => u.toString().startsWith('https://www.aliexpress.com/');
+    const sliderTrigger = page.locator(
+      'iframe[src*="captcha"], iframe[src*="punish"], iframe[src*="nocaptcha"], iframe[src*="awsc"], iframe[src*="baxia"]'
+    ).or(page.locator('text=/slide.*verify|drag.*slider/i')).first();
+    let captchaDetectLogged = false;
+    const captchaCheck = async () => {
+      const matched = page.frames().find(f => /captcha|nocaptcha|punish_box|baxia|awsc/i.test(f.url() || ''));
+      if (matched) {
+        if (!captchaDetectLogged) {
+          captchaDetectLogged = true;
+          console.log(`[CAPTCHA-DETECT] service=aliexpress branch=frame frameUrl=${matched.url()} pageUrl=${page.url()}`);
+        }
+        return true;
+      }
+      const textVisible = await page.locator('text=/slide.*verify|drag.*slider|向右滑动/i').first().isVisible().catch(() => false);
+      if (textVisible && !captchaDetectLogged) {
+        captchaDetectLogged = true;
+        console.log(`[CAPTCHA-DETECT] service=aliexpress branch=text pageUrl=${page.url()}`);
+      }
+      return textVisible;
+    };
+    await Promise.race([
+      page.waitForURL(successUrl),
+      sliderTrigger.waitFor({ state: 'visible' }).then(async () => {
+        const solved = await awaitUserCaptchaSolve(page, {
+          service: 'aliexpress',
+          label: 'slider after login',
+          captchaCheck,
+        });
+        if (!solved) {
+          const e = new Error('AliExpress slider verification not completed within timeout');
+          e.code = 'CAPTCHA_BLOCKED';
+          throw e;
+        }
+        await page.waitForURL(successUrl);
+      }),
+    ]);
     context.setDefaultTimeout(cfg.debug ? 0 : cfg.timeout);
     console.log('Logged in!');
   }), loggedIn.waitFor()]);
