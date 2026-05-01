@@ -2180,6 +2180,11 @@ function serviceRow(entry) {
     : '';
   return '<div class="svc-row' + (active ? '' : ' inactive') + (expandable ? ' expandable' : '') + '">' +
     '<div class="svc-head">' +
+      '<label class="svc-toggle" title="' + (active ? 'Active' : 'Inactive') + '" aria-label="' + (active ? 'Disable' : 'Enable') + ' ' + escapeHtml(entry.title) + '">' +
+        '<input type="checkbox" ' + (active ? 'checked' : '') +
+          ' onchange="setActiveService(\\'' + entry.id + '\\', this.checked)">' +
+        '<span class="svc-toggle-track"><span class="svc-toggle-thumb"></span></span>' +
+      '</label>' +
       '<button type="button" class="svc-expand" ' + onclick + (expandable ? '' : ' disabled') + '>' +
         '<span class="svc-caret' + (expandable ? '' : ' svc-caret-disabled') + '">' + caret + '</span>' +
         '<span class="svc-name-line">' +
@@ -2188,11 +2193,6 @@ function serviceRow(entry) {
         '</span>' +
         '<span class="svc-summary">' + escapeHtml(serviceSummary(entry.id)) + '</span>' +
       '</button>' +
-      '<label class="svc-toggle" title="' + (active ? 'Active' : 'Inactive') + '" aria-label="' + (active ? 'Disable' : 'Enable') + ' ' + escapeHtml(entry.title) + '">' +
-        '<input type="checkbox" ' + (active ? 'checked' : '') +
-          ' onchange="setActiveService(\\'' + entry.id + '\\', this.checked)">' +
-        '<span class="svc-toggle-track"><span class="svc-toggle-thumb"></span></span>' +
-      '</label>' +
     '</div>' +
     body +
   '</div>';
