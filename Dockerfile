@@ -114,10 +114,12 @@ ENV DEPTH=24
 # Show browser instead of running headless
 ENV SHOW=1
 
-# Health check verifies the container infrastructure (noVNC) is alive.
-# We don't check for a running node process because with LOOP mode the scripts
-# finish and the container sleeps between cycles — that's normal, not unhealthy.
-HEALTHCHECK --interval=30s --timeout=5s --start-period=15s CMD curl --fail http://localhost:6080 || exit 1
+# Health check hits the always-on control panel API. /api/state returns JSON
+# describing per-site session status, scheduler info, etc., so a passing check
+# means the panel process is responsive (not just that noVNC's HTTP listener
+# is up). With LOOP mode the claim scripts finish and the container sleeps
+# between cycles — that's normal, the panel stays up regardless.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s CMD curl --fail http://localhost:7080/api/state || exit 1
 
 # Script to setup display server & VNC is always executed.
 ENTRYPOINT ["docker-entrypoint.sh"]

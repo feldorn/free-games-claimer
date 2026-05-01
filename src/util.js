@@ -49,31 +49,68 @@ export const confirm = o => prompt({ type: 'confirm', message: 'Continue?', ...o
 
 // notifications via apprise CLI
 import { execFile } from 'child_process';
+import { promises as fsp } from 'node:fs';
 import chalk from 'chalk';
 import { cfg } from './config.js';
 
-export const notify = html => new Promise((resolve, reject) => {
+// Walk cfg.dir.screenshots recursively for the newest PNG with mtime ≥ this
+// process's start time. Used by notify() when callers pass
+// { attachLatestScreenshot: true } so error notifications carry the visual
+// state of the failure without each call site needing to track a path.
+const findLatestScreenshot = async () => {
+  const root = cfg.dir?.screenshots;
+  if (!root || root === '0') return null;
+  const cutoff = Date.now() - process.uptime() * 1000;
+  const walk = async dir => {
+    let entries;
+    try { entries = await fsp.readdir(dir, { withFileTypes: true }); }
+    catch { return []; }
+    const found = await Promise.all(entries.map(async e => {
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) return walk(full);
+      if (!e.isFile() || !e.name.toLowerCase().endsWith('.png')) return [];
+      const s = await fsp.stat(full).catch(() => null);
+      return s && s.mtimeMs >= cutoff ? [{ path: full, mtime: s.mtimeMs }] : [];
+    }));
+    return found.flat();
+  };
+  const files = await walk(root);
+  if (!files.length) return null;
+  files.sort((a, b) => b.mtime - a.mtime);
+  return files[0].path;
+};
+
+export const notify = (html, opts = {}) => {
   if (!cfg.notify) {
     if (cfg.debug) console.debug('notify: NOTIFY is not set!');
-    return resolve();
+    return Promise.resolve();
   }
-  // const cmd = `apprise '${cfg.notify}' ${title} -i html -b '${html}'`; // this had problems if e.g. ' was used in arg; could have `npm i shell-escape`, but instead using safer execFile which takes args as array instead of exec which spawned a shell to execute the command
-  const args = [cfg.notify, '-i', 'html', '-b', html];
-  if (cfg.notify_title) args.push(...['-t', cfg.notify_title]);
-  if (cfg.debug) console.debug(`apprise ${args.map(a => `'${a}'`).join(' ')}`); // this also doesn't escape, but it's just for info
-  execFile('apprise', args, (error, stdout, stderr) => {
-    if (error) {
-      console.log(`error: ${error.message}`);
-      if (error.message.includes('command not found')) {
-        console.info('Run `pip install apprise`. See https://github.com/vogler/free-games-claimer#notifications');
+  // Resolve attachment path (if any) before invoking apprise.
+  const attachPromise = opts.screenshot
+    ? Promise.resolve(opts.screenshot)
+    : opts.attachLatestScreenshot
+      ? findLatestScreenshot().catch(() => null)
+      : Promise.resolve(null);
+  return attachPromise.then(attachPath => new Promise((resolve, reject) => {
+    // const cmd = `apprise '${cfg.notify}' ${title} -i html -b '${html}'`; // this had problems if e.g. ' was used in arg; could have `npm i shell-escape`, but instead using safer execFile which takes args as array instead of exec which spawned a shell to execute the command
+    const args = [cfg.notify, '-i', 'html', '-b', html];
+    if (cfg.notify_title) args.push('-t', cfg.notify_title);
+    if (attachPath) args.push('-a', attachPath);
+    if (cfg.debug) console.debug(`apprise ${args.map(a => `'${a}'`).join(' ')}`); // this also doesn't escape, but it's just for info
+    execFile('apprise', args, (error, stdout, stderr) => {
+      if (error) {
+        console.log(`error: ${error.message}`);
+        if (error.message.includes('command not found')) {
+          console.info('Run `pip install apprise`. See https://github.com/vogler/free-games-claimer#notifications');
+        }
+        return reject(error);
       }
-      return reject(error);
-    }
-    if (stderr) console.error(`stderr: ${stderr}`);
-    if (stdout) console.log(`stdout: ${stdout}`);
-    resolve();
-  });
-});
+      if (stderr) console.error(`stderr: ${stderr}`);
+      if (stdout) console.log(`stdout: ${stdout}`);
+      resolve();
+    });
+  }));
+};
 
 export const escapeHtml = unsafe => unsafe.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll('\'', '&#039;');
 

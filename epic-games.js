@@ -369,7 +369,7 @@ try {
         }).catch(_ => { }); // may time out if not shown
         iframe.locator('.payment__errors:has-text("Failed to challenge captcha, please try again later.")').waitFor().then(async () => {
           log.fail('Failed captcha challenge — try again later');
-          await notify(`epic-games: failed captcha challenge for ${title}.\nGame link: ${url}`);
+          await notify(`epic-games: failed captcha challenge for ${title}.\nGame link: ${url}`, { attachLatestScreenshot: true });
         }).catch(_ => { });
         await page.locator('text=Thanks for your order!').waitFor({ state: 'attached' }); // TODO Bundle: got stuck here, but normal game now as well
         db.data[user][game_id].status = 'claimed';
@@ -499,7 +499,7 @@ try {
   process.exitCode ||= 1;
   log.fail(`Exception: ${error.message || error}`);
   if (cfg.debug) console.error(error);
-  if (error.message && process.exitCode != 130) await notify(`epic-games failed: ${error.message.split('\n')[0]}`);
+  if (error.message && process.exitCode != 130) await notify(`epic-games failed: ${error.message.split('\n')[0]}`, { attachLatestScreenshot: true });
 } finally {
   if (cfg.time) console.timeEnd('claim all games');
   await db.write();

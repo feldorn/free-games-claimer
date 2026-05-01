@@ -347,7 +347,7 @@ try {
   process.exitCode ||= 1;
   log.fail(`Exception: ${error.message || error}`);
   if (cfg.debug) console.error(error);
-  if (error.message && process.exitCode != 130) await notify(`gog failed: ${error.message.split('\n')[0]}`);
+  if (error.message && process.exitCode != 130) await notify(`gog failed: ${error.message.split('\n')[0]}`, { attachLatestScreenshot: true });
 } finally {
   await db.write();
   log.sectionEnd();

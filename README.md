@@ -238,7 +238,10 @@ Microsoft Rewards collects daily points by running a desktop Bing session (33–
 
 Notifications are sent via [apprise](https://github.com/caronc/apprise) for:
 - Successfully claimed games
-- Failed claims
+- Failed claims (the most recent screenshot from `data/screenshots/` is attached
+  when the apprise target supports attachments — Pushover, Discord webhooks,
+  Telegram, etc. Useful when the failure is visual: captcha, broken layout,
+  unexpected modal)
 - Login issues (expired sessions, captchas — see [Captcha pause](#captcha-pause))
 
 Set `NOTIFY` to one or more apprise service URLs. Examples:

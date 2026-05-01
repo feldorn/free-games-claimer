@@ -17,3 +17,4 @@ attached_assets/
 # macOS screenshots dropped into assets/ for editing — keep originals local
 # only; the blurred panel-*.png exports are what gets committed.
 assets/Screenshot*.png
+.local-drafts/
