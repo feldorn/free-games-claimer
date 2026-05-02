@@ -52,23 +52,30 @@ const auth = async url => {
   const loggedIn = page.locator('h3:text-is("day streak")');
   // AliExpress mobile sometimes hangs on initial load — a manual F5 recovers it.
   // Auto-reload up to 3 times if neither the login button nor the logged-in
-  // marker shows up within a short window.
+  // marker shows up within a short window. Track which marker resolved so we
+  // can dispatch directly: re-racing afterwards with `loggedIn.waitFor()`
+  // under the default timeout would prematurely abort the login branch when
+  // the user takes >60s (e.g. solving the post-login slider).
   const QUICK_WAIT_MS = 15000;
   const MAX_RELOADS = 3;
+  let alreadyLoggedIn = false;
   for (let attempt = 0; attempt <= MAX_RELOADS; attempt++) {
     if (attempt === 0) await page.goto(url, { waitUntil: 'domcontentloaded' });
     else {
       console.log(`Page stuck loading; reloading (attempt ${attempt}/${MAX_RELOADS})`);
       await page.reload({ waitUntil: 'domcontentloaded' }).catch(_ => {});
     }
-    const appeared = await Promise.any([
-      loginBtn.waitFor({ timeout: QUICK_WAIT_MS }).then(_ => true),
-      loggedIn.waitFor({ timeout: QUICK_WAIT_MS }).then(_ => true),
-    ]).catch(_ => false);
-    if (appeared) break;
+    const which = await Promise.any([
+      loginBtn.waitFor({ timeout: QUICK_WAIT_MS }).then(_ => 'loginBtn'),
+      loggedIn.waitFor({ timeout: QUICK_WAIT_MS }).then(_ => 'loggedIn'),
+    ]).catch(_ => null);
+    if (which) {
+      alreadyLoggedIn = which === 'loggedIn';
+      break;
+    }
     if (attempt === MAX_RELOADS) throw new Error('AliExpress page never finished loading (login button / logged-in marker never appeared)');
   }
-  await Promise.race([loginBtn.waitFor().then(async () => {
+  if (!alreadyLoggedIn) {
     console.error('Not logged in! Will wait for 120s for you to login in the browser or terminal...');
     context.setDefaultTimeout(120 * 1000);
     await loginBtn.click();
@@ -130,7 +137,7 @@ const auth = async url => {
     ]);
     context.setDefaultTimeout(cfg.debug ? 0 : cfg.timeout);
     console.log('Logged in!');
-  }), loggedIn.waitFor()]);
+  }
 };
 
 const urls = {
