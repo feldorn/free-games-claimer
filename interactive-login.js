@@ -2193,7 +2193,7 @@ const SERVICE_ROWS = [
     ['services.microsoft.searchDelayMaxSec', 'Max delay between Bing searches (seconds)',
       { unit: 'seconds', hint: 'Upper bound for the random pause before each Bing search. Default 180 mimics a human pace; lower values shorten runs significantly (~60 searches × this/2 avg = total search time) but increase the risk of MS flagging the account as a bot.' }],
     ['services.microsoft.redeemThreshold', 'Redeem reminder threshold (points)',
-      { unit: 'points', hint: 'When your balance crosses this each MS run sends a Pushover reminder with the deep-link below. Defaults to 5,250 (US $5 Amazon GC). Set to 0 to disable. The reminder re-fires every run until you redeem, since stock can sell out within hours.' }],
+      { unit: 'points', hint: 'When your balance crosses this each MS run sends a Pushover reminder with the deep-link below. Defaults to 6,500 (US $5 Amazon GC at the current 2026 catalog price). Set to 0 to disable. The reminder re-fires every run until you redeem, since stock can sell out within hours.' }],
     ['services.microsoft.redeemLabel', 'Reward label (shown in notification)',
       { hint: 'Free-text label for the reward you are chasing — appears in the Pushover message ("redeem <label>: <url>"). Update together with the URL when switching rewards.' }],
     ['services.microsoft.redeemUrl', 'Reward deep-link URL',

@@ -56,9 +56,10 @@ export const CONFIG_SCHEMA = [
   // run sends a Pushover reminder with the configured deep-link to the
   // chosen reward. Re-fires on every run while still over threshold
   // ("always-visible state" pattern) so the user can't miss it during the
-  // morning stock window. Defaults target the US $5 Amazon GC; switching
-  // to a different reward = update all three fields together.
-  { path: 'services.microsoft.redeemThreshold', env: 'MS_REDEEM_THRESHOLD', type: 'number', default: 5250, coerce: v => Math.max(0, Number(v) || 0) },
+  // morning stock window. Defaults target the US $5 Amazon GC at 6,500 pts
+  // (current 2026 catalog price after MS's quiet price hike); switching to
+  // a different reward = update all three fields together.
+  { path: 'services.microsoft.redeemThreshold', env: 'MS_REDEEM_THRESHOLD', type: 'number', default: 6500, coerce: v => Math.max(0, Number(v) || 0) },
   { path: 'services.microsoft.redeemUrl',       env: 'MS_REDEEM_URL',       type: 'string', default: 'https://rewards.bing.com/redeem/000800000000' },
   { path: 'services.microsoft.redeemLabel',     env: 'MS_REDEEM_LABEL',     type: 'string', default: '$5 Amazon GC' },
   // Per-service "active" flag — controls whether the Sessions card shows,
