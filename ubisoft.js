@@ -68,7 +68,9 @@ while ((m = tc100Regex.exec(html))) {
   let data;
   try { data = JSON.parse(decoded); }
   catch { continue; }
-  if (!data.pid || !data.productName) continue;
+  // JSON.parse("null") returns null without throwing; observed in the wild on
+  // a tile whose data-tc100 attribute value was literally "null".
+  if (!data || typeof data !== 'object' || !data.pid || !data.productName) continue;
   if (data.action !== 'add to wishlist') continue; // dedupe to one tile shape
   if (products.has(data.pid)) continue;
   products.set(data.pid, { name: data.productName, edition: data.edition || 'unknown' });
