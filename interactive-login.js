@@ -2653,14 +2653,42 @@ function renderScheduleTab() {
     parts.push('<div class="sched-row"><div class="sched-label">Next run</div><div class="sched-value muted">' + txt + '</div></div>');
   }
   // MS window row: dedicated, top-level when configured — the scheduler is
-  // anchored to this window, so it deserves its own line rather than living
-  // only as a bullet inside Services.
+  // anchored to this window, so it deserves its own line. Lead with the
+  // concrete next-open datetime so the user can see "MS will start
+  // searching at <X>" without having to add the offset themselves; the
+  // recurring window times follow on a muted second line.
   if (state.msScheduleHours > 0) {
     const fmt = h => String(h).padStart(2, '0') + ':00';
     const s = state.msScheduleStart || 0;
     const w = state.msScheduleHours;
+    const windowStr = fmt(s) + ' &rarr; ' + fmt((Number(s) + Number(w)) % 24);
+    let nextOpenLine = '';
+    if (state.nextScheduledRun) {
+      // nextScheduledRun is the wake (window-start − 30m). MS opens the
+      // window at the same date's msScheduleStart hour.
+      const wake = new Date(state.nextScheduledRun.replace(' ', 'T'));
+      if (Number.isFinite(wake.getTime())) {
+        const open = new Date(wake);
+        open.setHours(s, 0, 0, 0);
+        // If the wake itself is already past msStart (config edge case where
+        // wakeHour ≥ msStart), keep open ≥ wake so the displayed timestamp
+        // never claims MS will search before it actually wakes.
+        if (open.getTime() < wake.getTime()) open.setDate(open.getDate() + 1);
+        const Y = open.getFullYear();
+        const M = String(open.getMonth() + 1).padStart(2, '0');
+        const D = String(open.getDate()).padStart(2, '0');
+        const hh = String(open.getHours()).padStart(2, '0');
+        const mm = String(open.getMinutes()).padStart(2, '0');
+        nextOpenLine = '<span class="sched-value big" data-ms-open="' + Y + '-' + M + '-' + D + 'T' + hh + ':' + mm + '">' +
+          Y + '-' + M + '-' + D + ' ' + hh + ':' + mm + '</span>' +
+          '<span class="sched-count" id="msOpenCountdown"></span>';
+      }
+    }
     parts.push('<div class="sched-row"><div class="sched-label">MS window</div>' +
-      '<div class="sched-value">' + fmt(s) + ' &rarr; ' + fmt((Number(s) + Number(w)) % 24) + ' daily</div></div>');
+      '<div>' +
+        (nextOpenLine || ('<span class="sched-value">' + windowStr + ' daily</span>')) +
+        (nextOpenLine ? '<div class="sched-value muted" style="margin-top:2px">' + windowStr + ' daily</div>' : '') +
+      '</div></div>');
   }
   // Interval row: match scheduler priority. computeNextWakeMs() prefers the
   // MS-anchored daily wake when msHours > 0; LOOP only takes effect when
@@ -2732,21 +2760,31 @@ function renderScheduleTab() {
   updateScheduleCountdown();
 }
 
-function updateScheduleCountdown() {
-  const el = document.getElementById('schedCountdown');
-  if (!el || !state.nextScheduledRun) return;
-  const target = new Date(state.nextScheduledRun.replace(' ', 'T')).getTime();
-  if (!Number.isFinite(target)) return;
+function formatCountdown(target) {
   const delta = target - Date.now();
-  if (delta <= 0) { el.textContent = ' · due now'; return; }
+  if (delta <= 0) return ' · due now';
   const mins = Math.floor(delta / 60000);
   const hrs = Math.floor(mins / 60);
   const days = Math.floor(hrs / 24);
-  let txt;
-  if (days > 0) txt = 'in ' + days + 'd ' + (hrs % 24) + 'h';
-  else if (hrs > 0) txt = 'in ' + hrs + 'h ' + (mins % 60) + 'm';
-  else txt = 'in ' + Math.max(mins, 1) + 'm';
-  el.textContent = ' · ' + txt;
+  if (days > 0) return ' · in ' + days + 'd ' + (hrs % 24) + 'h';
+  if (hrs > 0) return ' · in ' + hrs + 'h ' + (mins % 60) + 'm';
+  return ' · in ' + Math.max(mins, 1) + 'm';
+}
+function updateScheduleCountdown() {
+  const el = document.getElementById('schedCountdown');
+  if (el && state.nextScheduledRun) {
+    const t = new Date(state.nextScheduledRun.replace(' ', 'T')).getTime();
+    if (Number.isFinite(t)) el.textContent = formatCountdown(t);
+  }
+  const msEl = document.getElementById('msOpenCountdown');
+  if (msEl) {
+    const stamp = msEl.previousElementSibling && msEl.previousElementSibling.dataset
+      ? msEl.previousElementSibling.dataset.msOpen : null;
+    if (stamp) {
+      const t = new Date(stamp).getTime();
+      if (Number.isFinite(t)) msEl.textContent = formatCountdown(t);
+    }
+  }
 }
 setInterval(updateScheduleCountdown, 30000);
 
