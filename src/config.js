@@ -86,6 +86,9 @@ export const cfg = {
   // that avoids MS bot detection; lowering it shortens runs at the user's own
   // risk. Lower bound stays 1s in randomMs().
   ms_search_delay_max: ms.searchDelayMaxSec ?? 180,
+  ms_redeem_threshold: ms.redeemThreshold ?? 5250,
+  ms_redeem_url:       ms.redeemUrl       ?? 'https://rewards.bing.com/redeem/000800000000',
+  ms_redeem_label:     ms.redeemLabel     ?? '$5 Amazon GC',
   // aliexpress — opt-in service. Disabled by default; toggle Active in
   // Settings → Per-service → AliExpress (stores services.aliexpress.active
   // in data/config.json). The runner consults `active` to decide whether

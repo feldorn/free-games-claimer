@@ -52,6 +52,15 @@ export const CONFIG_SCHEMA = [
   { path: 'services.steam.minRating',           env: 'STEAM_MIN_RATING', type: 'number',  default: 6,  coerce: v => Number(v) || 6 },
   { path: 'services.steam.minPrice',            env: 'STEAM_MIN_PRICE',  type: 'number',  default: 10, coerce: v => Number(v) || 10 },
   { path: 'services.microsoft.searchDelayMaxSec', env: 'MS_SEARCH_DELAY_MAX_SEC', type: 'number', default: 180, coerce: v => Math.max(1, Number(v) || 180) },
+  // Redeem reminder: when MS Rewards balance crosses redeemThreshold each
+  // run sends a Pushover reminder with the configured deep-link to the
+  // chosen reward. Re-fires on every run while still over threshold
+  // ("always-visible state" pattern) so the user can't miss it during the
+  // morning stock window. Defaults target the US $5 Amazon GC; switching
+  // to a different reward = update all three fields together.
+  { path: 'services.microsoft.redeemThreshold', env: 'MS_REDEEM_THRESHOLD', type: 'number', default: 5250, coerce: v => Math.max(0, Number(v) || 0) },
+  { path: 'services.microsoft.redeemUrl',       env: 'MS_REDEEM_URL',       type: 'string', default: 'https://rewards.bing.com/redeem/000800000000' },
+  { path: 'services.microsoft.redeemLabel',     env: 'MS_REDEEM_LABEL',     type: 'string', default: '$5 Amazon GC' },
   // Per-service "active" flag — controls whether the Sessions card shows,
   // whether auto-check/Check All probe it, and whether the claim runner
   // invokes the script. Six traditional services default to active; any new

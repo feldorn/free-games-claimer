@@ -781,5 +781,27 @@ log.section('Mobile');
 }
 
 await notify('microsoft-rewards: completed desktop and mobile reward sessions.');
+
+// Redeem reminder: re-fires every run while balance is over threshold so
+// the user catches the morning restock window (limited daily stock for
+// Amazon and similar third-party cards). Threshold + URL + label are all
+// configurable so switching targets is a Settings change, not a code
+// change. Pulls the latest balance from msDb.runs since both session
+// blocks scope their `after` locally. Bare URL because Pushover strips
+// HTML.
+const redeemThreshold = cfg.ms_redeem_threshold;
+if (redeemThreshold > 0) {
+  const lastWithBalance = [...msDb.data.runs].reverse().find(r => r.after != null);
+  const balance = lastWithBalance ? lastWithBalance.after : null;
+  const fmt = n => Number(n).toLocaleString('en-US');
+  if (balance != null && balance >= redeemThreshold) {
+    log.info(`Balance ${fmt(balance)} >= threshold ${fmt(redeemThreshold)} — sending redeem reminder`);
+    await notify(`Microsoft Rewards: ${fmt(balance)} pts available — redeem ${cfg.ms_redeem_label}: ${cfg.ms_redeem_url}`)
+      .catch(e => log.warn(`Redeem reminder notify failed: ${e.message.split('\n')[0]}`));
+  } else if (balance != null) {
+    log.info(`Balance ${fmt(balance)} pts (under threshold ${fmt(redeemThreshold)})`);
+  }
+}
+
 log.section('Done');
 log.status('Time', datetime());
