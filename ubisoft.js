@@ -55,16 +55,21 @@ try {
 // promo events (the actual signal). We track everything but tag accordingly
 // in the notification so the user knows whether it's worth their time.
 const tc100Regex = /data-tc100="([^"]*)"/g;
+const namedEntities = {
+  quot: '"', apos: "'", lt: '<', gt: '>', amp: '&',
+  nbsp: ' ', trade: '™', reg: '®', copy: '©',
+  hellip: '…', mdash: '—', ndash: '–',
+};
+const decodeEntities = s => s.replace(/&(?:#x([0-9a-fA-F]+)|#(\d+)|([a-zA-Z]+));/g, (match, hex, dec, name) => {
+  if (hex) return String.fromCodePoint(parseInt(hex, 16));
+  if (dec) return String.fromCodePoint(parseInt(dec, 10));
+  return namedEntities[name] ?? match;
+});
 const products = new Map(); // pid -> { name, edition }
 let m;
 while ((m = tc100Regex.exec(html))) {
   // The attribute value is HTML-encoded; decode back to JSON.
-  const decoded = m[1]
-    .replaceAll('&quot;', '"')
-    .replaceAll('&amp;', '&')
-    .replaceAll('&lt;', '<')
-    .replaceAll('&gt;', '>')
-    .replaceAll('&#039;', "'");
+  const decoded = decodeEntities(m[1]);
   let data;
   try { data = JSON.parse(decoded); }
   catch { continue; }
