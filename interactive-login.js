@@ -940,10 +940,13 @@ function computeNextWakeMs() {
   const c = getSchedulerConfig();
   if (c.msHours > 0) {
     const wakeHour = c.msStart > 0 ? c.msStart - 1 : 23;
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    tomorrow.setHours(wakeHour, 30, 0, 0);
-    return Math.max(tomorrow.getTime() - Date.now(), 60 * 1000);
+    // Use today's wake if it hasn't fired yet, else roll to tomorrow.
+    // Earlier this unconditionally rolled forward, so a midday container
+    // restart would skip today even when today's window was still ahead.
+    const wake = new Date();
+    wake.setHours(wakeHour, 30, 0, 0);
+    if (wake.getTime() <= Date.now()) wake.setDate(wake.getDate() + 1);
+    return Math.max(wake.getTime() - Date.now(), 60 * 1000);
   }
   return c.loop * 1000;
 }
@@ -1065,6 +1068,14 @@ function getState() {
   const allLoggedIn = Object.entries(siteStatus)
     .filter(([id]) => active.has(id))
     .every(([, s]) => s.status === 'logged_in');
+  // Always derive a next-run timestamp when the scheduler is enabled, even
+  // before schedulerLoop() has populated nextScheduledRun on first iteration
+  // — the UI should never have to display "Calculating…" since we can compute
+  // the wake deterministically from config.
+  const sched = getSchedulerConfig();
+  const schedEnabled = sched.loop > 0 || sched.msHours > 0;
+  const effectiveNext = nextScheduledRun
+    || (schedEnabled ? new Date(Date.now() + computeNextWakeMs()) : null);
   return {
     sites: Object.entries(SITES).map(([id, site]) => ({
       id,
@@ -1077,8 +1088,8 @@ function getState() {
     runStatus,
     runSource,
     runLogLength: runLog.length,
-    nextScheduledRun: nextScheduledRun ? datetime(nextScheduledRun) : null,
-    loopEnabled: (() => { const c = getSchedulerConfig(); return c.loop > 0 || c.msHours > 0; })(),
+    nextScheduledRun: effectiveNext ? datetime(effectiveNext) : null,
+    loopEnabled: schedEnabled,
     loopSeconds: getSchedulerConfig().loop,
     msScheduleHours: getSchedulerConfig().msHours,
     msScheduleStart: getSchedulerConfig().msStart,
@@ -2641,16 +2652,28 @@ function renderScheduleTab() {
     const txt = state.loopEnabled ? 'Calculating…' : 'Scheduler disabled';
     parts.push('<div class="sched-row"><div class="sched-label">Next run</div><div class="sched-value muted">' + txt + '</div></div>');
   }
-  // Interval row: pure LOOP description. MS-window info moved into the
-  // Services row below so the two schedules show side-by-side.
+  // MS window row: dedicated, top-level when configured — the scheduler is
+  // anchored to this window, so it deserves its own line rather than living
+  // only as a bullet inside Services.
+  if (state.msScheduleHours > 0) {
+    const fmt = h => String(h).padStart(2, '0') + ':00';
+    const s = state.msScheduleStart || 0;
+    const w = state.msScheduleHours;
+    parts.push('<div class="sched-row"><div class="sched-label">MS window</div>' +
+      '<div class="sched-value">' + fmt(s) + ' &rarr; ' + fmt((Number(s) + Number(w)) % 24) + ' daily</div></div>');
+  }
+  // Interval row: match scheduler priority. computeNextWakeMs() prefers the
+  // MS-anchored daily wake when msHours > 0; LOOP only takes effect when
+  // there's no MS window. Showing "Every 24 hours" while the scheduler was
+  // actually using MS anchoring was misleading.
   let intervalText;
-  if (state.loopSeconds > 0) {
+  if (state.msScheduleHours > 0) {
+    intervalText = 'Daily — anchored to MS window (wake 30m before)';
+  } else if (state.loopSeconds > 0) {
     const hrs = state.loopSeconds / 3600;
     if (hrs >= 1 && Number.isInteger(hrs)) intervalText = 'Every ' + hrs + ' hour' + (hrs === 1 ? '' : 's');
     else if (state.loopSeconds >= 60) intervalText = 'Every ' + Math.round(state.loopSeconds / 60) + ' minutes';
     else intervalText = 'Every ' + state.loopSeconds + ' seconds';
-  } else if (state.msScheduleHours > 0) {
-    intervalText = 'Anchored to Microsoft Rewards window (see Services below)';
   } else {
     intervalText = 'Not scheduled — set LOOP or enable Microsoft Rewards';
   }
@@ -2675,11 +2698,10 @@ function renderScheduleTab() {
     svcLines.push('<b>AliExpress</b> — collect daily check-in coins <span class="muted">(no specific window; runs on each scheduled fire)</span>');
   }
   if (hasMS) {
-    const w = state.msScheduleHours || 0;
-    const s = state.msScheduleStart || 0;
-    if (w > 0) {
-      const fmt = h => String(h).padStart(2, '0') + ':00';
-      svcLines.push('<b>Microsoft Rewards</b> — waits for <b>' + fmt(s) + ' → ' + fmt((Number(s) + Number(w)) % 24) + '</b> window each run, then searches');
+    if ((state.msScheduleHours || 0) > 0) {
+      // Window itself shown in dedicated MS-window row above; keep this
+      // bullet behavioural only.
+      svcLines.push('<b>Microsoft Rewards</b> — searches inside MS window');
     } else {
       svcLines.push('<b>Microsoft Rewards</b> — runs searches immediately (no window)');
     }
