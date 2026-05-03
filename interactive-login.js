@@ -938,7 +938,13 @@ let nextScheduledRun = null; // Date | null
 
 function computeNextWakeMs() {
   const c = getSchedulerConfig();
-  if (c.msHours > 0) {
+  // MS-anchored wake only applies when MS itself is active. Deactivating
+  // the service (Settings → Services) should release the anchor and fall
+  // back to LOOP — otherwise the scheduler keeps waking at the MS-window
+  // hour for a service that isn't going to run.
+  const active = activeServices();
+  const msActive = active.has('microsoft') || active.has('microsoft-mobile');
+  if (msActive && c.msHours > 0) {
     const wakeHour = c.msStart > 0 ? c.msStart - 1 : 23;
     // Use today's wake if it hasn't fired yet, else roll to tomorrow.
     // Earlier this unconditionally rolled forward, so a midday container
@@ -1073,7 +1079,9 @@ function getState() {
   // — the UI should never have to display "Calculating…" since we can compute
   // the wake deterministically from config.
   const sched = getSchedulerConfig();
-  const schedEnabled = sched.loop > 0 || sched.msHours > 0;
+  const msActive = active.has('microsoft') || active.has('microsoft-mobile');
+  const msAnchored = msActive && sched.msHours > 0;
+  const schedEnabled = sched.loop > 0 || msAnchored;
   const effectiveNext = nextScheduledRun
     || (schedEnabled ? new Date(Date.now() + computeNextWakeMs()) : null);
   return {
@@ -1093,6 +1101,7 @@ function getState() {
     loopSeconds: getSchedulerConfig().loop,
     msScheduleHours: getSchedulerConfig().msHours,
     msScheduleStart: getSchedulerConfig().msStart,
+    msAnchored,
     batchRedeem: batchRedeem ? {
       phase: batchRedeem.phase,
       message: batchRedeem.message,
@@ -2652,12 +2661,13 @@ function renderScheduleTab() {
     const txt = state.loopEnabled ? 'Calculating…' : 'Scheduler disabled';
     parts.push('<div class="sched-row"><div class="sched-label">Next run</div><div class="sched-value muted">' + txt + '</div></div>');
   }
-  // MS window row: dedicated, top-level when configured — the scheduler is
-  // anchored to this window, so it deserves its own line. Lead with the
-  // concrete next-open datetime so the user can see "MS will start
-  // searching at <X>" without having to add the offset themselves; the
-  // recurring window times follow on a muted second line.
-  if (state.msScheduleHours > 0) {
+  // MS window row: dedicated, top-level when MS is active AND configured —
+  // the scheduler is anchored to this window, so it deserves its own line.
+  // Lead with the concrete next-open datetime so the user can see "MS will
+  // start searching at <X>" without having to add the offset themselves; the
+  // recurring window times follow on a muted second line. If MS is inactive
+  // we suppress this row entirely — anchoring releases when MS releases.
+  if (state.msAnchored) {
     const fmt = h => String(h).padStart(2, '0') + ':00';
     const s = state.msScheduleStart || 0;
     const w = state.msScheduleHours;
@@ -2691,11 +2701,11 @@ function renderScheduleTab() {
       '</div></div>');
   }
   // Interval row: match scheduler priority. computeNextWakeMs() prefers the
-  // MS-anchored daily wake when msHours > 0; LOOP only takes effect when
-  // there's no MS window. Showing "Every 24 hours" while the scheduler was
-  // actually using MS anchoring was misleading.
+  // MS-anchored daily wake when MS is active AND msHours > 0; LOOP only
+  // takes effect when MS releases the anchor. Use msAnchored (not the raw
+  // config field) so deactivating MS flips the displayed mode immediately.
   let intervalText;
-  if (state.msScheduleHours > 0) {
+  if (state.msAnchored) {
     intervalText = 'Daily — anchored to MS window (wake 30m before)';
   } else if (state.loopSeconds > 0) {
     const hrs = state.loopSeconds / 3600;
