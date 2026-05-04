@@ -1759,6 +1759,16 @@ const PANEL_HTML = `<!DOCTYPE html>
   .setting-revert:hover:not(:disabled) { background: #1a2a48; color: #e0e0e0; border-color: #2a3a5a; }
   .setting-revert:disabled { opacity: 0.25; cursor: not-allowed; }
 
+  /* Composite day/hour/minute interval input — narrow number boxes inline with
+     unit labels and a live human-readable summary. */
+  .setting-interval-grid { flex-wrap: wrap; }
+  .setting-interval-grid input[type="number"] { width: 64px !important; }
+  .setting-interval-grid .interval-unit { color: #8aa0c2; font-size: 12px; margin-right: 6px; }
+  .setting-interval-grid .interval-summary { color: #8aa0c2; font-size: 12px; font-style: italic; margin-left: 8px; }
+  .setting-help-inline { color: #8aa0c2; font-size: 12px; line-height: 1.5; max-width: 720px; }
+  .setting-input input[type="time"] { width: 110px; padding: 6px 8px; background: #0e1726; border: 1px solid #233454; border-radius: 4px; color: #e0e0e0; font-size: 13px; }
+  .setting-input input[type="time"]:focus { outline: none; border-color: #4ecca3; }
+
   .settings-footer { background: #16233c; border-top: 1px solid #233454; padding: 12px 32px; display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
   .settings-footer .dirty-count { color: #f0c040; font-size: 13px; margin-right: auto; font-weight: 500; }
 
@@ -2455,18 +2465,127 @@ function serviceRow(entry) {
   '</div>';
 }
 
+// Decompose loopSeconds into days/hours/minutes for the composite input.
+// Sub-minute residue is reported in the summary so the user knows touching
+// any field will round to a whole minute.
+function decomposeLoopSeconds(loop) {
+  loop = Math.max(0, Math.floor(Number(loop) || 0));
+  return {
+    days: Math.floor(loop / 86400),
+    hours: Math.floor((loop % 86400) / 3600),
+    minutes: Math.floor((loop % 3600) / 60),
+    seconds: loop % 60,
+  };
+}
+
+function formatIntervalPretty(loop, fromCompletion) {
+  loop = Math.max(0, Math.floor(Number(loop) || 0));
+  if (loop <= 0) {
+    return fromCompletion ? '· disabled' : '· once daily at start time';
+  }
+  const p = decomposeLoopSeconds(loop);
+  const parts = [];
+  if (p.days)    parts.push(p.days + 'd');
+  if (p.hours)   parts.push(p.hours + 'h');
+  if (p.minutes) parts.push(p.minutes + 'm');
+  if (p.seconds) parts.push(p.seconds + 's');
+  let txt = '· every ' + parts.join(' ') + ' (' + loop + 's)';
+  if (p.seconds) txt += ' — touching a field rounds to the minute';
+  return txt;
+}
+
+// Stash the previous start time when toggling to from-completion mode so
+// flipping back restores it instead of forcing the user to re-enter.
+let _stashedStartTime = '';
+
+function setScheduleMode(fromCompletion) {
+  const cur = draftValue('scheduler.dailyStartTime') || '';
+  if (fromCompletion) {
+    if (cur) _stashedStartTime = cur;
+    setSettingValue('scheduler.dailyStartTime', '');
+  } else {
+    const restore = _stashedStartTime || cur || '08:00';
+    setSettingValue('scheduler.dailyStartTime', restore);
+  }
+  paintSettings();
+}
+
+function setIntervalPart(part, raw) {
+  const n = Math.max(0, Math.floor(Number(raw) || 0));
+  const cur = Number(draftValue('scheduler.loopSeconds')) || 0;
+  const p = decomposeLoopSeconds(cur);
+  if (part === 'days') p.days = n;
+  else if (part === 'hours') p.hours = n;
+  else if (part === 'minutes') p.minutes = n;
+  const total = p.days * 86400 + p.hours * 3600 + p.minutes * 60;
+  setSettingValue('scheduler.loopSeconds', total);
+  // Update the live summary in place so the user sees the recomposed value
+  // without losing input focus to a full repaint.
+  const summary = document.getElementById('schedIntervalSummary');
+  if (summary) {
+    const fromCompletion = !(draftValue('scheduler.dailyStartTime') || '');
+    summary.textContent = formatIntervalPretty(total, fromCompletion);
+  }
+}
+
+function renderSchedulerSection() {
+  const startTime = draftValue('scheduler.dailyStartTime') || '';
+  const loop = Number(draftValue('scheduler.loopSeconds')) || 0;
+  const fromCompletion = !startTime;
+  const p = decomposeLoopSeconds(loop);
+  const pretty = formatIntervalPretty(loop, fromCompletion);
+  const startOverridden = isOverriddenInForm('scheduler.dailyStartTime');
+  const loopOverridden = isOverriddenInForm('scheduler.loopSeconds');
+  const startDot = startOverridden ? '<span class="setting-dot" title="Overrides environment"></span>' : '';
+  const loopDot = loopOverridden ? '<span class="setting-dot" title="Overrides environment"></span>' : '';
+  const startRevert = startOverridden ? '<button type="button" class="setting-revert" onclick="revertSettingValue(\\'scheduler.dailyStartTime\\')">Revert</button>' : '';
+  const loopRevert = loopOverridden ? '<button type="button" class="setting-revert" onclick="revertSettingValue(\\'scheduler.loopSeconds\\')">Revert</button>' : '';
+
+  const startTimeRow = fromCompletion ? '' : (
+    '<div class="setting" data-path="scheduler.dailyStartTime">' +
+      '<div class="setting-label">Start time' + startDot + '</div>' +
+      '<div class="setting-input">' +
+        '<input type="time" value="' + escapeHtml(startTime) +
+          '" onchange="if(this.value) _stashedStartTime = this.value; setSettingValue(\\'scheduler.dailyStartTime\\', this.value); paintSettings()">' +
+      '</div>' +
+      startRevert +
+    '</div>'
+  );
+
+  return '<div class="settings-pane-title">Scheduler</div>' +
+    '<div class="setting-help-inline" style="margin-bottom:14px">' +
+      'Drives the main claim chain — Prime, Epic, GOG, Steam, Ubisoft, AliExpress. Microsoft Rewards has its own independent schedule under Services → Microsoft Rewards.' +
+    '</div>' +
+    '<div class="setting setting-bool">' +
+      '<label class="setting-bool-cluster">' +
+        '<input type="checkbox" ' + (fromCompletion ? 'checked' : '') +
+          ' onchange="setScheduleMode(this.checked)">' +
+        '<span>Run interval after each completion <span class="muted">(no fixed clock time — drifts by run duration)</span></span>' +
+      '</label>' +
+    '</div>' +
+    startTimeRow +
+    '<div class="setting" data-path="scheduler.loopSeconds">' +
+      '<div class="setting-label">Interval' + loopDot + '</div>' +
+      '<div class="setting-input setting-interval-grid">' +
+        '<input type="number" min="0" max="365" value="' + p.days + '" oninput="setIntervalPart(\\'days\\', this.value)">' +
+        '<span class="interval-unit">days</span>' +
+        '<input type="number" min="0" max="23" value="' + p.hours + '" oninput="setIntervalPart(\\'hours\\', this.value)">' +
+        '<span class="interval-unit">hours</span>' +
+        '<input type="number" min="0" max="59" value="' + p.minutes + '" oninput="setIntervalPart(\\'minutes\\', this.value)">' +
+        '<span class="interval-unit">minutes</span>' +
+        '<span class="interval-summary" id="schedIntervalSummary">' + escapeHtml(pretty) + '</span>' +
+      '</div>' +
+      loopRevert +
+    '</div>';
+}
+
 function paintSettings() {
   const view = document.getElementById('settingsView');
   if (!view || !settingsData) return;
 
   let html = '';
   if (currentSettingsSection === 'scheduler') {
-    html =
-      '<div class="settings-pane-title">Scheduler</div>' +
-      fieldRow('scheduler.dailyStartTime', 'Daily start time (HH:MM)',
-        { hint: 'Wall-clock anchor for the main claim chain (everything except Microsoft Rewards). Blank = run interval seconds after the previous run completes. With Interval at 86400 (24h) runs land at this time daily; with a smaller interval the anchor seeds the sequence (e.g. 08:00 + 4h interval = runs at 8, 12, 16, 20, 0, 4). Microsoft Rewards has its own independent schedule — set it under Services → Microsoft Rewards.' }) +
-      fieldRow('scheduler.loopSeconds', 'Interval (seconds)',
-        { unit: 'seconds', hint: 'Time between main-chain runs. 0 disables (unless a Daily start time is set, in which case 0 means once a day at that time). Microsoft Rewards is scheduled independently.' });
+    html = renderSchedulerSection();
   } else if (currentSettingsSection === 'notifications') {
     html =
       '<div class="settings-pane-title">Notifications' +
