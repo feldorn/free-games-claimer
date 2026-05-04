@@ -227,8 +227,8 @@ that's also on the Settings tab can be edited there at runtime instead.
 | `NOTIFY` | | Notification URL(s) for [apprise](https://github.com/caronc/apprise) (Pushover, Telegram, Slack, etc.) |
 | `NOTIFY_TITLE` | | Optional title for notifications |
 | `NOTIFY_ATTACH_SCREENSHOTS` | `1` | Attach the most recent screenshot to failure notifications. Set to `0` to keep notifications text-only (privacy / bandwidth). Also editable in **Settings → Notifications**. |
-| `LOOP` | | Repeat claiming every N seconds (e.g., `86400` = 24h). Without `START_TIME`, sleeps N seconds after each run completes (drifts by run duration). Omit to run once and exit. |
-| `START_TIME` | | Wall-clock anchor `HH:MM` (24h). When set, the scheduler wakes at this time each day; with a sub-daily `LOOP` (e.g. `14400` = 4h) the anchor seeds the sequence and runs land at `08:00, 12:00, 16:00, 20:00, 00:00, 04:00`. Overrides `MS_SCHEDULE_HOURS` anchoring when both are set. |
+| `LOOP` | | Main-schedule interval in seconds (e.g. `86400` = 24h). Without `START_TIME`, sleeps N seconds after each run completes (drifts by run duration). Drives the non-MS chain only — Microsoft Rewards is on its own schedule. Omit to run once and exit. |
+| `START_TIME` | | Wall-clock anchor `HH:MM` (24h) for the main schedule. When set, the non-MS chain wakes at this time each day; with a sub-daily `LOOP` (e.g. `14400` = 4h) the anchor seeds the sequence and runs land at `08:00, 12:00, 16:00, 20:00, 00:00, 04:00`. Microsoft Rewards is independent; see [Microsoft Rewards Options](#microsoft-rewards-options). |
 | `LOGIN_MODE` | — | **Deprecated no-op** — the control panel is always running on port 7080. Safe to remove from your config. |
 | `CLAIM_CMD` | (all 5 scripts in sequence) | Shell command the scheduler runs at its anchored wake. Includes microsoft.js, which sleeps internally until `MS_SCHEDULE_START`. |
 | `CLAIM_CMD_MANUAL` | (4 scripts, microsoft.js excluded) | Shell command the "Run Now" button runs. Excludes microsoft.js by default so a manual run actually finishes in a few minutes instead of hanging overnight. |
@@ -275,8 +275,8 @@ Steam discovery uses [Steam's own search endpoint](https://store.steampowered.co
 | `MS_EMAIL` | | Microsoft account email (falls back to `EMAIL`) |
 | `MS_PASSWORD` | | Microsoft account password (falls back to `PASSWORD`) |
 | `MS_OTPKEY` | | TOTP secret for automatic 2FA (otplib). Only needed if the account uses app-based TOTP, not phone push approval. |
-| `MS_SCHEDULE_HOURS` | `0` | Schedule window width in hours. When set, picks a random time within the window each day and waits until then. Use with `MS_SCHEDULE_START`. `0` = run immediately. |
-| `MS_SCHEDULE_START` | `8` | Window start hour (0–23). With `MS_SCHEDULE_HOURS=4` and `MS_SCHEDULE_START=8`, runs land randomly between 8am and 12pm each day. The LOOP sleep anchors to this time to prevent daily drift. |
+| `MS_SCHEDULE_HOURS` | `0` | MS-schedule window width in hours. When set (and `START_TIME` or `LOOP` is also set), the scheduler picks a random clock time inside the window each day and fires `microsoft.js` independently of the main chain. `0` = MS rides the main chain (no separate window). |
+| `MS_SCHEDULE_START` | `8` | Window start hour (0–23). With `MS_SCHEDULE_HOURS=4` and `MS_SCHEDULE_START=8`, MS runs land randomly between 8am and 12pm each day. Today's pick is persisted to `data/ms-schedule-today.json` so config saves don't reshuffle the displayed timestamp. |
 | `MS_SEARCH_DELAY_MAX_SEC` | `180` | Upper bound (seconds) for the random pause before each Bing search and between consecutive searches. With ~60 searches per run, this dominates total runtime: avg ≈ N × value/2 seconds. Default 180 paces searches like a human; lower values (e.g. `30`) shorten runs to a few minutes but increase the risk of MS flagging the account as a bot. Lower bound stays 1s. |
 
 Microsoft Rewards collects daily points by running a desktop Bing session (33–37 searches) and a mobile session emulating a Pixel 7 (23–27 searches), plus clicking any pending activity cards. Search terms are sourced fresh each run from Google Trends and BBC/ESPN RSS feeds, with a 30-day dedup window to avoid repeating terms. The existing 800-term pool is used as fallback when live sources are unreachable.
@@ -381,31 +381,40 @@ To get OTP keys for automatic 2FA:
 
 ## Scheduling
 
-Set `LOOP` to enable the built-in scheduler:
+The built-in scheduler runs **two independent schedules** so the long Microsoft
+Rewards window doesn't block the rest of the claim chain.
 
 ```yaml
 environment:
-  - LOOP=86400         # wake every 24 hours
-  # - START_TIME=08:00 # optional — anchor runs to wall-clock 08:00 each day
+  - LOOP=86400          # main-chain interval in seconds
+  - START_TIME=08:00    # main-chain wall-clock anchor (HH:MM)
+  - MS_SCHEDULE_HOURS=4 # Microsoft Rewards window width (hours)
+  - MS_SCHEDULE_START=8 # Microsoft Rewards window start hour
 ```
 
-The control panel process owns the scheduler — it sleeps until the next anchored
-wake time, fires the full claim sequence (including `microsoft.js` which has its
-own internal window-based timing), then sleeps again. No immediate run on
-container boot — the panel stays interactive at startup so you can log in, use
-**Run Now**, or **Batch Redeem** right away. First scheduled run happens at the
-next anchored time.
+- **Main schedule** (`START_TIME` + `LOOP`) fires the non-MS chain — Prime,
+  Epic, GOG, Steam, Ubisoft, AliExpress. With `START_TIME` set, runs land on
+  the wall clock; without, `LOOP` sleeps N seconds after each run completes.
+- **MS schedule** (`MS_SCHEDULE_HOURS` + `MS_SCHEDULE_START`) fires
+  `microsoft.js` alone at a random clock time inside the window. The picked
+  time is persisted to `data/ms-schedule-today.json` so config saves don't
+  reshuffle the displayed "Next MS run" timestamp.
 
-**Wake-time precedence** (highest first):
+If a run is already in progress when the other schedule fires, the second
+one queues behind it (single shared browser profile). If the MS pick has
+already passed by the time the container restarts, today's MS run is marked
+**missed** rather than auto-firing late — trigger it manually from the MS
+card if needed. Tomorrow's pick is fresh.
 
-1. `START_TIME` — wall-clock anchor (HH:MM). Anchor seeds the daily sequence;
-   `LOOP` (default 86400) is the spacing. Wins over MS-anchor when both are
-   set. Example: `START_TIME=08:00 LOOP=14400` → runs at 08:00, 12:00, 16:00,
-   20:00, 00:00, 04:00.
-2. `MS_SCHEDULE_HOURS` (with Microsoft Rewards active) — wake 30 minutes before
-   the MS window opens. See [Microsoft Rewards Options](#microsoft-rewards-options).
-3. `LOOP` alone — sleep N seconds *after the previous run completes* (drifts by
-   run duration each day).
+**Legacy combined mode (back-compat).** If you have neither `START_TIME` nor
+`LOOP` set but do have `MS_SCHEDULE_HOURS`, the scheduler keeps the pre-#10
+behavior: a single chain anchored 30 minutes before the MS window, with
+`microsoft.js` doing its own internal wait. Set `START_TIME` or `LOOP` to opt
+into the decoupled two-schedule mode.
+
+The control panel process owns the scheduler. No immediate run on container
+boot — the panel stays interactive at startup so you can log in, use
+**Run Now**, or **Batch Redeem** right away.
 
 **How often to run?**
 - **Epic Games**: New free games weekly (daily before Christmas)
@@ -505,9 +514,16 @@ snapshot.
 
 - **Next run:** wall time (`2026-04-20 07:30`) with a live countdown
   (`in 22h 8m`) updated every 30s.
-- **Interval:** human-readable translation of `START_TIME` / `LOOP` /
-  `MS_SCHEDULE_*` (e.g. "Daily at 08:00", "Every 4h, anchored at 08:00",
-  "Every 6 hours", or "Daily — anchored to MS window (wake 30m before)").
+- **Next run · Claimers / Next run · MS Rewards:** in decoupled mode the two
+  schedules each get their own row with wall time and a live countdown
+  (`in 22h 8m`). Today's MS pick badge shows status (`pending` / `fired` /
+  `missed today — Run manually`).
+- **Interval rows** translate the active config: "Daily at 08:00", "Every 4h
+  anchored at 08:00", "Every 6 hours from completion", or "Random within
+  08:00 → 12:00 daily" for MS.
+- In legacy combined mode (no `START_TIME` and no `LOOP` but
+  `MS_SCHEDULE_HOURS` set) the panel falls back to a single "Next run" row
+  plus an "MS window" row.
 - **Last run:** short wall time + source + status (success/error/finished) +
   duration.
 - Pause/resume and per-run history are planned follow-ups.

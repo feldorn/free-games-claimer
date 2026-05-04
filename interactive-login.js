@@ -1,6 +1,6 @@
 import http from 'node:http';
 import { spawn, execFile } from 'node:child_process';
-import { watch, readFileSync, existsSync } from 'node:fs';
+import { watch, readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 const __panelDirname = path.dirname(fileURLToPath(import.meta.url));
@@ -804,7 +804,7 @@ async function checkAllSites() {
   return results;
 }
 
-function runAllScripts({ source = 'panel', sites = null } = {}) {
+function runAllScripts({ source = 'panel', sites = null, extraEnv = null } = {}) {
   const busy = browserBusy();
   if (busy) return { success: false, error: `Cannot start run — ${busy}.` };
 
@@ -818,9 +818,11 @@ function runAllScripts({ source = 'panel', sites = null } = {}) {
   // For scheduled runs, set NOWAIT=1 so scripts exit fast on stale sessions
   // instead of waiting for interactive login. We follow up with a session
   // re-check to notify the user about any sites that now need manual action.
-  const childEnv = source === 'scheduler'
+  const isScheduler = source.startsWith('scheduler');
+  const childEnv = isScheduler
     ? { ...process.env, NOWAIT: '1' }
     : { ...process.env };
+  if (extraEnv) Object.assign(childEnv, extraEnv);
   // Single-service / explicit Run bypasses the MS internal window so a test
   // click at 3 PM doesn't sleep 17 hours until the 8 AM window opens.
   // Can't just set MS_SCHEDULE_HOURS=0 here — the in-app config layer
@@ -834,7 +836,10 @@ function runAllScripts({ source = 'panel', sites = null } = {}) {
   // Manual "Run Now" uses the subset without microsoft.js so it actually ends.
   // Both paths build dynamically from the current active-service set so
   // deactivating a site takes effect on the next run without a restart.
-  const cmd = resolveClaimCommand({ manual: source !== 'scheduler', sites });
+  // Scheduler sources ('scheduler', 'scheduler-main', 'scheduler-ms') all
+  // count as non-manual so a user's CLAIM_CMD env override still applies in
+  // legacy combined mode (sites=null).
+  const cmd = resolveClaimCommand({ manual: !isScheduler, sites });
   if (!cmd) {
     console.log(`[${datetime()}] Run (${source}): no matching services — skipping.`);
     runStatus = 'idle';
@@ -922,28 +927,80 @@ function runAllScripts({ source = 'panel', sites = null } = {}) {
 }
 
 // ----- Scheduler -----
-// Wake-time precedence:
-//   1. START_TIME ("HH:MM") — anchor + interval. anchor seeds the daily
-//      sequence, LOOP (default 86400) is the spacing. wins over MS-anchor.
-//   2. MS_SCHEDULE_HOURS (with MS active) — wake 30min before the MS window.
-//   3. LOOP — sleep N seconds after the previous run completes.
-// Scheduler constants come from cfg (which merges data/config.json on top of
-// env). This way the Settings tab's scheduler section takes effect at the
-// next panel restart without rebuilding the container. Changes without a
-// restart will land once the Phase 4 fs.watch hot-reload is in place.
+// Two independent schedules:
+//   * Main schedule — fires non-MS active services. Driven by START_TIME
+//     (anchor + LOOP interval) or bare LOOP (sleep N seconds after last run).
+//   * MS schedule  — fires microsoft.js alone, at MS_SCHEDULE_START + a
+//     random offset within MS_SCHEDULE_HOURS. Today's pick is persisted to
+//     data/ms-schedule-today.json so config saves don't reshuffle the
+//     visible "next MS run" timestamp.
+//
+// Legacy combined mode (back-compat for pre-#10 deploys): when the user has
+// neither START_TIME nor LOOP set but does have MS_SCHEDULE_HOURS, the main
+// loop wakes 30min before the MS window and fires the FULL chain (including
+// microsoft.js, which sleeps internally until its random pick). The MS loop
+// is suspended in this mode. Setting START_TIME or LOOP opts into decoupled.
 const LOOP_SECONDS = cfg.loop;
 const MS_SCHEDULE_HOURS = cfg.ms_schedule_hours;
 const MS_SCHEDULE_START = cfg.ms_schedule_start;
 
-let nextScheduledRun = null; // Date | null
+let nextMainRun = null;       // Date | null — main chain wake
+let nextMsRun = null;         // Date | null — MS-only wake (decoupled mode)
+let msTodayState = null;      // last-read MS schedule state, for getState()
 
-function computeNextWakeMs() {
+const MS_SCHEDULE_FILE = path.resolve(__panelDirname, 'data', 'ms-schedule-today.json');
+
+function todayKey(d = new Date()) {
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+function nextDayKey(key) {
+  const [y, m, d] = key.split('-').map(Number);
+  const dt = new Date(y, m - 1, d);
+  dt.setDate(dt.getDate() + 1);
+  return todayKey(dt);
+}
+
+function readMsScheduleToday() {
+  try {
+    if (!existsSync(MS_SCHEDULE_FILE)) return null;
+    const raw = readFileSync(MS_SCHEDULE_FILE, 'utf8');
+    if (!raw.trim()) return null;
+    const p = JSON.parse(raw);
+    if (!p || !p.date || !p.target || !p.status) return null;
+    return p;
+  } catch { return null; }
+}
+function writeMsScheduleToday(state) {
+  try {
+    mkdirSync(path.dirname(MS_SCHEDULE_FILE), { recursive: true });
+    writeFileSync(MS_SCHEDULE_FILE, JSON.stringify(state, null, 2) + '\n');
+  } catch (e) {
+    console.error(`[${datetime()}] Scheduler (MS): failed to persist schedule: ${e.message}`);
+  }
+}
+function pickMsTargetFor(dateKey, c) {
+  const [y, m, d] = dateKey.split('-').map(Number);
+  const target = new Date(y, m - 1, d);
+  const startHour = c.msStart;
+  const offsetMinutes = Math.floor(Math.random() * c.msHours * 60);
+  target.setHours(startHour, offsetMinutes, 0, 0);
+  return { date: dateKey, target: target.toISOString(), status: 'pending' };
+}
+
+// True when the user has neither START_TIME nor LOOP set but does have an
+// MS window — preserves pre-#10 single-chain-anchored-on-MS behavior.
+function legacyCombinedMode(sched = getSchedulerConfig(), active = activeServices()) {
+  const msActive = active.has('microsoft') || active.has('microsoft-mobile');
+  return !sched.dailyStartTime && !sched.loop && msActive && sched.msHours > 0;
+}
+
+function computeMainWakeMs() {
   const c = getSchedulerConfig();
-  // General anchor (START_TIME) wins over the legacy MS-anchor when set.
-  // Anchor + interval pattern: the anchor seeds the daily sequence, and
-  // we step forward by interval (default 24h when LOOP=0) until we land
-  // past now. e.g. START_TIME=08:00, LOOP=14400, restart at 11:00 → wake
-  // at 12:00 (8 + 4 = 12, first slot past now).
+  const active = activeServices();
+
+  // START_TIME anchor + interval (default 24h). Step forward in interval-ms
+  // chunks from today's anchor until we land past now. e.g. 08:00 + 4h with
+  // restart at 11:00 → wake at 12:00.
   if (c.dailyStartTime) {
     const m = /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(c.dailyStartTime);
     if (m) {
@@ -952,43 +1009,97 @@ function computeNextWakeMs() {
       const intervalMs = (c.loop > 0 ? c.loop : 86400) * 1000;
       const wake = new Date();
       wake.setHours(hh, mm, 0, 0);
-      // Walk forward in fixed-ms steps. For sub-daily intervals this gives
-      // exact spacing; for daily, DST transitions may shift one wake by 1h
-      // before re-aligning on the next compute — acceptable for a daily tool.
       while (wake.getTime() <= Date.now()) wake.setTime(wake.getTime() + intervalMs);
       return Math.max(wake.getTime() - Date.now(), 60 * 1000);
     }
   }
-  // MS-anchored wake only applies when MS itself is active. Deactivating
-  // the service (Settings → Services) should release the anchor and fall
-  // back to LOOP — otherwise the scheduler keeps waking at the MS-window
-  // hour for a service that isn't going to run.
-  const active = activeServices();
-  const msActive = active.has('microsoft') || active.has('microsoft-mobile');
-  if (msActive && c.msHours > 0) {
+
+  // Legacy combined: wake 30min before the MS window, fire full chain.
+  if (legacyCombinedMode(c, active)) {
     const wakeHour = c.msStart > 0 ? c.msStart - 1 : 23;
-    // Use today's wake if it hasn't fired yet, else roll to tomorrow.
-    // Earlier this unconditionally rolled forward, so a midday container
-    // restart would skip today even when today's window was still ahead.
     const wake = new Date();
     wake.setHours(wakeHour, 30, 0, 0);
     if (wake.getTime() <= Date.now()) wake.setDate(wake.getDate() + 1);
     return Math.max(wake.getTime() - Date.now(), 60 * 1000);
   }
-  return c.loop * 1000;
+
+  // Bare LOOP (no anchor) — sleep N seconds from "now" (caller schedules
+  // the post-run sleep too, so this also serves as the from-completion wait).
+  if (c.loop > 0) return c.loop * 1000;
+
+  return 0; // disabled
 }
 
-// Set by watchConfigForScheduler() on save — lets the scheduler abandon
-// its current sleep and recompute with the new interval immediately.
-let schedulerWakeup = null;
+// Compute the next MS-only wake. Walks forward through the persisted state:
+// if today is fired/missed or the pending target is past, eagerly picks
+// tomorrow so getState() can always show a real upcoming timestamp.
+function computeMsWakeMs() {
+  const c = getSchedulerConfig();
+  const active = activeServices();
+  const msActive = active.has('microsoft') || active.has('microsoft-mobile');
+  if (!msActive || c.msHours <= 0) { msTodayState = null; return 0; }
+  if (legacyCombinedMode(c, active)) { msTodayState = null; return 0; }
 
-// Cancellable sleep: resolves normally after ms, or early with 'reload' if
-// schedulerWakeup() is invoked (by the config-file watcher).
+  const now = Date.now();
+  for (let safety = 0; safety < 14; safety++) {
+    let st = readMsScheduleToday();
+    const today = todayKey();
+    const needsFresh = !st
+      || st.date < today
+      || (st.date === today && (st.status === 'fired' || st.status === 'missed'));
+    if (needsFresh) {
+      const day = (!st || st.date < today) ? today : nextDayKey(today);
+      st = pickMsTargetFor(day, c);
+      writeMsScheduleToday(st);
+    }
+    msTodayState = st;
+    const target = new Date(st.target).getTime();
+    if (!Number.isFinite(target)) {
+      // Corrupted target — repick and loop.
+      st = pickMsTargetFor(todayKey(), c);
+      writeMsScheduleToday(st);
+      msTodayState = st;
+      continue;
+    }
+    if (st.status === 'pending' && target <= now) {
+      // Picked time has already passed (container restart inside window
+      // after the pick, or saved file with old target). Mark missed —
+      // user can manually fire via the per-card Run button.
+      st.status = 'missed';
+      writeMsScheduleToday(st);
+      continue;
+    }
+    return Math.max(target - now, 60 * 1000);
+  }
+  console.error(`[${datetime()}] Scheduler (MS): pick loop exhausted, disabling.`);
+  msTodayState = null;
+  return 0;
+}
+
+// Multi-subscriber wakeup set — both schedulerLoops park in sleepUntilWakeup,
+// and any of them must re-arm when config changes.
+const schedulerWakeups = new Set();
+
 function sleepUntilWakeup(ms) {
   return new Promise(resolve => {
-    const t = setTimeout(() => { schedulerWakeup = null; resolve('tick'); }, ms);
-    schedulerWakeup = () => { clearTimeout(t); schedulerWakeup = null; resolve('reload'); };
+    let entry;
+    const t = setTimeout(() => {
+      schedulerWakeups.delete(entry);
+      resolve('tick');
+    }, ms);
+    entry = () => {
+      clearTimeout(t);
+      schedulerWakeups.delete(entry);
+      resolve('reload');
+    };
+    schedulerWakeups.add(entry);
   });
+}
+
+function fireSchedulerWakeups() {
+  const list = Array.from(schedulerWakeups);
+  schedulerWakeups.clear();
+  for (const fn of list) { try { fn(); } catch {} }
 }
 
 function watchConfigForScheduler() {
@@ -996,16 +1107,13 @@ function watchConfigForScheduler() {
   const base = path.basename(CONFIG_FILE_PATH);
   let debounce = null;
   try {
-    // Watch the parent dir so we're robust to config.json being created
-    // (first PUT), deleted (revert everything), or replaced via rename
-    // (atomic write from patchConfig).
     watch(dir, { persistent: false }, (eventType, filename) => {
       if (filename !== base) return;
       clearTimeout(debounce);
       debounce = setTimeout(() => {
         debounce = null;
-        console.log(`[${datetime()}] Scheduler: config changed — recomputing next wake.`);
-        if (schedulerWakeup) schedulerWakeup();
+        console.log(`[${datetime()}] Scheduler: config changed — recomputing next wakes.`);
+        fireSchedulerWakeups();
       }, 150);
     });
   } catch (e) {
@@ -1047,44 +1155,113 @@ async function postRunSessionCheck() {
   }
 }
 
-async function schedulerLoop() {
-  // Wait for the first computed wake time BEFORE running — otherwise a mid-day
-  // container restart fires an immediate claim run, and if MS_SCHEDULE_HOURS is
-  // set microsoft.js will sleep internally for up to 20 hours keeping runProcess
-  // non-null and locking the panel. Users who want an immediate run can click
-  // "Run Now" in the panel (matches how cron, systemd timers, etc. behave).
+// Mutex serializing the two scheduler loops through the shared browser-profile
+// dir. Two loops can wake at the same instant (e.g. main at 08:00, MS at 08:00
+// after a random pick); this lock ensures one fires while the other waits its
+// turn instead of both racing on browserBusy.
+let scheduleLock = Promise.resolve();
+function withScheduleLock(fn) {
+  const previous = scheduleLock;
+  let release;
+  scheduleLock = new Promise(r => { release = r; });
+  return previous.then(fn).finally(() => release());
+}
+
+async function fireScheduledRun({ label, sites, extraEnv, postRun }) {
+  return withScheduleLock(async () => {
+    if (sites && sites.length === 0) {
+      console.log(`[${datetime()}] Scheduler (${label}): no active services — skipping.`);
+      return false;
+    }
+    const res = runAllScripts({ source: 'scheduler-' + label, sites, extraEnv });
+    if (!res.success) {
+      console.log(`[${datetime()}] Scheduler (${label}): ${res.error}`);
+      return false;
+    }
+    if (runDone) {
+      try { await runDone; } catch (e) { console.error(`[${datetime()}] Scheduler (${label}) run error:`, e); }
+    }
+    if (postRun) {
+      try { await postRun(); } catch (e) { console.error(`[${datetime()}] Scheduler (${label}) post-run error:`, e); }
+    }
+    return true;
+  });
+}
+
+function nonMsActiveSiteIds() {
+  const active = activeServices();
+  active.delete('microsoft');
+  active.delete('microsoft-mobile');
+  return Array.from(active);
+}
+
+// Main loop — drives the non-MS chain (or, in legacy combined mode, the full
+// chain including microsoft.js with its internal sleep).
+async function mainSchedulerLoop() {
   while (true) {
-    const sleepMs = computeNextWakeMs();
+    const sleepMs = computeMainWakeMs();
     if (sleepMs <= 0) {
-      // Scheduler disabled (LOOP=0 and MS_SCHEDULE_HOURS=0). Park indefinitely
-      // and let a config change unstick us.
-      nextScheduledRun = null;
-      console.log(`[${datetime()}] Scheduler: disabled — waiting for config change.`);
+      nextMainRun = null;
+      console.log(`[${datetime()}] Scheduler (main): disabled — waiting for config change.`);
       await sleepUntilWakeup(2 ** 31 - 1);
       continue;
     }
-    nextScheduledRun = new Date(Date.now() + sleepMs);
-    console.log(`[${datetime()}] Scheduler: next run at ${datetime(nextScheduledRun)}.`);
+    nextMainRun = new Date(Date.now() + sleepMs);
+    console.log(`[${datetime()}] Scheduler (main): next run at ${datetime(nextMainRun)}.`);
     const how = await sleepUntilWakeup(sleepMs);
-    if (how === 'reload') {
-      // Config changed mid-sleep — skip the run, recompute.
-      continue;
-    }
+    if (how === 'reload') continue;
 
-    const busy = browserBusy();
-    if (busy) {
-      console.log(`[${datetime()}] Scheduler: skipping run — ${busy}.`);
+    const sched = getSchedulerConfig();
+    const active = activeServices();
+    // Legacy combined mode: sites=null lets a user's CLAIM_CMD env override
+    // apply (the same env-override path the original single-loop scheduler
+    // used). Decoupled mode: explicit non-MS list, which intentionally
+    // bypasses CLAIM_CMD because the override would re-include microsoft.
+    const sites = legacyCombinedMode(sched, active) ? null : nonMsActiveSiteIds();
+    await fireScheduledRun({
+      label: 'main',
+      sites,
+      postRun: () => postRunSessionCheck(),
+    });
+  }
+}
+
+// MS loop — fires microsoft.js alone at today's persisted random pick.
+// MS_SKIP_WINDOW=1 bypasses microsoft.js's own internal wait since the
+// scheduler has already done the waiting.
+async function msSchedulerLoop() {
+  while (true) {
+    const sleepMs = computeMsWakeMs();
+    if (sleepMs <= 0) {
+      nextMsRun = null;
+      console.log(`[${datetime()}] Scheduler (MS): disabled — waiting for config change.`);
+      await sleepUntilWakeup(2 ** 31 - 1);
       continue;
     }
-    const res = runAllScripts({ source: 'scheduler' });
-    if (res.success && runDone) {
-      try { await runDone; } catch (e) { console.error(`[${datetime()}] Scheduler run error:`, e); }
-    } else if (!res.success) {
-      console.log(`[${datetime()}] Scheduler: ${res.error}`);
-      continue;
+    nextMsRun = new Date(Date.now() + sleepMs);
+    console.log(`[${datetime()}] Scheduler (MS): next run at ${datetime(nextMsRun)}.`);
+    const how = await sleepUntilWakeup(sleepMs);
+    if (how === 'reload') continue;
+
+    // Re-validate after the wake — config may have flipped to legacy mode,
+    // MS may have been deactivated, the file may have been edited.
+    const c = getSchedulerConfig();
+    const active = activeServices();
+    const msActive = active.has('microsoft') || active.has('microsoft-mobile');
+    if (!msActive || c.msHours <= 0 || legacyCombinedMode(c, active)) continue;
+    const st = readMsScheduleToday();
+    if (!st || st.status !== 'pending') continue;
+
+    const fired = await fireScheduledRun({
+      label: 'ms',
+      sites: ['microsoft', 'microsoft-mobile'],
+      extraEnv: { MS_SKIP_WINDOW: '1' },
+    });
+    if (fired) {
+      const updated = readMsScheduleToday() || st;
+      updated.status = 'fired';
+      writeMsScheduleToday(updated);
     }
-    // Run finished — check which sessions survived and notify about stale ones.
-    try { await postRunSessionCheck(); } catch (e) { console.error(`[${datetime()}] Session check failed:`, e); }
   }
 }
 
@@ -1095,20 +1272,26 @@ function getState() {
   const allLoggedIn = Object.entries(siteStatus)
     .filter(([id]) => active.has(id))
     .every(([, s]) => s.status === 'logged_in');
-  // Always derive a next-run timestamp when the scheduler is enabled, even
-  // before schedulerLoop() has populated nextScheduledRun on first iteration
-  // — the UI should never have to display "Calculating…" since we can compute
-  // the wake deterministically from config.
+  // Always derive next-run timestamps from config so the UI never sits at
+  // "Calculating…" before the loops populate their cached values.
   const sched = getSchedulerConfig();
   const msActive = active.has('microsoft') || active.has('microsoft-mobile');
-  // General anchor wins over MS-anchor — keep msAnchored in sync with the
-  // wake algorithm so the schedule UI doesn't claim "MS-anchored" when the
-  // scheduler is actually using START_TIME.
+  const legacyMode = legacyCombinedMode(sched, active);
   const dailyAnchored = !!sched.dailyStartTime;
-  const msAnchored = !dailyAnchored && msActive && sched.msHours > 0;
-  const schedEnabled = sched.loop > 0 || msAnchored || dailyAnchored;
-  const effectiveNext = nextScheduledRun
-    || (schedEnabled ? new Date(Date.now() + computeNextWakeMs()) : null);
+  const mainEnabled = legacyMode || dailyAnchored || sched.loop > 0;
+  const msScheduled = !legacyMode && msActive && sched.msHours > 0;
+  const schedEnabled = mainEnabled || msScheduled;
+
+  const computedMain = mainEnabled ? new Date(Date.now() + computeMainWakeMs()) : null;
+  const computedMs = msScheduled ? new Date(Date.now() + computeMsWakeMs()) : null;
+  const effectiveMain = nextMainRun || computedMain;
+  const effectiveMs = nextMsRun || computedMs;
+  const effectiveNext = [effectiveMain, effectiveMs]
+    .filter(Boolean)
+    .reduce((a, b) => (!a || b.getTime() < a.getTime() ? b : a), null);
+
+  const msState = msScheduled ? (msTodayState || readMsScheduleToday()) : null;
+
   return {
     sites: Object.entries(SITES).map(([id, site]) => ({
       id,
@@ -1122,13 +1305,19 @@ function getState() {
     runSource,
     runLogLength: runLog.length,
     nextScheduledRun: effectiveNext ? datetime(effectiveNext) : null,
+    nextMainRun: effectiveMain ? datetime(effectiveMain) : null,
+    nextMsRun: effectiveMs ? datetime(effectiveMs) : null,
+    msTodayStatus: msState ? msState.status : null,
+    legacyCombinedMode: legacyMode,
+    mainEnabled,
+    msScheduled,
     loopEnabled: schedEnabled,
-    loopSeconds: getSchedulerConfig().loop,
+    loopSeconds: sched.loop,
     dailyStartTime: sched.dailyStartTime,
     dailyAnchored,
-    msScheduleHours: getSchedulerConfig().msHours,
-    msScheduleStart: getSchedulerConfig().msStart,
-    msAnchored,
+    msScheduleHours: sched.msHours,
+    msScheduleStart: sched.msStart,
+    msAnchored: legacyMode, // legacy alias — UI now reads legacyCombinedMode/msScheduled
     batchRedeem: batchRedeem ? {
       phase: batchRedeem.phase,
       message: batchRedeem.message,
@@ -2275,9 +2464,9 @@ function paintSettings() {
     html =
       '<div class="settings-pane-title">Scheduler</div>' +
       fieldRow('scheduler.dailyStartTime', 'Daily start time (HH:MM)',
-        { hint: 'Wall-clock anchor for the run sequence. Blank = run interval seconds after the previous run completes. With Interval at 86400 (24h) runs land at this time daily; with a smaller interval the anchor seeds the sequence (e.g. 08:00 + 4h interval = runs at 8, 12, 16, 20, 0, 4). Overrides the Microsoft Rewards window when both are set.' }) +
+        { hint: 'Wall-clock anchor for the main claim chain (everything except Microsoft Rewards). Blank = run interval seconds after the previous run completes. With Interval at 86400 (24h) runs land at this time daily; with a smaller interval the anchor seeds the sequence (e.g. 08:00 + 4h interval = runs at 8, 12, 16, 20, 0, 4). Microsoft Rewards has its own independent schedule — set it under Services → Microsoft Rewards.' }) +
       fieldRow('scheduler.loopSeconds', 'Interval (seconds)',
-        { unit: 'seconds', hint: 'Time between scheduled runs. 0 disables the scheduler (unless a Daily start time is set, in which case 0 means once a day at that time). Microsoft Rewards has its own window — set it under Services → Microsoft Rewards.' });
+        { unit: 'seconds', hint: 'Time between main-chain runs. 0 disables (unless a Daily start time is set, in which case 0 means once a day at that time). Microsoft Rewards is scheduled independently.' });
   } else if (currentSettingsSection === 'notifications') {
     html =
       '<div class="settings-pane-title">Notifications' +
@@ -2684,84 +2873,84 @@ function renderScheduleTab() {
   const view = document.getElementById('schedView');
   if (!view) return;
   const parts = [];
-  if (state.nextScheduledRun) {
-    parts.push(
-      '<div class="sched-row">' +
-        '<div class="sched-label">Next run</div>' +
+  const fmtH = h => String(h).padStart(2, '0') + ':00';
+
+  if (state.legacyCombinedMode) {
+    // Legacy: single combined chain anchored 30m before MS window.
+    if (state.nextScheduledRun) {
+      parts.push(
+        '<div class="sched-row"><div class="sched-label">Next run</div>' +
         '<div><span class="sched-value big" title="' + state.nextScheduledRun + '">' + formatTimestamp(state.nextScheduledRun, 'short') + '</span>' +
-        '<span class="sched-count" id="schedCountdown"></span></div>' +
-      '</div>'
-    );
-  } else {
-    const txt = state.loopEnabled ? 'Calculating…' : 'Scheduler disabled';
-    parts.push('<div class="sched-row"><div class="sched-label">Next run</div><div class="sched-value muted">' + txt + '</div></div>');
-  }
-  // MS window row: dedicated, top-level when MS is active AND configured —
-  // the scheduler is anchored to this window, so it deserves its own line.
-  // Lead with the concrete next-open datetime so the user can see "MS will
-  // start searching at <X>" without having to add the offset themselves; the
-  // recurring window times follow on a muted second line. If MS is inactive
-  // we suppress this row entirely — anchoring releases when MS releases.
-  if (state.msAnchored) {
-    const fmt = h => String(h).padStart(2, '0') + ':00';
+        '<span class="sched-count" id="schedCountdown"></span></div></div>'
+      );
+    } else {
+      parts.push('<div class="sched-row"><div class="sched-label">Next run</div><div class="sched-value muted">Calculating…</div></div>');
+    }
     const s = state.msScheduleStart || 0;
     const w = state.msScheduleHours;
-    const windowStr = fmt(s) + ' &rarr; ' + fmt((Number(s) + Number(w)) % 24);
-    let nextOpenLine = '';
-    if (state.nextScheduledRun) {
-      // nextScheduledRun is the wake (window-start − 30m). MS opens the
-      // window at the same date's msScheduleStart hour.
-      const wake = new Date(state.nextScheduledRun.replace(' ', 'T'));
-      if (Number.isFinite(wake.getTime())) {
-        const open = new Date(wake);
-        open.setHours(s, 0, 0, 0);
-        // If the wake itself is already past msStart (config edge case where
-        // wakeHour ≥ msStart), keep open ≥ wake so the displayed timestamp
-        // never claims MS will search before it actually wakes.
-        if (open.getTime() < wake.getTime()) open.setDate(open.getDate() + 1);
-        const Y = open.getFullYear();
-        const M = String(open.getMonth() + 1).padStart(2, '0');
-        const D = String(open.getDate()).padStart(2, '0');
-        const hh = String(open.getHours()).padStart(2, '0');
-        const mm = String(open.getMinutes()).padStart(2, '0');
-        nextOpenLine = '<span class="sched-value big" data-ms-open="' + Y + '-' + M + '-' + D + 'T' + hh + ':' + mm + '">' +
-          Y + '-' + M + '-' + D + ' ' + hh + ':' + mm + '</span>' +
-          '<span class="sched-count" id="msOpenCountdown"></span>';
-      }
-    }
     parts.push('<div class="sched-row"><div class="sched-label">MS window</div>' +
-      '<div>' +
-        (nextOpenLine || ('<span class="sched-value">' + windowStr + ' daily</span>')) +
-        (nextOpenLine ? '<div class="sched-value muted" style="margin-top:2px">' + windowStr + ' daily</div>' : '') +
-      '</div></div>');
-  }
-  // Interval row: match scheduler priority. computeNextWakeMs() prefers the
-  // general anchor (START_TIME) over MS-anchor over LOOP-from-completion.
-  // Mirror that order here so the displayed mode reflects what will actually
-  // fire — deactivating MS or clearing the anchor flips it immediately.
-  let intervalText;
-  if (state.dailyAnchored) {
-    const loop = state.loopSeconds || 0;
-    if (loop === 0 || loop === 86400) {
-      intervalText = 'Daily at ' + state.dailyStartTime;
-    } else {
-      const hrs = loop / 3600;
-      const span = (hrs >= 1 && Number.isInteger(hrs))
-        ? hrs + 'h'
-        : (loop >= 60 ? Math.round(loop / 60) + 'm' : loop + 's');
-      intervalText = 'Every ' + span + ', anchored at ' + state.dailyStartTime;
-    }
-  } else if (state.msAnchored) {
-    intervalText = 'Daily — anchored to MS window (wake 30m before)';
-  } else if (state.loopSeconds > 0) {
-    const hrs = state.loopSeconds / 3600;
-    if (hrs >= 1 && Number.isInteger(hrs)) intervalText = 'Every ' + hrs + ' hour' + (hrs === 1 ? '' : 's');
-    else if (state.loopSeconds >= 60) intervalText = 'Every ' + Math.round(state.loopSeconds / 60) + ' minutes';
-    else intervalText = 'Every ' + state.loopSeconds + ' seconds';
+      '<div><span class="sched-value">' + fmtH(s) + ' &rarr; ' + fmtH((Number(s) + Number(w)) % 24) + ' daily</span></div></div>');
+    parts.push('<div class="sched-row"><div class="sched-label">Mode</div><div class="sched-value">Legacy combined — anchored 30m before MS window. <span class="muted">Set START_TIME or LOOP for two independent schedules.</span></div></div>');
   } else {
-    intervalText = 'Not scheduled — set START_TIME, LOOP, or enable Microsoft Rewards';
+    // Decoupled: separate rows per schedule.
+    if (state.mainEnabled) {
+      if (state.nextMainRun) {
+        parts.push(
+          '<div class="sched-row"><div class="sched-label">Next run · Claimers</div>' +
+          '<div><span class="sched-value big" title="' + state.nextMainRun + '">' + formatTimestamp(state.nextMainRun, 'short') + '</span>' +
+          '<span class="sched-count" id="mainCountdown"></span></div></div>'
+        );
+      } else {
+        parts.push('<div class="sched-row"><div class="sched-label">Next run · Claimers</div><div class="sched-value muted">Calculating…</div></div>');
+      }
+      // Interval description for the main schedule.
+      let mainInterval;
+      if (state.dailyAnchored) {
+        const loop = state.loopSeconds || 0;
+        if (loop === 0 || loop === 86400) mainInterval = 'Daily at ' + state.dailyStartTime;
+        else {
+          const hrs = loop / 3600;
+          const span = (hrs >= 1 && Number.isInteger(hrs)) ? hrs + 'h'
+            : (loop >= 60 ? Math.round(loop / 60) + 'm' : loop + 's');
+          mainInterval = 'Every ' + span + ', anchored at ' + state.dailyStartTime;
+        }
+      } else if (state.loopSeconds > 0) {
+        const hrs = state.loopSeconds / 3600;
+        if (hrs >= 1 && Number.isInteger(hrs)) mainInterval = 'Every ' + hrs + ' hour' + (hrs === 1 ? '' : 's') + ' from completion';
+        else if (state.loopSeconds >= 60) mainInterval = 'Every ' + Math.round(state.loopSeconds / 60) + ' minutes from completion';
+        else mainInterval = 'Every ' + state.loopSeconds + ' seconds from completion';
+      } else {
+        mainInterval = '';
+      }
+      if (mainInterval) parts.push('<div class="sched-row"><div class="sched-label">Interval · Claimers</div><div class="sched-value muted">' + mainInterval + '</div></div>');
+    } else {
+      parts.push('<div class="sched-row"><div class="sched-label">Claimers</div><div class="sched-value muted">Not scheduled — set START_TIME or LOOP in Settings → Scheduler.</div></div>');
+    }
+
+    if (state.msScheduled) {
+      const statusBadge = state.msTodayStatus === 'missed'
+        ? ' <span class="muted">(missed today — Run manually from the MS card)</span>'
+        : state.msTodayStatus === 'fired'
+          ? ' <span class="muted">(today already fired)</span>'
+          : '';
+      if (state.nextMsRun) {
+        parts.push(
+          '<div class="sched-row"><div class="sched-label">Next run · MS Rewards</div>' +
+          '<div><span class="sched-value big" title="' + state.nextMsRun + '">' + formatTimestamp(state.nextMsRun, 'short') + '</span>' +
+          '<span class="sched-count" id="msCountdown"></span>' + statusBadge + '</div></div>'
+        );
+      } else {
+        parts.push('<div class="sched-row"><div class="sched-label">Next run · MS Rewards</div><div class="sched-value muted">Calculating…</div></div>');
+      }
+      const s = state.msScheduleStart || 0;
+      const w = state.msScheduleHours;
+      parts.push('<div class="sched-row"><div class="sched-label">Interval · MS Rewards</div><div class="sched-value muted">Random within ' + fmtH(s) + ' &rarr; ' + fmtH((Number(s) + Number(w)) % 24) + ' daily</div></div>');
+    }
+
+    if (!state.mainEnabled && !state.msScheduled) {
+      parts.push('<div class="sched-row"><div class="sched-label">Status</div><div class="sched-value muted">Scheduler disabled — set START_TIME, LOOP, or MS_SCHEDULE_HOURS to enable.</div></div>');
+    }
   }
-  parts.push('<div class="sched-row"><div class="sched-label">Interval</div><div class="sched-value">' + intervalText + '</div></div>');
 
   // Services row: enumerate each active service and the behaviour it'll
   // exhibit on the next scheduled fire. Inactive services don't appear —
@@ -2827,20 +3016,15 @@ function formatCountdown(target) {
   return ' · in ' + Math.max(mins, 1) + 'm';
 }
 function updateScheduleCountdown() {
-  const el = document.getElementById('schedCountdown');
-  if (el && state.nextScheduledRun) {
-    const t = new Date(state.nextScheduledRun.replace(' ', 'T')).getTime();
+  const apply = (id, ts) => {
+    const el = document.getElementById(id);
+    if (!el || !ts) return;
+    const t = new Date(ts.replace(' ', 'T')).getTime();
     if (Number.isFinite(t)) el.textContent = formatCountdown(t);
-  }
-  const msEl = document.getElementById('msOpenCountdown');
-  if (msEl) {
-    const stamp = msEl.previousElementSibling && msEl.previousElementSibling.dataset
-      ? msEl.previousElementSibling.dataset.msOpen : null;
-    if (stamp) {
-      const t = new Date(stamp).getTime();
-      if (Number.isFinite(t)) msEl.textContent = formatCountdown(t);
-    }
-  }
+  };
+  apply('schedCountdown', state.nextScheduledRun);
+  apply('mainCountdown', state.nextMainRun);
+  apply('msCountdown', state.nextMsRun);
 }
 setInterval(updateScheduleCountdown, 30000);
 
@@ -3873,15 +4057,22 @@ server.listen(PANEL_PORT, async () => {
   console.log(`[${datetime()}] noVNC viewer:  http://localhost:${NOVNC_PORT}${BASE_PATH ? ` (proxied at ${BASE_PATH}/novnc/)` : ''}`);
   console.log(`[${datetime()}] Password protection: ${PANEL_PASSWORD ? 'ENABLED' : 'DISABLED (set PANEL_PASSWORD or VNC_PASSWORD to enable)'}`);
   const startTime = cfg.daily_start_time;
-  if (startTime || LOOP_SECONDS > 0 || MS_SCHEDULE_HOURS > 0) {
-    const desc = startTime
-      ? `anchored at ${startTime}, interval ${LOOP_SECONDS > 0 ? LOOP_SECONDS : 86400}s`
-      : MS_SCHEDULE_HOURS > 0
-        ? `anchored to MS window start ${MS_SCHEDULE_START}:00`
-        : `every ${LOOP_SECONDS}s`;
-    console.log(`[${datetime()}] Scheduler: enabled (${desc})`);
+  const legacyMode = !startTime && !LOOP_SECONDS && MS_SCHEDULE_HOURS > 0;
+  if (legacyMode) {
+    console.log(`[${datetime()}] Scheduler (legacy combined): enabled (full chain anchored 30m before MS window start ${MS_SCHEDULE_START}:00)`);
   } else {
-    console.log(`[${datetime()}] Scheduler: disabled (set START_TIME, LOOP, or MS_SCHEDULE_HOURS to enable)`);
+    if (startTime) {
+      console.log(`[${datetime()}] Scheduler (main): enabled (anchored at ${startTime}, interval ${LOOP_SECONDS > 0 ? LOOP_SECONDS : 86400}s)`);
+    } else if (LOOP_SECONDS > 0) {
+      console.log(`[${datetime()}] Scheduler (main): enabled (every ${LOOP_SECONDS}s from completion)`);
+    } else {
+      console.log(`[${datetime()}] Scheduler (main): disabled (set START_TIME or LOOP to enable)`);
+    }
+    if (MS_SCHEDULE_HOURS > 0) {
+      console.log(`[${datetime()}] Scheduler (MS): enabled (random within ${MS_SCHEDULE_START}:00 → ${(MS_SCHEDULE_START + MS_SCHEDULE_HOURS) % 24}:00)`);
+    } else {
+      console.log(`[${datetime()}] Scheduler (MS): disabled (set MS_SCHEDULE_HOURS to enable)`);
+    }
   }
   if (cfg.notify && !cfg.public_url) {
     console.log(`[${datetime()}] ⚠  NOTIFY is set but PUBLIC_URL is not — notification tap-targets will point to http://localhost:${PANEL_PORT}${BASE_PATH} which won't work from a mobile device. Set PUBLIC_URL to the externally-reachable panel URL.`);
@@ -3899,12 +4090,14 @@ server.listen(PANEL_PORT, async () => {
   startupAutoCheck = null;
   console.log(`[${datetime()}] Auto-check complete (${siteIds.length} active, ${Object.keys(SITES).length - siteIds.length} skipped).`);
 
-  // Kick off the scheduler after session auto-check so first run sees fresh
-  // status. The loop always starts — when both LOOP and MS_SCHEDULE_HOURS
-  // resolve to 0 it parks in sleepUntilWakeup and wakes on config change via
-  // watchConfigForScheduler().
-  schedulerLoop().catch(err => {
-    console.error(`[${datetime()}] Scheduler crashed:`, err);
+  // Kick off the two scheduler loops after session auto-check so first runs
+  // see fresh status. Loops always start — disabled paths park inside
+  // sleepUntilWakeup and re-arm on config change via watchConfigForScheduler.
+  mainSchedulerLoop().catch(err => {
+    console.error(`[${datetime()}] Scheduler (main) crashed:`, err);
+  });
+  msSchedulerLoop().catch(err => {
+    console.error(`[${datetime()}] Scheduler (MS) crashed:`, err);
   });
   watchConfigForScheduler();
 });
