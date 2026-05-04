@@ -8,7 +8,7 @@ import { chromium } from 'patchright';
 import { datetime, notify, jsonDb, normalizeTitle } from './src/util.js';
 import { cfg } from './src/config.js';
 import { describeConfig, patchConfig, describeEnv, getSchedulerConfig, CONFIG_FILE_PATH } from './src/app-config.js';
-import { getLoginSitesById, getClaimScriptOrder } from './src/sites.js';
+import { SITES as SITE_REGISTRY, getLoginSitesById, getClaimScriptOrder } from './src/sites.js';
 
 const PANEL_PORT = Number(process.env.PANEL_PORT) || 7080;
 const NOVNC_PORT = process.env.NOVNC_PORT || 6080;
@@ -228,18 +228,18 @@ let startupAutoCheck = null; // { current, total, siteName } while auto-check is
 // via the linkedWith pointer and runs both sessions internally.
 const CLAIM_SCRIPT_ORDER = getClaimScriptOrder();
 
+// The valid-service enum and opt-in defaults are sourced from the registry
+// (src/sites.js — Phase 0 of #11). Each entry's defaultActive flag drives
+// the fallback when no config or env value is present: false means opt-in
+// (aliexpress, ubisoft today), true means default-on (the rest).
 function activeServices() {
   const svc = describeConfig().effective.services || {};
-  const optInIds = new Set(['aliexpress', 'ubisoft']); // opt-in services default off
-  const isActive = id => {
-    const s = svc[id];
+  const isActive = entry => {
+    const s = svc[entry.id];
     if (s && typeof s.active === 'boolean') return s.active;
-    return !optInIds.has(id);
+    return entry.defaultActive;
   };
-  return new Set(Object.keys({
-    'prime-gaming': 1, 'epic-games': 1, 'gog': 1, 'steam': 1,
-    'microsoft': 1, 'microsoft-mobile': 1, 'aliexpress': 1, 'ubisoft': 1,
-  }).filter(isActive));
+  return new Set(SITE_REGISTRY.filter(isActive).map(s => s.id));
 }
 
 // Build the shell command for a claim run.
