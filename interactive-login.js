@@ -8,7 +8,7 @@ import { chromium } from 'patchright';
 import { datetime, notify, jsonDb, normalizeTitle } from './src/util.js';
 import { cfg } from './src/config.js';
 import { describeConfig, patchConfig, describeEnv, getSchedulerConfig, CONFIG_FILE_PATH } from './src/app-config.js';
-import { SITES as SITE_REGISTRY, getLoginSitesById, getClaimScriptOrder } from './src/sites.js';
+import { SITES as SITE_REGISTRY, getLoginSitesById, getClaimScriptOrder, getLinkedActiveMap } from './src/sites.js';
 
 const PANEL_PORT = Number(process.env.PANEL_PORT) || 7080;
 const NOVNC_PORT = process.env.NOVNC_PORT || 6080;
@@ -2142,10 +2142,10 @@ function serviceSummary(id) {
 // Microsoft desktop + mobile share everything — settings, credentials, claim
 // script (microsoft.js runs both sessions internally). We present them as a
 // single service in the Settings UI but keep two session cards in the
-// Sessions tab for per-session login-state visibility.
-const LINKED_ACTIVE = {
-  'microsoft': ['microsoft', 'microsoft-mobile'],
-};
+// Sessions tab for per-session login-state visibility. Sourced from the
+// registry's linkedWith pointers (Phase 0 of #11) so adding a new linked
+// sub-service is one field on its parent entry.
+const LINKED_ACTIVE = ${JSON.stringify(getLinkedActiveMap())};
 
 // Hours dropdown reused by multiple fields.
 const HOURS_OF_DAY = (() => {

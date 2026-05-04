@@ -496,3 +496,18 @@ export function getClaimScriptOrder() {
       ? { id: s.id, script: s.script, linkedWith: s.linkedWith }
       : { id: s.id, script: s.script });
 }
+
+// Settings-tab "Active" toggle linking. Each parent entry's linkedWith
+// pointer fans out to a list whose first element is the parent and second
+// element is the linked sub-service — toggling either id flips both. Today
+// only Microsoft is linked (microsoft + microsoft-mobile share a settings
+// row, credentials, and the microsoft.js script). Shape matches the
+// previous LINKED_ACTIVE literal so the client-side panel JS that consumes
+// this map can stay identical.
+export function getLinkedActiveMap() {
+  const out = {};
+  for (const s of SITES) {
+    if (s.linkedWith) out[s.id] = [s.id, s.linkedWith];
+  }
+  return out;
+}
