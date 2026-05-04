@@ -896,6 +896,13 @@ function runAllScripts({ source = 'panel', sites = null, extraEnv = null } = {})
         status: runStatus,
         durationSec: runStartedAt ? Math.round((Date.now() - runStartedAt) / 1000) : null,
       };
+      // If this run included microsoft.js (any source — scheduled, manual,
+      // per-card test), mark today's MS schedule fired so the decoupled MS
+      // loop won't re-fire later the same day. Without this, a manual
+      // 09:00 click + scheduled 10:48 fire would double-run MS.
+      if (code === 0 && /\bnode microsoft\.js\b/.test(cmd)) {
+        try { markMsRunFiredToday(); } catch {}
+      }
       runProcess = null;
       runSource = null;
       runStartedAt = null;
@@ -985,6 +992,24 @@ function pickMsTargetFor(dateKey, c) {
   const offsetMinutes = Math.floor(Math.random() * c.msHours * 60);
   target.setHours(startHour, offsetMinutes, 0, 0);
   return { date: dateKey, target: target.toISOString(), status: 'pending' };
+}
+
+// Called from runAllScripts close handler when any successful run included
+// microsoft.js. Flips today's MS schedule to fired so the msSchedulerLoop
+// won't re-fire the same day. Idempotent — writes a synthetic fired entry
+// for today if no file exists yet (per-card Run before any scheduled day).
+function markMsRunFiredToday() {
+  const today = todayKey();
+  const cur = readMsScheduleToday();
+  if (cur && cur.date === today) {
+    if (cur.status === 'fired') return; // already fired
+    cur.status = 'fired';
+    writeMsScheduleToday(cur);
+    return;
+  }
+  // No file or stale file — synthesize a fired record for today using "now"
+  // as the target. Tomorrow's pick happens on the next computeMsWakeMs call.
+  writeMsScheduleToday({ date: today, target: new Date().toISOString(), status: 'fired' });
 }
 
 // True when the user has neither START_TIME nor LOOP set but does have an
@@ -1252,16 +1277,14 @@ async function msSchedulerLoop() {
     const st = readMsScheduleToday();
     if (!st || st.status !== 'pending') continue;
 
-    const fired = await fireScheduledRun({
+    // status=fired is written by runAllScripts' close handler whenever a
+    // run includes microsoft.js — that path also covers per-card Run, so
+    // we don't need to mark fired here too.
+    await fireScheduledRun({
       label: 'ms',
       sites: ['microsoft', 'microsoft-mobile'],
       extraEnv: { MS_SKIP_WINDOW: '1' },
     });
-    if (fired) {
-      const updated = readMsScheduleToday() || st;
-      updated.status = 'fired';
-      writeMsScheduleToday(updated);
-    }
   }
 }
 
