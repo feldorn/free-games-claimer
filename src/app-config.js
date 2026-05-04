@@ -14,6 +14,7 @@
 import { readFileSync, writeFileSync, renameSync, existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { SITES } from './sites.js';
 
 // Compute the data-dir path directly instead of importing dataDir from util.js.
 // util.js itself imports cfg from config.js (for top-level enquirer setup),
@@ -32,6 +33,53 @@ const coerceHHMM = v => {
   const s = String(v ?? '').trim();
   return HHMM_RE.test(s) ? s : '';
 };
+
+// Map a coerce descriptor from src/sites.js into a coerce function. Kept
+// here (not in src/sites.js) so the registry stays a pure data layer
+// without dragging coercion logic — and to avoid app-config.js importing
+// helpers from the registry side of the cycle.
+function coerceFromDescriptor(d, type) {
+  if (!d) return type === 'boolean' ? toBool : undefined;
+  switch (d.kind) {
+    case 'boolDefaultTrue': return toBoolDefaultTrue;
+    case 'nullableNumber':  return v => (v === '' || v == null) ? null : Number(v);
+    case 'numberOr':        return v => Number(v) || d.fallback;
+    case 'numberBounded':   return v => Math.max(d.min, Number(v) || d.fallback);
+    default: throw new Error(`unknown coerce descriptor kind: ${d.kind}`);
+  }
+}
+
+// Build the per-service portion of CONFIG_SCHEMA from the registry. Walks
+// SITES twice so configFields appear before active flags, matching the
+// previous hand-listed ordering. Fields marked schedulerScope are skipped
+// (those paths live under scheduler.* and are emitted inline above).
+function serviceConfigEntries() {
+  const out = [];
+  for (const s of SITES) {
+    for (const f of s.configFields || []) {
+      if (f.schedulerScope) continue;
+      const entry = {
+        path: `services.${s.id}.${f.key}`,
+        env: f.env,
+        type: f.type,
+        default: f.default,
+        coerce: coerceFromDescriptor(f.coerce, f.type),
+      };
+      if (f.nullable) entry.nullable = true;
+      out.push(entry);
+    }
+  }
+  for (const s of SITES) {
+    out.push({
+      path: `services.${s.id}.active`,
+      env: s.activeEnv,
+      type: 'boolean',
+      default: s.defaultActive,
+      coerce: toBool,
+    });
+  }
+  return out;
+}
 
 export const CONFIG_SCHEMA = [
   // scheduler
@@ -52,37 +100,11 @@ export const CONFIG_SCHEMA = [
   { path: 'advanced.loginTimeoutSec', env: 'LOGIN_TIMEOUT', type: 'number',  default: 180,  coerce: v => Number(v) || 180 },
   { path: 'advanced.width',           env: 'WIDTH',         type: 'number',  default: 1920, coerce: v => Number(v) || 1920 },
   { path: 'advanced.height',          env: 'HEIGHT',        type: 'number',  default: 1080, coerce: v => Number(v) || 1080 },
-  // per-service
-  { path: 'services.prime-gaming.redeem',       env: 'PG_REDEEM',        type: 'boolean', default: false, coerce: toBool },
-  { path: 'services.prime-gaming.claimDlc',     env: 'PG_CLAIMDLC',      type: 'boolean', default: false, coerce: toBool },
-  { path: 'services.prime-gaming.timeLeftDays', env: 'PG_TIMELEFT',      type: 'number',  default: null, nullable: true, coerce: v => (v === '' || v == null) ? null : Number(v) },
-  { path: 'services.epic-games.claimMobile',    env: 'EG_MOBILE',        type: 'boolean', default: true,  coerce: toBoolDefaultTrue },
-  { path: 'services.gog.keepNewsletter',        env: 'GOG_NEWSLETTER',   type: 'boolean', default: false, coerce: toBool },
-  { path: 'services.steam.minRating',           env: 'STEAM_MIN_RATING', type: 'number',  default: 6,  coerce: v => Number(v) || 6 },
-  { path: 'services.steam.minPrice',            env: 'STEAM_MIN_PRICE',  type: 'number',  default: 10, coerce: v => Number(v) || 10 },
-  { path: 'services.microsoft.searchDelayMaxSec', env: 'MS_SEARCH_DELAY_MAX_SEC', type: 'number', default: 180, coerce: v => Math.max(1, Number(v) || 180) },
-  // Redeem reminder: when MS Rewards balance crosses redeemThreshold each
-  // run sends a Pushover reminder with the configured deep-link to the
-  // chosen reward. Re-fires on every run while still over threshold
-  // ("always-visible state" pattern) so the user can't miss it during the
-  // morning stock window. Defaults target the US $5 Amazon GC at 6,500 pts
-  // (current 2026 catalog price after MS's quiet price hike); switching to
-  // a different reward = update all three fields together.
-  { path: 'services.microsoft.redeemThreshold', env: 'MS_REDEEM_THRESHOLD', type: 'number', default: 6500, coerce: v => Math.max(0, Number(v) || 0) },
-  { path: 'services.microsoft.redeemUrl',       env: 'MS_REDEEM_URL',       type: 'string', default: 'https://rewards.bing.com/redeem/000800000000' },
-  { path: 'services.microsoft.redeemLabel',     env: 'MS_REDEEM_LABEL',     type: 'string', default: '$5 Amazon GC' },
-  // Per-service "active" flag — controls whether the Sessions card shows,
-  // whether auto-check/Check All probe it, and whether the claim runner
-  // invokes the script. Six traditional services default to active; any new
-  // opt-in service (AliExpress today, others later) defaults to inactive.
-  { path: 'services.prime-gaming.active',       env: 'PG_ACTIVE',        type: 'boolean', default: true,  coerce: toBool },
-  { path: 'services.epic-games.active',         env: 'EG_ACTIVE',        type: 'boolean', default: true,  coerce: toBool },
-  { path: 'services.gog.active',                env: 'GOG_ACTIVE',       type: 'boolean', default: true,  coerce: toBool },
-  { path: 'services.steam.active',              env: 'STEAM_ACTIVE',     type: 'boolean', default: true,  coerce: toBool },
-  { path: 'services.microsoft.active',          env: 'MS_ACTIVE',        type: 'boolean', default: true,  coerce: toBool },
-  { path: 'services.microsoft-mobile.active',   env: 'MS_MOBILE_ACTIVE', type: 'boolean', default: true,  coerce: toBool },
-  { path: 'services.aliexpress.active',         env: 'AE_ACTIVE',        type: 'boolean', default: false, coerce: toBool },
-  { path: 'services.ubisoft.active',            env: 'UBISOFT_ACTIVE',   type: 'boolean', default: false, coerce: toBool },
+  // per-service — derived from the registry (Phase 0 of #11). Each registry
+  // entry contributes its configFields followed (in a second pass) by its
+  // services.<id>.active row. Coerce descriptors on configFields are mapped
+  // to functions via coerceFromDescriptor() above.
+  ...serviceConfigEntries(),
 ];
 
 const schemaByPath = new Map(CONFIG_SCHEMA.map(f => [f.path, f]));
