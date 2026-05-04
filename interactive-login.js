@@ -2144,14 +2144,17 @@ function serviceSummary(id) {
 const LINKED_ACTIVE = ${JSON.stringify(getLinkedActiveMap())};
 
 // Settings-tab service rows derived from the registry (Phase 0 of #11).
-// Microsoft's MS_SCHEDULE_* fields are rendered under its row even though
+// Microsoft's MS_SCHEDULE_ fields are rendered under its row even though
 // their config paths live under scheduler.* — they're flagged
-// schedulerScope on the registry's configFields and getServiceRows()
+// schedulerScope on the registry's configFields and getServiceRows
 // preserves the full path. Sub-services (microsoft-mobile) are rolled into
 // their parent row via the registry's linkedWith pointer. This block is
-// inside PANEL_HTML so the server pre-computes the array via
-// ${JSON.stringify(...)} — a literal getServiceRows() call here would
-// reference a Node-only symbol that doesn't exist in the browser.
+// inside PANEL_HTML so the server pre-computes the array as a JSON
+// literal (see the assignment below) — a literal getServiceRows call
+// here would reference a Node-only symbol that doesn't exist in the
+// browser. NOTE: do not write a server-substitution placeholder inside
+// any comment in this file. Even inside // single-line comments, Node
+// parses the surrounding PANEL_HTML template literal eagerly and crashes.
 const SERVICE_ROWS = ${JSON.stringify(getServiceRows())};
 
 function serviceRow(entry) {
