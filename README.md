@@ -167,6 +167,7 @@ services:
       - STEAM_PASSWORD=your-steam-password
       - NOTIFY=pover://user@token          # Pushover, Telegram, Slack, etc.
       - LOOP=86400                          # scheduler interval in seconds; omit to disable
+      # - START_TIME=08:00                  # optional wall-clock anchor (HH:MM). e.g. with LOOP=86400, runs daily at 08:00
       # - BASE_PATH=/free-games             # URL prefix for reverse-proxy subfolder setups
       # - PUBLIC_URL=https://example.com/free-games
       # - STEAM_MIN_RATING=6               # minimum review rating (default: 6 = Mostly Positive)
@@ -226,7 +227,8 @@ that's also on the Settings tab can be edited there at runtime instead.
 | `NOTIFY` | | Notification URL(s) for [apprise](https://github.com/caronc/apprise) (Pushover, Telegram, Slack, etc.) |
 | `NOTIFY_TITLE` | | Optional title for notifications |
 | `NOTIFY_ATTACH_SCREENSHOTS` | `1` | Attach the most recent screenshot to failure notifications. Set to `0` to keep notifications text-only (privacy / bandwidth). Also editable in **Settings → Notifications**. |
-| `LOOP` | | Repeat claiming every N seconds (e.g., `86400` = 24h). Omit to run once and exit. |
+| `LOOP` | | Repeat claiming every N seconds (e.g., `86400` = 24h). Without `START_TIME`, sleeps N seconds after each run completes (drifts by run duration). Omit to run once and exit. |
+| `START_TIME` | | Wall-clock anchor `HH:MM` (24h). When set, the scheduler wakes at this time each day; with a sub-daily `LOOP` (e.g. `14400` = 4h) the anchor seeds the sequence and runs land at `08:00, 12:00, 16:00, 20:00, 00:00, 04:00`. Overrides `MS_SCHEDULE_HOURS` anchoring when both are set. |
 | `LOGIN_MODE` | — | **Deprecated no-op** — the control panel is always running on port 7080. Safe to remove from your config. |
 | `CLAIM_CMD` | (all 5 scripts in sequence) | Shell command the scheduler runs at its anchored wake. Includes microsoft.js, which sleeps internally until `MS_SCHEDULE_START`. |
 | `CLAIM_CMD_MANUAL` | (4 scripts, microsoft.js excluded) | Shell command the "Run Now" button runs. Excludes microsoft.js by default so a manual run actually finishes in a few minutes instead of hanging overnight. |
@@ -383,7 +385,8 @@ Set `LOOP` to enable the built-in scheduler:
 
 ```yaml
 environment:
-  - LOOP=86400  # wake every 24 hours
+  - LOOP=86400         # wake every 24 hours
+  # - START_TIME=08:00 # optional — anchor runs to wall-clock 08:00 each day
 ```
 
 The control panel process owns the scheduler — it sleeps until the next anchored
@@ -392,6 +395,17 @@ own internal window-based timing), then sleeps again. No immediate run on
 container boot — the panel stays interactive at startup so you can log in, use
 **Run Now**, or **Batch Redeem** right away. First scheduled run happens at the
 next anchored time.
+
+**Wake-time precedence** (highest first):
+
+1. `START_TIME` — wall-clock anchor (HH:MM). Anchor seeds the daily sequence;
+   `LOOP` (default 86400) is the spacing. Wins over MS-anchor when both are
+   set. Example: `START_TIME=08:00 LOOP=14400` → runs at 08:00, 12:00, 16:00,
+   20:00, 00:00, 04:00.
+2. `MS_SCHEDULE_HOURS` (with Microsoft Rewards active) — wake 30 minutes before
+   the MS window opens. See [Microsoft Rewards Options](#microsoft-rewards-options).
+3. `LOOP` alone — sleep N seconds *after the previous run completes* (drifts by
+   run duration each day).
 
 **How often to run?**
 - **Epic Games**: New free games weekly (daily before Christmas)
@@ -491,9 +505,9 @@ snapshot.
 
 - **Next run:** wall time (`2026-04-20 07:30`) with a live countdown
   (`in 22h 8m`) updated every 30s.
-- **Interval:** human-readable translation of `LOOP` / `MS_SCHEDULE_*`
-  (e.g. "Every 6 hours" or "Daily, anchored to MS window start 08:00 local
-  time").
+- **Interval:** human-readable translation of `START_TIME` / `LOOP` /
+  `MS_SCHEDULE_*` (e.g. "Daily at 08:00", "Every 4h, anchored at 08:00",
+  "Every 6 hours", or "Daily — anchored to MS window (wake 30m before)").
 - **Last run:** short wall time + source + status (success/error/finished) +
   duration.
 - Pause/resume and per-run history are planned follow-ups.
@@ -577,7 +591,7 @@ the file directly.
 
 ### Sections
 
-- **Schedule** — `LOOP`, `MS_SCHEDULE_HOURS`, `MS_SCHEDULE_START`.
+- **Schedule** — `START_TIME`, `LOOP`, `MS_SCHEDULE_HOURS`, `MS_SCHEDULE_START`.
   Changes apply immediately via `fs.watch` — the scheduler wakes up and
   recomputes its next run. No container restart.
 - **Notifications** — `NOTIFY`, `NOTIFY_TITLE`, `PUBLIC_URL`. A

@@ -50,6 +50,7 @@ export const cfg = {
   notify_attach_screenshots: notif.attachScreenshots ?? true, // attach latest screenshot to failure notifications
   // scheduler (moved out of interactive-login.js so Settings can override)
   loop: sched.loopSeconds ?? 0,
+  daily_start_time: sched.dailyStartTime ?? '',
   ms_schedule_hours: sched.msScheduleHours ?? 0,
   ms_schedule_start: sched.msScheduleStart ?? 8,
   get dir() { // avoids ReferenceError: Cannot access 'dataDir' before initialization

@@ -922,10 +922,11 @@ function runAllScripts({ source = 'panel', sites = null } = {}) {
 }
 
 // ----- Scheduler -----
-// Reads LOOP (seconds) and optional MS_SCHEDULE_HOURS / MS_SCHEDULE_START (hours) from env.
-// Anchor-based wake time: if MS_SCHEDULE_HOURS is set we wake 30min before the window opens
-// tomorrow, so the loop fires at ~the same clock time every day (no drift from run duration).
-// Otherwise we sleep LOOP seconds after the previous run completes.
+// Wake-time precedence:
+//   1. START_TIME ("HH:MM") — anchor + interval. anchor seeds the daily
+//      sequence, LOOP (default 86400) is the spacing. wins over MS-anchor.
+//   2. MS_SCHEDULE_HOURS (with MS active) — wake 30min before the MS window.
+//   3. LOOP — sleep N seconds after the previous run completes.
 // Scheduler constants come from cfg (which merges data/config.json on top of
 // env). This way the Settings tab's scheduler section takes effect at the
 // next panel restart without rebuilding the container. Changes without a
@@ -938,6 +939,26 @@ let nextScheduledRun = null; // Date | null
 
 function computeNextWakeMs() {
   const c = getSchedulerConfig();
+  // General anchor (START_TIME) wins over the legacy MS-anchor when set.
+  // Anchor + interval pattern: the anchor seeds the daily sequence, and
+  // we step forward by interval (default 24h when LOOP=0) until we land
+  // past now. e.g. START_TIME=08:00, LOOP=14400, restart at 11:00 → wake
+  // at 12:00 (8 + 4 = 12, first slot past now).
+  if (c.dailyStartTime) {
+    const m = /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(c.dailyStartTime);
+    if (m) {
+      const hh = Number(m[1]);
+      const mm = Number(m[2]);
+      const intervalMs = (c.loop > 0 ? c.loop : 86400) * 1000;
+      const wake = new Date();
+      wake.setHours(hh, mm, 0, 0);
+      // Walk forward in fixed-ms steps. For sub-daily intervals this gives
+      // exact spacing; for daily, DST transitions may shift one wake by 1h
+      // before re-aligning on the next compute — acceptable for a daily tool.
+      while (wake.getTime() <= Date.now()) wake.setTime(wake.getTime() + intervalMs);
+      return Math.max(wake.getTime() - Date.now(), 60 * 1000);
+    }
+  }
   // MS-anchored wake only applies when MS itself is active. Deactivating
   // the service (Settings → Services) should release the anchor and fall
   // back to LOOP — otherwise the scheduler keeps waking at the MS-window
@@ -1080,8 +1101,12 @@ function getState() {
   // the wake deterministically from config.
   const sched = getSchedulerConfig();
   const msActive = active.has('microsoft') || active.has('microsoft-mobile');
-  const msAnchored = msActive && sched.msHours > 0;
-  const schedEnabled = sched.loop > 0 || msAnchored;
+  // General anchor wins over MS-anchor — keep msAnchored in sync with the
+  // wake algorithm so the schedule UI doesn't claim "MS-anchored" when the
+  // scheduler is actually using START_TIME.
+  const dailyAnchored = !!sched.dailyStartTime;
+  const msAnchored = !dailyAnchored && msActive && sched.msHours > 0;
+  const schedEnabled = sched.loop > 0 || msAnchored || dailyAnchored;
   const effectiveNext = nextScheduledRun
     || (schedEnabled ? new Date(Date.now() + computeNextWakeMs()) : null);
   return {
@@ -1099,6 +1124,8 @@ function getState() {
     nextScheduledRun: effectiveNext ? datetime(effectiveNext) : null,
     loopEnabled: schedEnabled,
     loopSeconds: getSchedulerConfig().loop,
+    dailyStartTime: sched.dailyStartTime,
+    dailyAnchored,
     msScheduleHours: getSchedulerConfig().msHours,
     msScheduleStart: getSchedulerConfig().msStart,
     msAnchored,
@@ -2247,8 +2274,10 @@ function paintSettings() {
   if (currentSettingsSection === 'scheduler') {
     html =
       '<div class="settings-pane-title">Scheduler</div>' +
-      fieldRow('scheduler.loopSeconds', 'Loop interval (seconds)',
-        { unit: 'seconds', hint: 'Time between scheduled runs. 0 disables the loop. Microsoft Rewards has its own window — set it under Services → Microsoft Rewards.' });
+      fieldRow('scheduler.dailyStartTime', 'Daily start time (HH:MM)',
+        { hint: 'Wall-clock anchor for the run sequence. Blank = run interval seconds after the previous run completes. With Interval at 86400 (24h) runs land at this time daily; with a smaller interval the anchor seeds the sequence (e.g. 08:00 + 4h interval = runs at 8, 12, 16, 20, 0, 4). Overrides the Microsoft Rewards window when both are set.' }) +
+      fieldRow('scheduler.loopSeconds', 'Interval (seconds)',
+        { unit: 'seconds', hint: 'Time between scheduled runs. 0 disables the scheduler (unless a Daily start time is set, in which case 0 means once a day at that time). Microsoft Rewards has its own window — set it under Services → Microsoft Rewards.' });
   } else if (currentSettingsSection === 'notifications') {
     html =
       '<div class="settings-pane-title">Notifications' +
@@ -2707,11 +2736,22 @@ function renderScheduleTab() {
       '</div></div>');
   }
   // Interval row: match scheduler priority. computeNextWakeMs() prefers the
-  // MS-anchored daily wake when MS is active AND msHours > 0; LOOP only
-  // takes effect when MS releases the anchor. Use msAnchored (not the raw
-  // config field) so deactivating MS flips the displayed mode immediately.
+  // general anchor (START_TIME) over MS-anchor over LOOP-from-completion.
+  // Mirror that order here so the displayed mode reflects what will actually
+  // fire — deactivating MS or clearing the anchor flips it immediately.
   let intervalText;
-  if (state.msAnchored) {
+  if (state.dailyAnchored) {
+    const loop = state.loopSeconds || 0;
+    if (loop === 0 || loop === 86400) {
+      intervalText = 'Daily at ' + state.dailyStartTime;
+    } else {
+      const hrs = loop / 3600;
+      const span = (hrs >= 1 && Number.isInteger(hrs))
+        ? hrs + 'h'
+        : (loop >= 60 ? Math.round(loop / 60) + 'm' : loop + 's');
+      intervalText = 'Every ' + span + ', anchored at ' + state.dailyStartTime;
+    }
+  } else if (state.msAnchored) {
     intervalText = 'Daily — anchored to MS window (wake 30m before)';
   } else if (state.loopSeconds > 0) {
     const hrs = state.loopSeconds / 3600;
@@ -2719,7 +2759,7 @@ function renderScheduleTab() {
     else if (state.loopSeconds >= 60) intervalText = 'Every ' + Math.round(state.loopSeconds / 60) + ' minutes';
     else intervalText = 'Every ' + state.loopSeconds + ' seconds';
   } else {
-    intervalText = 'Not scheduled — set LOOP or enable Microsoft Rewards';
+    intervalText = 'Not scheduled — set START_TIME, LOOP, or enable Microsoft Rewards';
   }
   parts.push('<div class="sched-row"><div class="sched-label">Interval</div><div class="sched-value">' + intervalText + '</div></div>');
 
@@ -3832,11 +3872,16 @@ server.listen(PANEL_PORT, async () => {
   if (cfg.public_url) console.log(`[${datetime()}] Public URL:    ${PUBLIC_URL}`);
   console.log(`[${datetime()}] noVNC viewer:  http://localhost:${NOVNC_PORT}${BASE_PATH ? ` (proxied at ${BASE_PATH}/novnc/)` : ''}`);
   console.log(`[${datetime()}] Password protection: ${PANEL_PASSWORD ? 'ENABLED' : 'DISABLED (set PANEL_PASSWORD or VNC_PASSWORD to enable)'}`);
-  if (LOOP_SECONDS > 0 || MS_SCHEDULE_HOURS > 0) {
-    const desc = MS_SCHEDULE_HOURS > 0 ? `anchored to MS window start ${MS_SCHEDULE_START}:00` : `every ${LOOP_SECONDS}s`;
+  const startTime = cfg.daily_start_time;
+  if (startTime || LOOP_SECONDS > 0 || MS_SCHEDULE_HOURS > 0) {
+    const desc = startTime
+      ? `anchored at ${startTime}, interval ${LOOP_SECONDS > 0 ? LOOP_SECONDS : 86400}s`
+      : MS_SCHEDULE_HOURS > 0
+        ? `anchored to MS window start ${MS_SCHEDULE_START}:00`
+        : `every ${LOOP_SECONDS}s`;
     console.log(`[${datetime()}] Scheduler: enabled (${desc})`);
   } else {
-    console.log(`[${datetime()}] Scheduler: disabled (set LOOP or MS_SCHEDULE_HOURS to enable)`);
+    console.log(`[${datetime()}] Scheduler: disabled (set START_TIME, LOOP, or MS_SCHEDULE_HOURS to enable)`);
   }
   if (cfg.notify && !cfg.public_url) {
     console.log(`[${datetime()}] ⚠  NOTIFY is set but PUBLIC_URL is not — notification tap-targets will point to http://localhost:${PANEL_PORT}${BASE_PATH} which won't work from a mobile device. Set PUBLIC_URL to the externally-reachable panel URL.`);

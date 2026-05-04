@@ -26,9 +26,18 @@ const toBool = v => v === '1' || v === 'true' || v === true;
 // EG_MOBILE is inverted in the original: absent or truthy → true, only '0'/'false' → false.
 const toBoolDefaultTrue = v => v !== '0' && v !== 'false' && v !== false && v !== 0;
 
+// HH:MM (24h) — used by scheduler.dailyStartTime. Empty string = unset.
+const HHMM_RE = /^([01]?\d|2[0-3]):[0-5]\d$/;
+const coerceHHMM = v => {
+  const s = String(v ?? '').trim();
+  return HHMM_RE.test(s) ? s : '';
+};
+
 export const CONFIG_SCHEMA = [
   // scheduler
   { path: 'scheduler.loopSeconds',     env: 'LOOP',              type: 'number',  default: 0, coerce: v => Number(v) || 0 },
+  { path: 'scheduler.dailyStartTime',  env: 'START_TIME',        type: 'string',  default: '', coerce: coerceHHMM,
+    validate: v => v === '' || HHMM_RE.test(v) ? null : 'expected HH:MM (24h) or empty' },
   { path: 'scheduler.msScheduleHours', env: 'MS_SCHEDULE_HOURS', type: 'number',  default: 0, coerce: v => Number(v) || 0 },
   { path: 'scheduler.msScheduleStart', env: 'MS_SCHEDULE_START', type: 'number',  default: 8, coerce: v => Number(v) || 0 },
   // notifications + panel URL
@@ -264,9 +273,10 @@ function maskLast4(s) {
 export function getSchedulerConfig() {
   const s = describeConfig().effective.scheduler || {};
   return {
-    loop:    s.loopSeconds     ?? 0,
-    msHours: s.msScheduleHours ?? 0,
-    msStart: s.msScheduleStart ?? 8,
+    loop:           s.loopSeconds     ?? 0,
+    dailyStartTime: s.dailyStartTime  ?? '',
+    msHours:        s.msScheduleHours ?? 0,
+    msStart:        s.msScheduleStart ?? 8,
   };
 }
 
@@ -305,6 +315,10 @@ export function patchConfig(patches) {
     }
     if (field.type === 'string' && typeof value !== 'string') {
       errors.push({ path: p, error: 'expected string, got ' + typeof value }); continue;
+    }
+    if (field.validate) {
+      const err = field.validate(value);
+      if (err) { errors.push({ path: p, error: err }); continue; }
     }
     setByPath(app, p, value);
   }
