@@ -8,7 +8,7 @@ import { chromium } from 'patchright';
 import { datetime, notify, jsonDb, normalizeTitle } from './src/util.js';
 import { cfg } from './src/config.js';
 import { describeConfig, patchConfig, describeEnv, getSchedulerConfig, CONFIG_FILE_PATH } from './src/app-config.js';
-import { SITES as SITE_REGISTRY, getLoginSitesById, getClaimScriptOrder, getLinkedActiveMap, getClaimDbFiles } from './src/sites.js';
+import { SITES as SITE_REGISTRY, getLoginSitesById, getClaimScriptOrder, getLinkedActiveMap, getClaimDbFiles, getServiceRows } from './src/sites.js';
 
 const PANEL_PORT = Number(process.env.PANEL_PORT) || 7080;
 const NOVNC_PORT = process.env.NOVNC_PORT || 6080;
@@ -2143,54 +2143,13 @@ function serviceSummary(id) {
 // sub-service is one field on its parent entry.
 const LINKED_ACTIVE = ${JSON.stringify(getLinkedActiveMap())};
 
-// Hours dropdown reused by multiple fields.
-const HOURS_OF_DAY = (() => {
-  const out = [];
-  for (let h = 0; h < 24; h++) out.push({ value: h, label: String(h).padStart(2, '0') + ':00' });
-  return out;
-})();
-
-// Settings-tab fields grouped per service so the accordion code can iterate.
-const SERVICE_ROWS = [
-  { id: 'prime-gaming', title: 'Prime Gaming', fields: [
-    ['services.prime-gaming.redeem',       'Redeem keys on external stores'],
-    ['services.prime-gaming.claimDlc',     'Claim in-game DLC content',
-      { hint: 'Amazon removed the in-game content tab from Prime Gaming — this toggle is currently a no-op. The script skips cleanly when the tab is missing; will resume claiming if/when Amazon brings it back.' }],
-    ['services.prime-gaming.timeLeftDays', 'Skip if more than N days remain to claim',
-      { unit: 'days', hint: 'Leave blank to claim everything regardless of how long is left.' }],
-  ]},
-  { id: 'epic-games', title: 'Epic Games', fields: [
-    ['services.epic-games.claimMobile', 'Claim mobile games'],
-  ]},
-  { id: 'gog', title: 'GOG', fields: [
-    ['services.gog.keepNewsletter', 'Keep newsletter subscription after claiming'],
-  ]},
-  { id: 'steam', title: 'Steam', fields: [
-    ['services.steam.minRating', 'Minimum review rating (1–9)',
-      { hint: '6 = Mostly Positive; 7 = Very Positive; 8 = Overwhelmingly Positive.' }],
-    ['services.steam.minPrice', 'Minimum original price', { prefix: '$',
-      hint: 'Filters out shovelware that was free or near-free before the giveaway.' }],
-  ]},
-  // Microsoft Rewards: one row controls both desktop and mobile sessions.
-  // MS_SCHEDULE_* fields moved here from the Scheduler section because they
-  // only affect the Microsoft Rewards run, not the global loop.
-  { id: 'microsoft', title: 'Microsoft Rewards', subtitle: 'Runs both desktop and mobile sessions in one script.', fields: [
-    ['scheduler.msScheduleHours', 'Schedule window width (hours)',
-      { unit: 'hours', hint: 'Width of the daily Microsoft Rewards window, anchored to the start time. 0 runs immediately without anchoring.' }],
-    ['scheduler.msScheduleStart', 'Schedule window start (local time)',
-      { options: HOURS_OF_DAY }],
-    ['services.microsoft.searchDelayMaxSec', 'Max delay between Bing searches (seconds)',
-      { unit: 'seconds', hint: 'Upper bound for the random pause before each Bing search. Default 180 mimics a human pace; lower values shorten runs significantly (~60 searches × this/2 avg = total search time) but increase the risk of MS flagging the account as a bot.' }],
-    ['services.microsoft.redeemThreshold', 'Redeem reminder threshold (points)',
-      { unit: 'points', hint: 'When your balance crosses this each MS run sends a Pushover reminder with the deep-link below. Defaults to 6,500 (US $5 Amazon GC at the current 2026 catalog price). Set to 0 to disable. The reminder re-fires every run until you redeem, since stock can sell out within hours.' }],
-    ['services.microsoft.redeemLabel', 'Reward label (shown in notification)',
-      { hint: 'Free-text label for the reward you are chasing — appears in the Pushover message ("redeem <label>: <url>"). Update together with the URL when switching rewards.' }],
-    ['services.microsoft.redeemUrl', 'Reward deep-link URL',
-      { hint: 'Direct link to the reward catalog page. Find it at https://rewards.bing.com/redeem/all — click the reward you want and copy the address-bar URL (looks like https://rewards.bing.com/redeem/000800000000).' }],
-  ]},
-  { id: 'aliexpress', title: 'AliExpress', fields: [] },
-  { id: 'ubisoft', title: 'Ubisoft Connect', subtitle: 'Watch-only: pings you when a new free game appears at store.ubisoft.com/us/free-games. No login, no auto-claim — go grab it manually.', fields: [] },
-];
+// Settings-tab service rows derived from the registry (Phase 0 of #11).
+// Microsoft's MS_SCHEDULE_* fields are rendered under its row even though
+// their config paths live under scheduler.* — they're flagged
+// schedulerScope on the registry's configFields and getServiceRows()
+// preserves the full path. Sub-services (microsoft-mobile) are rolled into
+// their parent row via the registry's linkedWith pointer.
+const SERVICE_ROWS = getServiceRows();
 
 function serviceRow(entry) {
   const active = isServiceActiveForUI(entry.id);

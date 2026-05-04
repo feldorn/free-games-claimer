@@ -523,3 +523,40 @@ export function getClaimDbFiles() {
     SITES.filter(s => s.claimDbFile).map(s => [s.id, s.claimDbFile]),
   );
 }
+
+// Hours-of-day dropdown options (00:00 … 23:00). Lives here because the
+// only consumer is getServiceRows() below for the MS schedule-window-start
+// field; if any other field needs the same options, importing it from
+// here keeps the data co-located with the registry.
+const HOURS_OF_DAY = (() => {
+  const out = [];
+  for (let h = 0; h < 24; h++) out.push({ value: h, label: String(h).padStart(2, '0') + ':00' });
+  return out;
+})();
+
+// Settings-tab service rows. Walks SITES, skipping any entry that is a
+// linkedWith target of another (microsoft-mobile is rolled into the
+// microsoft row). Each configField becomes a [path, label, extra?]
+// tuple — the format the existing fieldRow() helper consumes. Entries
+// flagged schedulerScope keep their full path verbatim (scheduler.*);
+// regular entries get services.<id>.<key>. Empty configFields produce
+// fields: [] so the row still renders a toggle-only card.
+export function getServiceRows() {
+  const subServiceIds = new Set(SITES.map(s => s.linkedWith).filter(Boolean));
+  return SITES
+    .filter(s => !subServiceIds.has(s.id))
+    .map(s => {
+      const row = { id: s.id, title: s.name };
+      if (s.subtitle) row.subtitle = s.subtitle;
+      row.fields = (s.configFields || []).map(f => {
+        const path = f.schedulerScope ? f.path : `services.${s.id}.${f.key}`;
+        const extra = {};
+        if (f.unit)   extra.unit   = f.unit;
+        if (f.hint)   extra.hint   = f.hint;
+        if (f.prefix) extra.prefix = f.prefix;
+        if (f.kind === 'hour-of-day') extra.options = HOURS_OF_DAY;
+        return Object.keys(extra).length ? [path, f.label, extra] : [path, f.label];
+      });
+      return row;
+    });
+}
