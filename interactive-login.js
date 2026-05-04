@@ -8,7 +8,7 @@ import { chromium } from 'patchright';
 import { datetime, notify, jsonDb, normalizeTitle } from './src/util.js';
 import { cfg } from './src/config.js';
 import { describeConfig, patchConfig, describeEnv, getSchedulerConfig, CONFIG_FILE_PATH } from './src/app-config.js';
-import { SITES as SITE_REGISTRY, getLoginSitesById, getClaimScriptOrder, getLinkedActiveMap } from './src/sites.js';
+import { SITES as SITE_REGISTRY, getLoginSitesById, getClaimScriptOrder, getLinkedActiveMap, getClaimDbFiles } from './src/sites.js';
 
 const PANEL_PORT = Number(process.env.PANEL_PORT) || 7080;
 const NOVNC_PORT = process.env.NOVNC_PORT || 6080;
@@ -1109,12 +1109,8 @@ function getState() {
 // Microsoft Rewards is points-based and has no claim DB, so it appears in
 // the per-service table as N/A.
 
-const CLAIM_DB_FILES = {
-  'prime-gaming': 'prime-gaming.json',
-  'epic-games': 'epic-games.json',
-  'gog': 'gog.json',
-  'steam': 'steam.json',
-};
+// Sourced from the registry's claimDbFile fields (Phase 0 of #11).
+const CLAIM_DB_FILES = getClaimDbFiles();
 
 function parseLocalDateTime(s) {
   if (typeof s !== 'string' || !s) return null;

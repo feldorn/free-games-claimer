@@ -511,3 +511,15 @@ export function getLinkedActiveMap() {
   }
   return out;
 }
+
+// id → JSON-DB filename map for stats aggregation. Only services that
+// write a claim DB are included — Microsoft Rewards is points-based,
+// AliExpress is coin-based, Ubisoft is watch-only, all four return null
+// from claimDbFile and are skipped here. Iteration order matches SITES
+// (prime-gaming, epic-games, gog, steam) so any consumer relying on
+// insertion order sees the same sequence as the previous literal.
+export function getClaimDbFiles() {
+  return Object.fromEntries(
+    SITES.filter(s => s.claimDbFile).map(s => [s.id, s.claimDbFile]),
+  );
+}
