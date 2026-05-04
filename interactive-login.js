@@ -2148,8 +2148,11 @@ const LINKED_ACTIVE = ${JSON.stringify(getLinkedActiveMap())};
 // their config paths live under scheduler.* — they're flagged
 // schedulerScope on the registry's configFields and getServiceRows()
 // preserves the full path. Sub-services (microsoft-mobile) are rolled into
-// their parent row via the registry's linkedWith pointer.
-const SERVICE_ROWS = getServiceRows();
+// their parent row via the registry's linkedWith pointer. This block is
+// inside PANEL_HTML so the server pre-computes the array via
+// ${JSON.stringify(...)} — a literal getServiceRows() call here would
+// reference a Node-only symbol that doesn't exist in the browser.
+const SERVICE_ROWS = ${JSON.stringify(getServiceRows())};
 
 function serviceRow(entry) {
   const active = isServiceActiveForUI(entry.id);
