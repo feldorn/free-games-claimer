@@ -8,7 +8,7 @@ import { chromium } from 'patchright';
 import { datetime, notify, jsonDb, normalizeTitle } from './src/util.js';
 import { cfg } from './src/config.js';
 import { describeConfig, patchConfig, describeEnv, getSchedulerConfig, CONFIG_FILE_PATH } from './src/app-config.js';
-import { getLoginSitesById } from './src/sites.js';
+import { getLoginSitesById, getClaimScriptOrder } from './src/sites.js';
 
 const PANEL_PORT = Number(process.env.PANEL_PORT) || 7080;
 const NOVNC_PORT = process.env.NOVNC_PORT || 6080;
@@ -218,20 +218,15 @@ let startupAutoCheck = null; // { current, total, siteName } while auto-check is
 // scheduled-daily path but wrong for interactive "run these now".
 //   CLAIM_CMD         — full set, used by the scheduler at its anchored wake.
 //   CLAIM_CMD_MANUAL  — subset (no microsoft.js), used by the "Run Now" button.
-// Claim script order when running every active service. microsoft.js is last
-// because it has an internal wait-until-window that blocks the process; put
-// it after everything else so the rest finishes promptly. microsoft.js is
-// shared between the 'microsoft' (desktop) and 'microsoft-mobile' site cards
-// — invoked once and runs both sessions internally.
-const CLAIM_SCRIPT_ORDER = [
-  { id: 'gog',              script: 'gog.js' },
-  { id: 'prime-gaming',     script: 'prime-gaming.js' },
-  { id: 'epic-games',       script: 'epic-games.js' },
-  { id: 'steam',            script: 'steam.js' },
-  { id: 'aliexpress',       script: 'aliexpress.js' },
-  { id: 'ubisoft',          script: 'ubisoft.js' }, // watch-only: notifies on new free games, no claim flow
-  { id: 'microsoft',        script: 'microsoft.js', linkedWith: 'microsoft-mobile' }, // omitted from "manual" runs by default
-];
+// Claim script order is derived from src/sites.js (Phase 0 of the engine
+// refactor — issue #11). Each registry entry carries a claimOrder integer;
+// getClaimScriptOrder() filters to entries with a script and sorts by it.
+// microsoft.js is intentionally last (claimOrder 7) — it has an internal
+// wait-until-window that blocks the process; running it after everything
+// else lets the rest finish promptly. microsoft.js is shared between the
+// 'microsoft' (desktop) and 'microsoft-mobile' site cards — invoked once
+// via the linkedWith pointer and runs both sessions internally.
+const CLAIM_SCRIPT_ORDER = getClaimScriptOrder();
 
 function activeServices() {
   const svc = describeConfig().effective.services || {};

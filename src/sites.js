@@ -90,6 +90,7 @@ export const SITES = [
     name: 'Prime Gaming',
     subtitle: null,
     script: 'prime-gaming.js',
+    claimOrder: 2,
     loginUrl: 'https://luna.amazon.com/claims',
     browserDir: cfg.dir.browser,
     contextOptions: null,
@@ -135,6 +136,7 @@ export const SITES = [
     name: 'Epic Games',
     subtitle: null,
     script: 'epic-games.js',
+    claimOrder: 3,
     loginUrl: 'https://www.epicgames.com/id/login?lang=en-US&noHostRedirect=true&redirectUrl=https://store.epicgames.com/en-US/free-games',
     browserDir: cfg.dir.browser,
     contextOptions: null,
@@ -170,6 +172,7 @@ export const SITES = [
     name: 'GOG',
     subtitle: null,
     script: 'gog.js',
+    claimOrder: 1,
     loginUrl: 'https://www.gog.com/en',
     browserDir: cfg.dir.browser,
     contextOptions: null,
@@ -265,6 +268,7 @@ export const SITES = [
     name: 'Steam',
     subtitle: null,
     script: 'steam.js',
+    claimOrder: 4,
     loginUrl: 'https://store.steampowered.com/login/',
     browserDir: cfg.dir.browser,
     contextOptions: null,
@@ -307,6 +311,7 @@ export const SITES = [
     name: 'AliExpress',
     subtitle: null,
     script: 'aliexpress.js',
+    claimOrder: 5,
     // AliExpress's coin collector only works on the mobile site; desktop just
     // says "install the app". Use a dedicated browser profile so its
     // fingerprint-injected session doesn't collide with the desktop services'
@@ -354,6 +359,7 @@ export const SITES = [
     name: 'Microsoft Rewards',
     subtitle: 'Runs both desktop and mobile sessions in one script.',
     script: 'microsoft.js',
+    claimOrder: 7,
     loginUrl: 'https://rewards.bing.com',
     browserDir: cfg.dir.browser,
     contextOptions: null,
@@ -449,6 +455,7 @@ export const SITES = [
     name: 'Ubisoft Connect',
     subtitle: 'Watch-only: pings you when a new free game appears at store.ubisoft.com/us/free-games. No login, no auto-claim — go grab it manually.',
     script: 'ubisoft.js',
+    claimOrder: 6,
     loginUrl: null,
     browserDir: null,
     contextOptions: null,
@@ -471,4 +478,21 @@ export const SITES_BY_ID = Object.fromEntries(SITES.map(s => [s.id, s]));
 // Returning a fresh map per call keeps the data immutable from callers.
 export function getLoginSitesById() {
   return Object.fromEntries(SITES.filter(s => typeof s.checkLogin === 'function').map(s => [s.id, s]));
+}
+
+// Run-order list consumed by buildClaimCommand. Sorted by claimOrder so the
+// registry's display ordering (used by the Sessions tab) stays decoupled from
+// the script execution sequence — gog runs first because it's the fastest
+// and most stable, microsoft runs last because microsoft.js has an internal
+// wait-until-window that blocks the process. linkedWith is preserved verbatim
+// so a single 'microsoft' entry covers both microsoft + microsoft-mobile via
+// the same microsoft.js invocation.
+export function getClaimScriptOrder() {
+  return SITES
+    .filter(s => s.script && Number.isFinite(s.claimOrder))
+    .slice()
+    .sort((a, b) => a.claimOrder - b.claimOrder)
+    .map(s => s.linkedWith
+      ? { id: s.id, script: s.script, linkedWith: s.linkedWith }
+      : { id: s.id, script: s.script });
 }
