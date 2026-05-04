@@ -10,6 +10,14 @@ on:
       - 'refactor/**'
   workflow_dispatch:
 
+# Cancel any in-progress run for the same branch when a new push lands.
+# Without this, rapid successive commits race on the moving branch tag
+# (e.g. :feat-sites-registry) — the older build can finish second and
+# silently revert the tag to its older sha.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
