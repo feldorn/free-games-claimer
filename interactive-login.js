@@ -2082,6 +2082,16 @@ const PANEL_HTML = `<!DOCTYPE html>
   .run-log .line.system { color: #f0c040; font-weight: 600; }
   .run-log .time { color: #555; margin-right: 8px; }
 
+  /* Unsaved-changes confirmation modal — gates navigation away from
+     Settings while settingsDirty is non-empty. Three actions: stay,
+     save and continue, discard and continue. Backdrop click and
+     Escape both behave as "stay". */
+  .unsaved-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.65); z-index: 200; display: flex; align-items: center; justify-content: center; }
+  .unsaved-modal-card { background: #16213e; border: 1px solid #2a3a5a; border-radius: 8px; padding: 22px 24px; max-width: 460px; width: 90%; box-shadow: 0 8px 32px rgba(0,0,0,0.5); }
+  .unsaved-modal-title { font-size: 16px; font-weight: 600; color: #ffffff; margin-bottom: 10px; }
+  .unsaved-modal-body { font-size: 14px; color: #c0c8d8; line-height: 1.5; margin-bottom: 18px; }
+  .unsaved-modal-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+  .unsaved-modal-actions .btn { font-size: 13px; padding: 8px 14px; }
   .toast { position: fixed; bottom: 20px; right: 20px; background: #16213e; border: 1px solid #0f3460; border-radius: 8px; padding: 12px 20px; font-size: 14px; z-index: 100; animation: slideIn 0.3s ease; max-width: 400px; }
   .toast.success { border-color: #4ecca3; }
   .toast.error { border-color: #e94560; }
@@ -2202,6 +2212,17 @@ const PANEL_HTML = `<!DOCTYPE html>
     <div class="env-view-body" id="envView">Loading…</div>
   </div>
 </div>
+<div class="unsaved-modal" id="unsavedModal" role="dialog" aria-modal="true" aria-labelledby="unsavedModalTitle" style="display:none">
+  <div class="unsaved-modal-card">
+    <div class="unsaved-modal-title" id="unsavedModalTitle">Unsaved changes</div>
+    <div class="unsaved-modal-body">You have unsaved settings changes. What would you like to do?</div>
+    <div class="unsaved-modal-actions">
+      <button class="btn btn-cancel unsaved-stay">Stay on Settings</button>
+      <button class="btn btn-stop unsaved-discard">Discard and continue</button>
+      <button class="btn btn-run unsaved-save">Save and continue</button>
+    </div>
+  </div>
+</div>
 <script>
 const NOVNC_PORT = ${NOVNC_PORT};
 const BASE_PATH = '${BASE_PATH}';
@@ -2268,7 +2289,53 @@ async function enableService(id) {
   }
 }
 
-function switchTab(tab) {
+// Modal helper — returns 'stay' | 'save' | 'discard' based on user
+// click, backdrop click, or Escape key. Used by switchTab to gate
+// navigation away from Settings while there are unsaved drafts.
+function confirmUnsavedChanges() {
+  return new Promise(resolve => {
+    const modal = document.getElementById('unsavedModal');
+    if (!modal) { resolve('stay'); return; }
+    const stay = modal.querySelector('.unsaved-stay');
+    const save = modal.querySelector('.unsaved-save');
+    const discard = modal.querySelector('.unsaved-discard');
+    const onKey = (e) => { if (e.key === 'Escape') onChoice('stay'); };
+    const onChoice = (choice) => {
+      modal.style.display = 'none';
+      stay.onclick = save.onclick = discard.onclick = null;
+      modal.onclick = null;
+      document.removeEventListener('keydown', onKey);
+      resolve(choice);
+    };
+    stay.onclick = () => onChoice('stay');
+    save.onclick = () => onChoice('save');
+    discard.onclick = () => onChoice('discard');
+    modal.onclick = (e) => { if (e.target === modal) onChoice('stay'); };
+    document.addEventListener('keydown', onKey);
+    modal.style.display = 'flex';
+    stay.focus();
+  });
+}
+
+async function switchTab(tab) {
+  // Guard against navigating away from Settings with unsaved drafts.
+  // settingsDirty is a flat path → value map; non-empty means the
+  // Save / Discard footer is showing, and the user has changes that
+  // would be lost on a tab switch.
+  const currentTab = document.body.dataset.tab;
+  if (currentTab === 'settings' && tab !== 'settings' && Object.keys(settingsDirty).length > 0) {
+    const choice = await confirmUnsavedChanges();
+    if (choice === 'stay') return;
+    if (choice === 'save') {
+      await saveSettings();
+      // saveSettings clears settingsDirty on success and leaves it
+      // populated on validation/network failure. If anything is still
+      // dirty, the save didn't fully apply — keep the user on Settings
+      // rather than losing their changes silently.
+      if (Object.keys(settingsDirty).length > 0) return;
+    }
+    if (choice === 'discard') discardSettings();
+  }
   document.body.dataset.tab = tab;
   document.querySelectorAll('.tab-nav .tab').forEach(t => {
     t.classList.toggle('active', t.dataset.tab === tab);
@@ -2280,6 +2347,15 @@ function switchTab(tab) {
   if (tab === 'settings') renderSettingsTab();
   if (tab === 'environment') renderEnvironmentTab();
 }
+
+// Native browser dialog for tab close / reload while drafts exist.
+// Browser shows a generic localized message; can't customise the text.
+window.addEventListener('beforeunload', e => {
+  if (Object.keys(settingsDirty).length > 0) {
+    e.preventDefault();
+    e.returnValue = '';
+  }
+});
 
 async function renderEnvironmentTab() {
   // Environment is read-only; reuse the same loadEnvTable used to live
@@ -2706,19 +2782,25 @@ function paintSettings() {
           { hint: 'External URL used in notifications so tap-targets land on the panel.' })
       );
   } else if (currentSettingsSection === 'services') {
-    // Split rows into Full Collectors (auto-claim) vs Notify-Only Collectors
-    // (watch-only). Discriminator is scheduleKind on each row, populated
-    // from the registry. Two headed sub-sections within the existing list.
-    const fullCollectors = SERVICE_ROWS.filter(r => r.scheduleKind !== 'watch-only');
-    const watchOnly      = SERVICE_ROWS.filter(r => r.scheduleKind === 'watch-only');
+    // Three-way split by row category (set by getServiceRows in
+    // src/sites.js): 'game' (claims free games — writes a claim DB),
+    // 'points' (collects points/coins for redemption), 'watch'
+    // (notify-only watcher).
+    const gameRows   = SERVICE_ROWS.filter(r => r.category === 'game');
+    const pointRows  = SERVICE_ROWS.filter(r => r.category === 'points');
+    const watchRows  = SERVICE_ROWS.filter(r => r.category === 'watch');
     let svcInner = '';
-    if (fullCollectors.length) {
-      svcInner += '<div class="svc-section-header">Full Collectors</div>';
-      svcInner += fullCollectors.map(serviceRow).join('');
+    if (gameRows.length) {
+      svcInner += '<div class="svc-section-header">Game Collectors</div>';
+      svcInner += gameRows.map(serviceRow).join('');
     }
-    if (watchOnly.length) {
+    if (pointRows.length) {
+      svcInner += '<div class="svc-section-header">Point Collectors</div>';
+      svcInner += pointRows.map(serviceRow).join('');
+    }
+    if (watchRows.length) {
       svcInner += '<div class="svc-section-header">Notify-Only Collectors</div>';
-      svcInner += watchOnly.map(serviceRow).join('');
+      svcInner += watchRows.map(serviceRow).join('');
     }
     html = '<div class="settings-pane-title">Services</div>' +
       '<div class="svc-list">' +
@@ -2900,6 +2982,14 @@ async function saveSettings() {
     settingsDirty = {};
     paintSettings();
     showToast('Settings saved. Scheduler changes apply after a restart.', 'success');
+    // Refresh the shared state so Sessions, Schedule, Stats, and any
+    // other tab that reads from in-memory state reflects the new
+    // effective config immediately rather than waiting for the next
+    // 10-second poll. refreshState also calls render, so the Sessions
+    // card grid, Watchers section, and Available drawer all reconcile
+    // in one round trip; tabs that derive from state only on entry
+    // pick it up the next time they open.
+    await refreshState();
   } catch (e) {
     showToast('Save failed: ' + (e && e.message || 'unknown error'), 'error');
   } finally {

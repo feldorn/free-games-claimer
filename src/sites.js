@@ -592,7 +592,15 @@ export function getServiceRows() {
   return SITES
     .filter(s => !subServiceIds.has(s.id))
     .map(s => {
-      const row = { id: s.id, title: s.name, version: s.version || null, scheduleKind: s.scheduleKind || 'daily-chain' };
+      // Settings-tab category. Three buckets:
+      //   'watch'  — scheduleKind 'watch-only' (notify-only collectors)
+      //   'game'   — has a claimDbFile (writes a per-service claim DB)
+      //   'points' — neither: collects points/coins/rewards (Microsoft,
+      //              AliExpress today; Temu daily check-in et al later)
+      const category = s.scheduleKind === 'watch-only' ? 'watch'
+        : s.claimDbFile ? 'game'
+        : 'points';
+      const row = { id: s.id, title: s.name, version: s.version || null, scheduleKind: s.scheduleKind || 'daily-chain', category };
       if (s.subtitle) row.subtitle = s.subtitle;
       row.fields = (s.configFields || []).map(f => {
         const path = f.schedulerScope ? f.path : `services.${s.id}.${f.key}`;

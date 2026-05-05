@@ -27,7 +27,7 @@ Append an entry to the `SITES` array. Required fields:
 | `browserDir` | getter (`get browserDir() { return cfg.dir.browser; }`) — most services share the profile; suffix it (`+ '-foo'`) for an isolated profile |
 | `defaultActive` | `true` for default-on, `false` for opt-in |
 | `activeEnv` | env var name that gates `services.<id>.active` (e.g. `'FOO_ACTIVE'`) |
-| `claimDbFile` | `'<id>.json'` if the script writes a claim DB; `null` otherwise (Microsoft, Ubisoft) |
+| `claimDbFile` | `'<id>.json'` if the script writes a claim DB; `null` otherwise (Microsoft, Ubisoft). Also drives the Settings → Services grouping: entries with a claim DB land under "Game Collectors", entries without (and that aren't watch-only) land under "Point Collectors". |
 | `scheduleKind` | `'daily-chain'` (runs in the main scheduler chain), `'daily-window'` (own random-pick loop — Microsoft today), or `'watch-only'` |
 | `claimOrder` | integer; `getClaimScriptOrder()` sorts ascending |
 | `configFields` | array of per-service settings (see step 2) |
