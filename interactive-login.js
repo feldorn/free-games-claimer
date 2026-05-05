@@ -2614,7 +2614,8 @@ function renderSchedulerSection() {
       '<div class="setting-label">Start time' + startDot + '</div>' +
       '<div class="setting-input">' +
         '<input type="time" value="' + escapeHtml(startTime) +
-          '" onchange="if(this.value) _stashedStartTime = this.value; setSettingValue(\\'scheduler.dailyStartTime\\', this.value); paintSettings()">' +
+          '" onchange="if(this.value) _stashedStartTime = this.value; setSettingValue(\\'scheduler.dailyStartTime\\', this.value)"' +
+          ' onblur="paintSettings()">' +
       '</div>' +
       startRevert +
     '</div>'
