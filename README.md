@@ -78,7 +78,7 @@ services:
       - GOG_PASSWORD=your-gog-password
       - STEAM_PASSWORD=your-steam-password
       - NOTIFY=pover://user@token          # Pushover, Telegram, Slack, etc.
-      - LOOP=86400                          # scheduler interval in seconds; omit to disable
+      - LOOP=86400                          # scheduler interval in seconds (24h)
       # - START_TIME=08:00                  # optional wall-clock anchor (HH:MM). e.g. with LOOP=86400, runs daily at 08:00
       # - BASE_PATH=/free-games             # URL prefix for reverse-proxy subfolder setups
       # - PUBLIC_URL=https://example.com/free-games
@@ -139,7 +139,7 @@ that's also on the Settings tab can be edited there at runtime instead.
 | `NOTIFY` | | Notification URL(s) for [apprise](https://github.com/caronc/apprise) (Pushover, Telegram, Slack, etc.) |
 | `NOTIFY_TITLE` | | Optional title for notifications |
 | `NOTIFY_ATTACH_SCREENSHOTS` | `1` | Attach the most recent screenshot to failure notifications. Set to `0` to keep notifications text-only (privacy / bandwidth). Also editable in **Settings → Notifications**. |
-| `LOOP` | | Main-schedule interval in seconds (e.g. `86400` = 24h). Without `START_TIME`, sleeps N seconds after each run completes (drifts by run duration). Drives the non-MS chain only — Microsoft Rewards is on its own schedule. Omit to run once and exit. |
+| `LOOP` | | Main-schedule interval in seconds (e.g. `86400` = 24h, used in the docker-compose template). Without `START_TIME`, sleeps N seconds after each run completes (drifts by run duration). Drives the non-MS chain only — Microsoft Rewards is on its own schedule. The panel always runs in the foreground; this only controls how often the claim chain fires. |
 | `START_TIME` | | Wall-clock anchor `HH:MM` (24h) for the main schedule. When set, the non-MS chain wakes at this time each day; with a sub-daily `LOOP` (e.g. `14400` = 4h) the anchor seeds the sequence and runs land at `08:00, 12:00, 16:00, 20:00, 00:00, 04:00`. Microsoft Rewards is independent; see [Microsoft Rewards Options](#microsoft-rewards-options). |
 | `LOGIN_MODE` | — | **Deprecated no-op** — the control panel is always running on port 7080. Safe to remove from your config. |
 | `CLAIM_CMD` | (all 5 scripts in sequence) | Shell command the scheduler runs at its anchored wake. Includes microsoft.js, which sleeps internally until `MS_SCHEDULE_START`. |

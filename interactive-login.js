@@ -3596,7 +3596,7 @@ function render() {
       // Status strip in the header already communicates "all sessions OK" —
       // don't repeat it here. Just explain what this empty space is for.
       placeholder.innerHTML = wrap(
-        'Click <b style="color:#e0e0e0">Run Now</b> to trigger an immediate claim, or let the scheduler (if enabled) handle it.<br><br>' +
+        'Click <b style="color:#e0e0e0">Run Now</b> to trigger an immediate claim, or let the scheduler handle it on its next tick.<br><br>' +
         'Click <b style="color:#e0e0e0">Login</b> on a session card or <b style="color:#e0e0e0">Show browser</b> in the header to mount the live browser view here. ' +
         'Run output streams in the <b style="color:#e0e0e0">Logs</b> tab.'
       );
