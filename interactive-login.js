@@ -4,10 +4,11 @@ import { watch, readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 const __panelDirname = path.dirname(fileURLToPath(import.meta.url));
-import { chromium, devices } from 'patchright';
+import { chromium } from 'patchright';
 import { datetime, notify, jsonDb, normalizeTitle } from './src/util.js';
 import { cfg } from './src/config.js';
 import { describeConfig, patchConfig, describeEnv, getSchedulerConfig, CONFIG_FILE_PATH } from './src/app-config.js';
+import { SITES as SITE_REGISTRY, getLoginSitesById, getClaimScriptOrder, getLinkedActiveMap, getClaimDbFiles, getServiceRows } from './src/sites.js';
 
 const PANEL_PORT = Number(process.env.PANEL_PORT) || 7080;
 const NOVNC_PORT = process.env.NOVNC_PORT || 6080;
@@ -72,265 +73,13 @@ async function login() {
 }
 </script></body></html>`;
 
-// Read the signed-in Microsoft Rewards user via the Rewards dashboard's own
-// dapi/me endpoint. page.request inherits the browser context's cookies, so a
-// valid session authenticates automatically. Returns null on any failure so
-// callers can fall back to a generic label without invalidating the session.
-// Read the signed-in user's display name from Microsoft's ME Control — the
-// account widget rendered across every authenticated MS property. The primary
-// span holds the display name ("Chris Orr"), the secondary span holds the
-// email. Caller has already navigated to rewards.bing.com, so the widget is
-// populated (or will be shortly).
-//
-// (The dapi/me and getuserinfo APIs were tried first — dapi/me 401s without
-// extra auth headers, and getuserinfo is a dashboard blob that doesn't carry
-// user identity. The ME widget has been in place for years across MS, so the
-// DOM path is actually the more stable choice here.)
-async function readMicrosoftRewardsUser(page) {
-  try {
-    // state: 'attached' rather than the default 'visible' — the ME Control
-    // renders the name into hidden DOM until the widget is opened, so the
-    // default visible-wait would time out even though the text is present.
-    await page.waitForSelector('#mectrl_currentAccount_primary', { timeout: 8000, state: 'attached' });
-    const name = await page.evaluate(() => {
-      const primary = document.getElementById('mectrl_currentAccount_primary');
-      const secondary = document.getElementById('mectrl_currentAccount_secondary');
-      const p = primary && primary.textContent && primary.textContent.trim();
-      const s = secondary && secondary.textContent && secondary.textContent.trim();
-      return p || s || null;
-    });
-    if (name) return name;
-  } catch (e) {
-    console.log(`[ms] readUser: ${e.message}`);
-  }
-  return null;
-}
-
-const SITES = {
-  'prime-gaming': {
-    name: 'Prime Gaming',
-    loginUrl: 'https://luna.amazon.com/claims',
-    browserDir: cfg.dir.browser,
-    async checkLogin(page) {
-      try {
-        await page.goto('https://luna.amazon.com/claims', { waitUntil: 'domcontentloaded', timeout: 20000 });
-        await page.waitForTimeout(3000);
-        // Amazon redirects stale sessions to /ap/signin — check final URL first (real auth signal).
-        if (/\/ap\/signin|\/sign[-_]?in/i.test(page.url())) return { loggedIn: false };
-        const signInBtn = await page.locator('button:has-text("Sign in")').count();
-        if (signInBtn > 0) return { loggedIn: false };
-        const userEl = page.locator('[data-a-target="user-dropdown-first-name-text"]');
-        if (await userEl.count() > 0) {
-          const user = await userEl.first().innerText();
-          return { loggedIn: true, user };
-        }
-        return { loggedIn: false };
-      } catch {
-        return { loggedIn: false };
-      }
-    },
-  },
-  'epic-games': {
-    name: 'Epic Games',
-    loginUrl: 'https://www.epicgames.com/id/login?lang=en-US&noHostRedirect=true&redirectUrl=https://store.epicgames.com/en-US/free-games',
-    browserDir: cfg.dir.browser,
-    async checkLogin(page) {
-      try {
-        await page.goto('https://store.epicgames.com/en-US/free-games', { waitUntil: 'domcontentloaded', timeout: 20000 });
-        await page.waitForTimeout(3000);
-        const nav = page.locator('egs-navigation');
-        const isLoggedIn = await nav.getAttribute('isloggedin');
-        if (isLoggedIn === 'true') {
-          const user = await nav.getAttribute('displayname');
-          return { loggedIn: true, user: user || 'unknown' };
-        }
-        return { loggedIn: false };
-      } catch {
-        return { loggedIn: false };
-      }
-    },
-  },
-  'gog': {
-    name: 'GOG',
-    loginUrl: 'https://www.gog.com/en',
-    browserDir: cfg.dir.browser,
-    async checkLogin(page) {
-      try {
-        // Navigate to /account — GOG server-side requires a valid session here;
-        // stale sessions get redirected to the homepage with an #openlogin overlay.
-        // The final URL is the definitive session-validity signal.
-        await page.goto('https://www.gog.com/account', { waitUntil: 'domcontentloaded', timeout: 20000 });
-        await page.waitForTimeout(3000);
-        const url = page.url();
-        if (url.includes('openlogin') || url.includes('/login')) return { loggedIn: false };
-        if (!url.includes('/account')) return { loggedIn: false };
-
-        // Primary username source: GOG's own account APIs. page.request
-        // inherits the browser context's cookies, so a valid session
-        // authenticates automatically. This sidesteps the DOM path entirely
-        // — the legacy #menuUsername element carries data-hj-suppress (PII
-        // suppression) and is frequently hidden or renamed across GOG's
-        // header redesigns.
-        let user = null;
-        const apis = [
-          'https://menu.gog.com/v1/account/basic',
-          'https://www.gog.com/userData.json',
-          'https://embed.gog.com/userData.json',
-        ];
-        for (const endpoint of apis) {
-          try {
-            const res = await page.request.get(endpoint, { timeout: 10000 });
-            if (!res.ok()) continue;
-            const data = await res.json();
-            const name = data && (data.username || data.userName || data.name);
-            if (name) { user = String(name).trim(); break; }
-          } catch { /* try next endpoint */ }
-        }
-
-        // DOM fallback: open the account dropdown and parse the block of text
-        // next to "Your account". Used only if all APIs fail.
-        if (!user) {
-          try {
-            await page.goto('https://www.gog.com', { waitUntil: 'domcontentloaded', timeout: 15000 });
-            const trigger = page.locator([
-              'header [class*="menu-user"]',
-              'header [class*="account"]',
-              'header button[aria-haspopup]:has(svg)',
-            ].join(', ')).first();
-            await trigger.waitFor({ state: 'visible', timeout: 8000 });
-            await trigger.hover();
-            const dropdown = page.locator('[class*="menu-user-dropdown"], [class*="account-menu"], [class*="menu-user"]')
-              .filter({ hasText: 'Your account' }).first();
-            try {
-              await dropdown.waitFor({ state: 'visible', timeout: 3000 });
-            } catch {
-              await trigger.click();
-              await dropdown.waitFor({ state: 'visible', timeout: 4000 });
-            }
-            const text = await dropdown.innerText({ timeout: 2000 }).catch(() => '');
-            const m = text.match(/Your account\s*\n?\s*([^\n]+)/);
-            if (m && m[1]) user = m[1].trim() || null;
-            await page.keyboard.press('Escape').catch(() => {});
-          } catch { /* DOM path failed — fall through */ }
-        }
-
-        // Tertiary: legacy cookie that some GOG builds still set.
-        if (!user) {
-          const cookieUser = await page.evaluate(() => {
-            for (const c of document.cookie.split(';')) {
-              const [k, v] = c.trim().split('=');
-              if (k === 'gog_username' || k === 'gog-username') return decodeURIComponent(v);
-            }
-            return null;
-          });
-          if (cookieUser) user = cookieUser;
-        }
-        return { loggedIn: true, user: user || 'unknown' };
-      } catch {
-        return { loggedIn: false };
-      }
-    },
-  },
-  'steam': {
-    name: 'Steam',
-    loginUrl: 'https://store.steampowered.com/login/',
-    browserDir: cfg.dir.browser,
-    async checkLogin(page) {
-      try {
-        // /account/ is auth-gated — stale sessions get redirected to /login/.
-        await page.goto('https://store.steampowered.com/account/', { waitUntil: 'domcontentloaded', timeout: 20000 });
-        await page.waitForTimeout(3000);
-        if (page.url().includes('/login/')) return { loggedIn: false };
-        const pulldown = page.locator('#account_pulldown');
-        if (await pulldown.count() > 0) {
-          const user = (await pulldown.innerText()).trim();
-          if (user.length > 0) return { loggedIn: true, user };
-        }
-        return { loggedIn: false };
-      } catch {
-        return { loggedIn: false };
-      }
-    },
-  },
-  'aliexpress': {
-    name: 'AliExpress',
-    // AliExpress's coin collector only works on the mobile site; desktop just
-    // says "install the app". Use a dedicated browser profile so its
-    // fingerprint-injected session doesn't collide with the desktop services'
-    // profiles.
-    loginUrl: 'https://m.aliexpress.com/p/coin-index/index.html',
-    browserDir: cfg.dir.browser + '-aliexpress',
-    contextOptions: devices['Pixel 7'],
-    async checkLogin(page) {
-      const loginBtn = page.locator('button:has-text("Log in")');
-      const streak = page.locator('h3:text-is("day streak")');
-      // AliExpress mobile frequently hangs on initial load — same issue as in
-      // aliexpress.js auth(). Auto-reload up to 3 times until either the login
-      // button or the logged-in "day streak" marker appears, then short-circuit.
-      const QUICK_WAIT_MS = 15000;
-      const MAX_RELOADS = 3;
-      try {
-        for (let attempt = 0; attempt <= MAX_RELOADS; attempt++) {
-          if (attempt === 0) {
-            await page.goto('https://m.aliexpress.com/p/coin-index/index.html', { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
-          } else {
-            await page.reload({ waitUntil: 'domcontentloaded' }).catch(() => {});
-          }
-          const which = await Promise.any([
-            loginBtn.waitFor({ state: 'visible', timeout: QUICK_WAIT_MS }).then(() => 'login'),
-            streak.waitFor({ state: 'visible', timeout: QUICK_WAIT_MS }).then(() => 'streak'),
-          ]).catch(() => null);
-          if (which === 'streak') return { loggedIn: true, user: 'member' };
-          if (which === 'login') return { loggedIn: false };
-        }
-        return { loggedIn: false };
-      } catch {
-        return { loggedIn: false };
-      }
-    },
-  },
-  'microsoft': {
-    name: 'Microsoft Rewards',
-    loginUrl: 'https://rewards.bing.com',
-    browserDir: cfg.dir.browser,
-    async checkLogin(page) {
-      try {
-        await page.goto('https://rewards.bing.com', { waitUntil: 'domcontentloaded', timeout: 20000 });
-        await page.waitForTimeout(3000);
-        const url = page.url();
-        if (url.includes('login.live.com') || url.includes('login.microsoftonline.com') || url.includes('account.microsoft.com') || url.includes('/welcome')) {
-          return { loggedIn: false };
-        }
-        const user = await readMicrosoftRewardsUser(page);
-        return { loggedIn: true, user: user || 'Microsoft account' };
-      } catch {
-        return { loggedIn: false };
-      }
-    },
-  },
-  'microsoft-mobile': {
-    name: 'Microsoft Rewards (Mobile)',
-    loginUrl: 'https://rewards.bing.com',
-    browserDir: cfg.dir.browser + '-mobile',
-    contextOptions: devices['Pixel 7'],
-    async checkLogin(page) {
-      try {
-        await page.goto('https://rewards.bing.com', { waitUntil: 'domcontentloaded', timeout: 20000 });
-        await page.waitForTimeout(5000); // mobile redirects settle more slowly
-        const url = page.url();
-        if (url.includes('login.live.com') || url.includes('login.microsoftonline.com') || url.includes('account.microsoft.com') || url.includes('/welcome')) {
-          return { loggedIn: false };
-        }
-        // Same account as the desktop entry; the card title already says "(Mobile)",
-        // so don't append it here too.
-        const user = await readMicrosoftRewardsUser(page);
-        return { loggedIn: true, user: user || 'Microsoft account' };
-      } catch {
-        return { loggedIn: false };
-      }
-    },
-  },
-};
+// SITES is sourced from src/sites.js (Phase 0 of the engine refactor —
+// issue #11). The local binding is the login-capable subset, matching the
+// previous shape (id-keyed object containing only services with a
+// checkLogin function). Future commits migrate CLAIM_SCRIPT_ORDER,
+// activeServices(), CONFIG_SCHEMA, SERVICE_ROWS, etc. to derive from the
+// full registry too.
+const SITES = getLoginSitesById();
 
 let activeBrowser = null;
 const siteStatus = {};
@@ -469,33 +218,28 @@ let startupAutoCheck = null; // { current, total, siteName } while auto-check is
 // scheduled-daily path but wrong for interactive "run these now".
 //   CLAIM_CMD         — full set, used by the scheduler at its anchored wake.
 //   CLAIM_CMD_MANUAL  — subset (no microsoft.js), used by the "Run Now" button.
-// Claim script order when running every active service. microsoft.js is last
-// because it has an internal wait-until-window that blocks the process; put
-// it after everything else so the rest finishes promptly. microsoft.js is
-// shared between the 'microsoft' (desktop) and 'microsoft-mobile' site cards
-// — invoked once and runs both sessions internally.
-const CLAIM_SCRIPT_ORDER = [
-  { id: 'gog',              script: 'gog.js' },
-  { id: 'prime-gaming',     script: 'prime-gaming.js' },
-  { id: 'epic-games',       script: 'epic-games.js' },
-  { id: 'steam',            script: 'steam.js' },
-  { id: 'aliexpress',       script: 'aliexpress.js' },
-  { id: 'ubisoft',          script: 'ubisoft.js' }, // watch-only: notifies on new free games, no claim flow
-  { id: 'microsoft',        script: 'microsoft.js', linkedWith: 'microsoft-mobile' }, // omitted from "manual" runs by default
-];
+// Claim script order is derived from src/sites.js (Phase 0 of the engine
+// refactor — issue #11). Each registry entry carries a claimOrder integer;
+// getClaimScriptOrder() filters to entries with a script and sorts by it.
+// microsoft.js is intentionally last (claimOrder 7) — it has an internal
+// wait-until-window that blocks the process; running it after everything
+// else lets the rest finish promptly. microsoft.js is shared between the
+// 'microsoft' (desktop) and 'microsoft-mobile' site cards — invoked once
+// via the linkedWith pointer and runs both sessions internally.
+const CLAIM_SCRIPT_ORDER = getClaimScriptOrder();
 
+// The valid-service enum and opt-in defaults are sourced from the registry
+// (src/sites.js — Phase 0 of #11). Each entry's defaultActive flag drives
+// the fallback when no config or env value is present: false means opt-in
+// (aliexpress, ubisoft today), true means default-on (the rest).
 function activeServices() {
   const svc = describeConfig().effective.services || {};
-  const optInIds = new Set(['aliexpress', 'ubisoft']); // opt-in services default off
-  const isActive = id => {
-    const s = svc[id];
+  const isActive = entry => {
+    const s = svc[entry.id];
     if (s && typeof s.active === 'boolean') return s.active;
-    return !optInIds.has(id);
+    return entry.defaultActive;
   };
-  return new Set(Object.keys({
-    'prime-gaming': 1, 'epic-games': 1, 'gog': 1, 'steam': 1,
-    'microsoft': 1, 'microsoft-mobile': 1, 'aliexpress': 1, 'ubisoft': 1,
-  }).filter(isActive));
+  return new Set(SITE_REGISTRY.filter(isActive).map(s => s.id));
 }
 
 // Build the shell command for a claim run.
@@ -545,6 +289,9 @@ function browserBusy({ allowActiveBrowser = false } = {}) {
   }
   if (batchRedeem && batchRedeem.phase !== 'done' && batchRedeem.phase !== 'stopped' && batchRedeem.phase !== 'error') {
     return 'batch redeem in progress';
+  }
+  if (steamRedeem && steamRedeem.phase !== 'done' && steamRedeem.phase !== 'stopped' && steamRedeem.phase !== 'error') {
+    return 'Steam batch redeem in progress';
   }
   return null;
 }
@@ -787,6 +534,331 @@ async function stopBatchRedeem() {
 function clearFinishedBatchRedeem() {
   if (batchRedeem && (batchRedeem.phase === 'done' || batchRedeem.phase === 'stopped' || batchRedeem.phase === 'error')) {
     batchRedeem = null;
+  }
+}
+
+// ----- Steam batch redeem -----
+// Drives store.steampowered.com/account/registerkey for each pending Steam
+// key found across any service's claim DB (CLAIM_DB_FILES). An entry is
+// "pending" when it has store=steampowered.com, a code, and the status
+// hasn't already been marked redeemed/expired/invalid/locked. Steam's
+// activation page returns a structured AJAX JSON response we intercept
+// to determine outcome; we cross-check ambiguous "already_owned" cases
+// only via response text since Steam responses are usually unambiguous
+// (no library cross-check, unlike GOG where code_used is overloaded).
+//
+// Anti-bot: Steam occasionally serves a captcha mid-batch and rate-limits
+// after ~10 failed attempts in a short window. Captcha → pause and let
+// the user solve via VNC, same pattern as GOG. Rate-limit → bail the
+// batch so we don't burn through more keys than necessary.
+let steamRedeem = null;
+
+const STEAM_REDEEM_URL = 'https://store.steampowered.com/account/registerkey';
+const STEAM_AJAX_URL = 'https://store.steampowered.com/account/ajaxregisterkey/';
+
+function collectPendingSteamCodes(dbs) {
+  const pending = [];
+  for (const [dbFile, db] of Object.entries(dbs)) {
+    for (const [user, games] of Object.entries(db.data || {})) {
+      if (!games || typeof games !== 'object') continue;
+      for (const [title, entry] of Object.entries(games)) {
+        if (!entry || typeof entry !== 'object') continue;
+        if (entry.store !== 'steampowered.com' || !entry.code) continue;
+        if (/redeemed|expired|invalid|locked|not available/i.test(String(entry.status || ''))) continue;
+        pending.push({ db, dbFile, user, title, entry });
+      }
+    }
+  }
+  return pending;
+}
+
+async function countPendingSteamCodes() {
+  try {
+    const dbs = {};
+    for (const file of Object.values(getClaimDbFiles())) {
+      try { dbs[file] = await jsonDb(file, {}); } catch { /* DB doesn't exist yet */ }
+    }
+    return collectPendingSteamCodes(dbs).length;
+  } catch {
+    return 0;
+  }
+}
+
+// Parse Steam's ajaxregisterkey JSON response into a normalized outcome.
+// The actual discriminator is `purchase_result_details` (Steam's enum)
+// — not `success`, which is just 1 (any success) / 2 (any failure).
+// `error_text` is reliably populated only for a small subset of failures;
+// most go through the numeric detail code with empty error_text. Codes
+// observed in this account's test run plus documented values:
+//   0   NoDetail (paired with success=1 → genuine activation)
+//   5   InvalidKey
+//   9   AlreadyOwned by this account
+//   14  alternate already-owned bucket some packages return
+//   15  AlreadyActivatedDifferentAccount
+//   24  RegionLocked / not available in this country
+//   36  ItemAlreadyClaimed
+//   50  ExpiredCdKey
+//   53  RateLimitExceeded
+//   71  RestrictedCountry
+function classifySteamResponse(json) {
+  if (!json || typeof json !== 'object') return { outcome: 'unknown', raw: json };
+  const success = Number(json.success);
+  const detail = Number(
+    json.purchase_result_details ??
+    json.purchase_receipt_info?.result_detail,
+  );
+  const productTitle = json.purchase_receipt_info?.line_items?.[0]?.line_item_description || null;
+  const errText = String(json.error_text || json.errorText || '').toLowerCase();
+
+  // Genuine new activation: success=1 with no failure detail.
+  if (success === 1 && (!Number.isFinite(detail) || detail === 0)) {
+    return { outcome: 'redeemed', productTitle };
+  }
+
+  switch (detail) {
+    case 5:  return { outcome: 'invalid',        productTitle };
+    case 9:  return { outcome: 'already-owned',  productTitle };
+    case 14: return { outcome: 'already-owned',  productTitle };
+    case 15: return { outcome: 'used-elsewhere', productTitle };
+    case 24: return { outcome: 'region-locked',  productTitle };
+    case 36: return { outcome: 'used-elsewhere', productTitle };
+    case 50: return { outcome: 'invalid',        productTitle };
+    case 53: return { outcome: 'rate-limited',   productTitle };
+    case 71: return { outcome: 'region-locked',  productTitle };
+  }
+
+  // Fall back to error_text matching for any code not enumerated above.
+  if (errText.includes('already activated by a different steam account')) return { outcome: 'used-elsewhere', productTitle };
+  if (errText.includes('already owns') || errText.includes('already in your steam library')) return { outcome: 'already-owned', productTitle };
+  if (errText.includes('not valid') || errText.includes('does not appear to be valid') || errText.includes('expired')) return { outcome: 'invalid', productTitle };
+  if (errText.includes('not available') || errText.includes('region')) return { outcome: 'region-locked', productTitle };
+  if (errText.includes('too many') || errText.includes('try again later')) return { outcome: 'rate-limited', productTitle };
+  if (errText.includes('captcha')) return { outcome: 'captcha', productTitle };
+
+  return { outcome: 'unknown', raw: json };
+}
+
+async function processOneSteamKey(page, key) {
+  await page.goto(STEAM_REDEEM_URL, { waitUntil: 'domcontentloaded', timeout: 30000 });
+  await page.waitForTimeout(1500);
+  // The activation form is straightforward: product_key input, agreement
+  // checkbox (not always present on every account), and #register_btn.
+  try { await page.fill('#product_key', key); } catch (e) {
+    return { outcome: 'error', error: 'product_key input not found: ' + e.message };
+  }
+  try { await page.check('#accept_ssa'); } catch { /* checkbox not always present */ }
+  const respPromise = page.waitForResponse(
+    r => r.request().method() === 'POST' && r.url().startsWith(STEAM_AJAX_URL),
+    { timeout: 30000 },
+  ).catch(() => null);
+  try {
+    if (await page.locator('#register_btn').count() > 0) await page.click('#register_btn');
+    else if (await page.locator('button:has-text("Continue")').count() > 0) await page.click('button:has-text("Continue")');
+    else await page.click('button[type="submit"], a.btnv6_blue_hoverfade');
+  } catch (e) {
+    return { outcome: 'error', error: 'register button click failed: ' + e.message };
+  }
+  const resp = await respPromise;
+  if (!resp) return await scrapeDomOutcome(page);
+  let json = {};
+  try { json = await resp.json(); } catch { json = {}; }
+  const result = classifySteamResponse(json);
+  if (result.outcome === 'unknown') {
+    // Augment with DOM scrape — covers any future success=2 case where
+    // the JSON shape changes but Steam still renders a recognizable
+    // error in the page text.
+    const dom = await scrapeDomOutcome(page);
+    if (dom.outcome !== 'unknown') return dom;
+    // Log just enough to diagnose if we ever miss a code in the wild —
+    // not the full body since that includes packageids and timestamps.
+    console.log(`[${datetime()}] Steam redeem: unknown response — success=${json.success} detail=${json.purchase_result_details ?? json.purchase_receipt_info?.result_detail} errText="${(json.error_text || '').slice(0, 100)}"`);
+  }
+  return result;
+}
+
+async function scrapeDomOutcome(page) {
+  try {
+    if (await page.locator('text=/Welcome to your new game|Your transaction is complete/i').count() > 0) {
+      return { outcome: 'redeemed', productTitle: null };
+    }
+    if (await page.locator('text=/already owns this product|already in your Steam library/i').count() > 0) {
+      return { outcome: 'already-owned' };
+    }
+    if (await page.locator('text=/already activated by a different/i').count() > 0) {
+      return { outcome: 'used-elsewhere' };
+    }
+    if (await page.locator('text=/not valid|expired|incorrect/i').count() > 0) {
+      return { outcome: 'invalid' };
+    }
+    if (await page.locator('text=/not available .* country|region/i').count() > 0) {
+      return { outcome: 'region-locked' };
+    }
+    if (await page.locator('text=/too many .* attempts|try again later/i').count() > 0) {
+      return { outcome: 'rate-limited' };
+    }
+  } catch { /* selector errors fall through */ }
+  return { outcome: 'unknown' };
+}
+
+async function waitForSteamCaptchaResolution(page) {
+  const deadline = Date.now() + 10 * 60 * 1000;
+  while (Date.now() < deadline) {
+    if (!steamRedeem || steamRedeem.phase === 'stopped') return 'stopped';
+    const dom = await scrapeDomOutcome(page).catch(() => ({ outcome: 'unknown' }));
+    if (dom.outcome !== 'unknown' && dom.outcome !== 'captcha') return dom.outcome;
+    await new Promise(r => setTimeout(r, 2000));
+  }
+  return 'timeout';
+}
+
+async function runSteamRedeemLoop() {
+  while (steamRedeem && steamRedeem.index < steamRedeem.pending.length && steamRedeem.phase !== 'stopped') {
+    const { db, title, entry } = steamRedeem.pending[steamRedeem.index];
+    steamRedeem.currentTitle = title;
+    steamRedeem.currentCode = entry.code;
+    steamRedeem.message = `Processing ${title}…`;
+    steamRedeem.updatedAt = datetime();
+
+    let result;
+    try {
+      result = await processOneSteamKey(steamRedeem.page, entry.code);
+    } catch (e) {
+      console.error(`[${datetime()}] Steam redeem: ${title} — ${e.message}`);
+      result = { outcome: 'error', error: e.message };
+    }
+
+    let finalOutcome = result.outcome;
+    if (result.outcome === 'captcha') {
+      steamRedeem.phase = 'awaiting-captcha';
+      steamRedeem.message = `Solve captcha for "${title}" in the browser — auto-continuing when done.`;
+      steamRedeem.updatedAt = datetime();
+      finalOutcome = await waitForSteamCaptchaResolution(steamRedeem.page);
+      if (finalOutcome === 'stopped') break;
+      steamRedeem.phase = 'running';
+    }
+
+    if (finalOutcome === 'redeemed') {
+      entry.status = 'claimed and redeemed (Steam batch)';
+      steamRedeem.stats.redeemed++;
+    } else if (finalOutcome === 'already-owned') {
+      entry.status = 'claimed and redeemed (Steam: already owned)';
+      steamRedeem.stats.alreadyOwned++;
+    } else if (finalOutcome === 'used-elsewhere') {
+      entry.status = 'claimed, code activated on a different Steam account';
+      steamRedeem.stats.usedElsewhere++;
+    } else if (finalOutcome === 'invalid') {
+      entry.status = 'claimed, code expired or invalid (Steam)';
+      steamRedeem.stats.invalid++;
+    } else if (finalOutcome === 'region-locked') {
+      entry.status = 'claimed, code not available in this region';
+      steamRedeem.stats.regionLocked++;
+    } else if (finalOutcome === 'rate-limited') {
+      // Stop the batch — Steam will start failing every key and we don't
+      // want to burn through more attempts.
+      steamRedeem.message = `Steam rate-limited at "${title}" — stopping batch to avoid burning more keys. Retry later.`;
+      steamRedeem.stats.rateLimited++;
+      console.log(`[${datetime()}] Steam redeem: rate-limited at ${title}, halting batch.`);
+      try { await db.write(); } catch {}
+      steamRedeem.phase = 'stopped';
+      break;
+    } else if (finalOutcome === 'timeout') {
+      steamRedeem.stats.timeouts++;
+      console.log(`[${datetime()}] Steam redeem: ${title} — timed out, moving on`);
+    } else if (finalOutcome === 'error') {
+      steamRedeem.stats.errors++;
+    } else {
+      steamRedeem.stats.unknown++;
+    }
+    try { await db.write(); } catch {}
+    steamRedeem.index++;
+  }
+
+  if (steamRedeem) {
+    steamRedeem.phase = steamRedeem.phase === 'stopped' ? 'stopped' : 'done';
+    const s = steamRedeem.stats;
+    const summaryBits = [];
+    if (s.redeemed) summaryBits.push(`${s.redeemed} redeemed`);
+    if (s.alreadyOwned) summaryBits.push(`${s.alreadyOwned} already owned`);
+    if (s.usedElsewhere) summaryBits.push(`${s.usedElsewhere} used elsewhere`);
+    if (s.invalid) summaryBits.push(`${s.invalid} invalid`);
+    if (s.regionLocked) summaryBits.push(`${s.regionLocked} region-locked`);
+    if (s.rateLimited) summaryBits.push(`rate-limited`);
+    if (s.errors) summaryBits.push(`${s.errors} errors`);
+    steamRedeem.message = `Steam batch ${steamRedeem.phase} — ${summaryBits.join(', ') || 'no results'}`;
+    steamRedeem.updatedAt = datetime();
+    try { await steamRedeem.context.close(); } catch {}
+    steamRedeem.context = null;
+    steamRedeem.page = null;
+    console.log(`[${datetime()}] Steam redeem ${steamRedeem.phase}: ${steamRedeem.message}`);
+  }
+}
+
+async function startSteamRedeem() {
+  const busy = browserBusy({ allowActiveBrowser: true });
+  if (busy) throw new Error(`Cannot start Steam batch redeem — ${busy}.`);
+  if (activeBrowser) await closeBrowser();
+
+  // Open every claim DB that the registry knows about. Pending keys can
+  // come from any of them — today only prime-gaming.json carries Steam
+  // entries (rare), but Humble/Fanatical collectors will write into their
+  // own DBs and this loop picks those up automatically.
+  const dbs = {};
+  for (const file of Object.values(getClaimDbFiles())) {
+    try { dbs[file] = await jsonDb(file, {}); }
+    catch (e) { console.warn(`[${datetime()}] Steam redeem: couldn't open ${file}: ${e.message}`); }
+  }
+  const pending = collectPendingSteamCodes(dbs);
+  if (!pending.length) throw new Error('No pending Steam keys to redeem.');
+
+  console.log(`[${datetime()}] Starting Steam batch redeem for ${pending.length} key(s)...`);
+  const context = await chromium.launchPersistentContext(cfg.dir.browser, {
+    headless: false,
+    viewport: { width: cfg.width, height: cfg.height },
+    locale: 'en-US',
+    handleSIGINT: false,
+    args: ['--hide-crash-restore-bubble'],
+  });
+  const page = context.pages()[0] || await context.newPage();
+  try { await page.setViewportSize({ width: cfg.width, height: cfg.height }); } catch {}
+  context.setDefaultTimeout(0);
+
+  steamRedeem = {
+    context, page, pending,
+    index: 0,
+    stats: {
+      redeemed: 0, alreadyOwned: 0, usedElsewhere: 0,
+      invalid: 0, regionLocked: 0, rateLimited: 0,
+      errors: 0, timeouts: 0, unknown: 0,
+    },
+    phase: 'running',
+    currentTitle: null, currentCode: null,
+    message: `Starting — ${pending.length} key(s) queued`,
+    startedAt: datetime(), updatedAt: datetime(),
+  };
+
+  runSteamRedeemLoop().catch(e => {
+    console.error(`[${datetime()}] Steam redeem loop crashed:`, e);
+    if (steamRedeem) {
+      steamRedeem.phase = 'error';
+      steamRedeem.message = `Error: ${e.message}`;
+    }
+  });
+
+  return { success: true, total: pending.length };
+}
+
+async function stopSteamRedeem() {
+  if (!steamRedeem) return { success: false, error: 'No Steam batch redeem active.' };
+  steamRedeem.phase = 'stopped';
+  steamRedeem.message = 'Stopped by user';
+  steamRedeem.updatedAt = datetime();
+  try { if (steamRedeem.context) await steamRedeem.context.close(); } catch {}
+  return { success: true, stats: steamRedeem.stats };
+}
+
+function clearFinishedSteamRedeem() {
+  if (steamRedeem && (steamRedeem.phase === 'done' || steamRedeem.phase === 'stopped' || steamRedeem.phase === 'error')) {
+    steamRedeem = null;
   }
 }
 
@@ -1351,6 +1423,16 @@ function getState() {
       startedAt: batchRedeem.startedAt,
       updatedAt: batchRedeem.updatedAt,
     } : null,
+    steamRedeem: steamRedeem ? {
+      phase: steamRedeem.phase,
+      message: steamRedeem.message,
+      index: steamRedeem.index,
+      total: steamRedeem.pending.length,
+      currentTitle: steamRedeem.currentTitle,
+      stats: steamRedeem.stats,
+      startedAt: steamRedeem.startedAt,
+      updatedAt: steamRedeem.updatedAt,
+    } : null,
     startupAutoCheck,
     lastRun,
     captchaPending,
@@ -1365,12 +1447,8 @@ function getState() {
 // Microsoft Rewards is points-based and has no claim DB, so it appears in
 // the per-service table as N/A.
 
-const CLAIM_DB_FILES = {
-  'prime-gaming': 'prime-gaming.json',
-  'epic-games': 'epic-games.json',
-  'gog': 'gog.json',
-  'steam': 'steam.json',
-};
+// Sourced from the registry's claimDbFile fields (Phase 0 of #11).
+const CLAIM_DB_FILES = getClaimDbFiles();
 
 function parseLocalDateTime(s) {
   if (typeof s !== 'string' || !s) return null;
@@ -2025,6 +2103,7 @@ const PANEL_HTML = `<!DOCTYPE html>
   <div class="site-cards sessions-only" id="siteCards"></div>
   <div class="available-drawer sessions-only" id="availableDrawer" style="display:none"></div>
   <div class="sessions-only" id="batchRedeemInfo" style="display:none; margin-top: 10px;"></div>
+  <div class="sessions-only" id="steamRedeemInfo" style="display:none; margin-top: 10px;"></div>
   <div class="sessions-only" id="activeSession" style="display:none"></div>
   <div class="compact-sessions sessions-only" id="compactSessions" onclick="toggleSessionsCollapsed()" title="Click to expand session details"></div>
   <button class="header-collapse sessions-only" id="btnHeaderCollapse" onclick="toggleSessionsCollapsed()" title="Collapse session details" aria-label="Collapse session details">▴</button>
@@ -2105,6 +2184,7 @@ let userShowBrowser = false;
 let logOffset = 0;
 let logPollTimer = null;
 let pendingGogCount = 0;
+let pendingSteamCount = 0;
 
 // Drawer expand state lives in JS rather than the DOM because render() rebuilds
 // availableDrawer.innerHTML on every poll — pre-this fix, clicking the caret
@@ -2398,59 +2478,24 @@ function serviceSummary(id) {
 // Microsoft desktop + mobile share everything — settings, credentials, claim
 // script (microsoft.js runs both sessions internally). We present them as a
 // single service in the Settings UI but keep two session cards in the
-// Sessions tab for per-session login-state visibility.
-const LINKED_ACTIVE = {
-  'microsoft': ['microsoft', 'microsoft-mobile'],
-};
+// Sessions tab for per-session login-state visibility. Sourced from the
+// registry's linkedWith pointers (Phase 0 of #11) so adding a new linked
+// sub-service is one field on its parent entry.
+const LINKED_ACTIVE = ${JSON.stringify(getLinkedActiveMap())};
 
-// Hours dropdown reused by multiple fields.
-const HOURS_OF_DAY = (() => {
-  const out = [];
-  for (let h = 0; h < 24; h++) out.push({ value: h, label: String(h).padStart(2, '0') + ':00' });
-  return out;
-})();
-
-// Settings-tab fields grouped per service so the accordion code can iterate.
-const SERVICE_ROWS = [
-  { id: 'prime-gaming', title: 'Prime Gaming', fields: [
-    ['services.prime-gaming.redeem',       'Redeem keys on external stores'],
-    ['services.prime-gaming.claimDlc',     'Claim in-game DLC content',
-      { hint: 'Amazon removed the in-game content tab from Prime Gaming — this toggle is currently a no-op. The script skips cleanly when the tab is missing; will resume claiming if/when Amazon brings it back.' }],
-    ['services.prime-gaming.timeLeftDays', 'Skip if more than N days remain to claim',
-      { unit: 'days', hint: 'Leave blank to claim everything regardless of how long is left.' }],
-  ]},
-  { id: 'epic-games', title: 'Epic Games', fields: [
-    ['services.epic-games.claimMobile', 'Claim mobile games'],
-  ]},
-  { id: 'gog', title: 'GOG', fields: [
-    ['services.gog.keepNewsletter', 'Keep newsletter subscription after claiming'],
-  ]},
-  { id: 'steam', title: 'Steam', fields: [
-    ['services.steam.minRating', 'Minimum review rating (1–9)',
-      { hint: '6 = Mostly Positive; 7 = Very Positive; 8 = Overwhelmingly Positive.' }],
-    ['services.steam.minPrice', 'Minimum original price', { prefix: '$',
-      hint: 'Filters out shovelware that was free or near-free before the giveaway.' }],
-  ]},
-  // Microsoft Rewards: one row controls both desktop and mobile sessions.
-  // MS_SCHEDULE_* fields moved here from the Scheduler section because they
-  // only affect the Microsoft Rewards run, not the global loop.
-  { id: 'microsoft', title: 'Microsoft Rewards', subtitle: 'Runs both desktop and mobile sessions in one script.', fields: [
-    ['scheduler.msScheduleHours', 'Schedule window width (hours)',
-      { unit: 'hours', hint: 'Width of the daily Microsoft Rewards window, anchored to the start time. 0 runs immediately without anchoring.' }],
-    ['scheduler.msScheduleStart', 'Schedule window start (local time)',
-      { options: HOURS_OF_DAY }],
-    ['services.microsoft.searchDelayMaxSec', 'Max delay between Bing searches (seconds)',
-      { unit: 'seconds', hint: 'Upper bound for the random pause before each Bing search. Default 180 mimics a human pace; lower values shorten runs significantly (~60 searches × this/2 avg = total search time) but increase the risk of MS flagging the account as a bot.' }],
-    ['services.microsoft.redeemThreshold', 'Redeem reminder threshold (points)',
-      { unit: 'points', hint: 'When your balance crosses this each MS run sends a Pushover reminder with the deep-link below. Defaults to 6,500 (US $5 Amazon GC at the current 2026 catalog price). Set to 0 to disable. The reminder re-fires every run until you redeem, since stock can sell out within hours.' }],
-    ['services.microsoft.redeemLabel', 'Reward label (shown in notification)',
-      { hint: 'Free-text label for the reward you are chasing — appears in the Pushover message ("redeem <label>: <url>"). Update together with the URL when switching rewards.' }],
-    ['services.microsoft.redeemUrl', 'Reward deep-link URL',
-      { hint: 'Direct link to the reward catalog page. Find it at https://rewards.bing.com/redeem/all — click the reward you want and copy the address-bar URL (looks like https://rewards.bing.com/redeem/000800000000).' }],
-  ]},
-  { id: 'aliexpress', title: 'AliExpress', fields: [] },
-  { id: 'ubisoft', title: 'Ubisoft Connect', subtitle: 'Watch-only: pings you when a new free game appears at store.ubisoft.com/us/free-games. No login, no auto-claim — go grab it manually.', fields: [] },
-];
+// Settings-tab service rows derived from the registry (Phase 0 of #11).
+// Microsoft's MS_SCHEDULE_ fields are rendered under its row even though
+// their config paths live under scheduler.* — they're flagged
+// schedulerScope on the registry's configFields and getServiceRows
+// preserves the full path. Sub-services (microsoft-mobile) are rolled into
+// their parent row via the registry's linkedWith pointer. This block is
+// inside PANEL_HTML so the server pre-computes the array as a JSON
+// literal (see the assignment below) — a literal getServiceRows call
+// here would reference a Node-only symbol that doesn't exist in the
+// browser. NOTE: do not write a server-substitution placeholder inside
+// any comment in this file. Even inside // single-line comments, Node
+// parses the surrounding PANEL_HTML template literal eagerly and crashes.
+const SERVICE_ROWS = ${JSON.stringify(getServiceRows())};
 
 function serviceRow(entry) {
   const active = isServiceActiveForUI(entry.id);
@@ -2569,7 +2614,8 @@ function renderSchedulerSection() {
       '<div class="setting-label">Start time' + startDot + '</div>' +
       '<div class="setting-input">' +
         '<input type="time" value="' + escapeHtml(startTime) +
-          '" onchange="if(this.value) _stashedStartTime = this.value; setSettingValue(\\'scheduler.dailyStartTime\\', this.value); paintSettings()">' +
+          '" onchange="if(this.value) _stashedStartTime = this.value; setSettingValue(\\'scheduler.dailyStartTime\\', this.value)"' +
+          ' onblur="paintSettings()">' +
       '</div>' +
       startRevert +
     '</div>'
@@ -3216,6 +3262,13 @@ async function refreshPendingGogCount() {
   } catch { pendingGogCount = 0; }
 }
 
+async function refreshPendingSteamCount() {
+  try {
+    const r = await api('GET', '/pending-steam-count');
+    pendingSteamCount = r.count || 0;
+  } catch { pendingSteamCount = 0; }
+}
+
 async function api(method, path, body) {
   const opts = { method, headers: { 'Content-Type': 'application/json' } };
   if (body) opts.body = JSON.stringify(body);
@@ -3290,6 +3343,51 @@ function render() {
     batchInfo.style.display = 'none';
   }
 
+  // Steam batch-redeem panel — same pattern, separate state.
+  const steamInfo = document.getElementById('steamRedeemInfo');
+  const sr = state.steamRedeem;
+  if (sr) {
+    steamInfo.style.display = 'block';
+    const s = sr.stats || {};
+    const progressBar = '<span style="color:#888">' + sr.index + ' / ' + sr.total + ' keys</span>';
+    const statsBits = [];
+    if (s.redeemed) statsBits.push(s.redeemed + ' redeemed');
+    if (s.alreadyOwned) statsBits.push(s.alreadyOwned + ' already owned');
+    if (s.usedElsewhere) statsBits.push(s.usedElsewhere + ' used elsewhere');
+    if (s.invalid) statsBits.push(s.invalid + ' invalid');
+    if (s.regionLocked) statsBits.push(s.regionLocked + ' region-locked');
+    if (s.rateLimited) statsBits.push('rate-limited');
+    if (s.timeouts) statsBits.push(s.timeouts + ' timeouts');
+    if (s.errors) statsBits.push(s.errors + ' errors');
+    const statsLine = statsBits.join(', ');
+    const bgColor = sr.phase === 'awaiting-captcha' ? '#3a1a1e' : sr.phase === 'done' ? '#1a3a2e' : sr.phase === 'stopped' || sr.phase === 'error' ? '#3a2a1e' : '#0f3460';
+    const borderColor = sr.phase === 'awaiting-captcha' ? '#e94560' : sr.phase === 'done' ? '#4ecca3' : '#555';
+    let buttonsHtml = '';
+    if (sr.phase === 'running' || sr.phase === 'awaiting-captcha') {
+      buttonsHtml = '<button class="btn btn-stop" onclick="stopSteamRedeem()">Stop</button>';
+    } else {
+      buttonsHtml = '<button class="btn btn-cancel" onclick="clearSteamRedeem()">Dismiss</button>';
+    }
+    steamInfo.innerHTML =
+      '<div style="background:' + bgColor + ';border:1px solid ' + borderColor + ';border-radius:8px;padding:10px 14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">' +
+      '  <div style="flex:1;min-width:240px">' +
+      '    <div style="font-weight:600;margin-bottom:2px">Steam batch redeem — ' + sr.phase + '</div>' +
+      '    <div style="font-size:13px;margin-bottom:4px">' + sr.message + '</div>' +
+      '    <div style="font-size:12px;color:#888">' + progressBar + ' · ' + (statsLine || 'no results yet') + '</div>' +
+      '  </div>' +
+      '  <div>' + buttonsHtml + '</div>' +
+      '</div>';
+  } else if (pendingSteamCount > 0) {
+    steamInfo.style.display = 'block';
+    steamInfo.innerHTML =
+      '<div style="background:#0f3460;border-radius:8px;padding:10px 14px;display:flex;align-items:center;gap:12px">' +
+      '  <div style="flex:1"><b>' + pendingSteamCount + ' pending Steam key' + (pendingSteamCount === 1 ? '' : 's') + '</b> — auto-redeems each via store.steampowered.com</div>' +
+      '  <button class="btn btn-run" onclick="startSteamRedeem()">Batch Redeem on Steam</button>' +
+      '</div>';
+  } else {
+    steamInfo.style.display = 'none';
+  }
+
   const stepLabels = ['Check sessions', 'Log in to sites', 'First run', 'Done!'];
   steps.innerHTML = stepLabels.map((label, i) => {
     const num = i + 1;
@@ -3338,7 +3436,7 @@ function render() {
     // Login + batch-redeem flows already mount the iframe themselves and
     // would break if we removed it — show the button disabled with a label
     // that matches the actual state.
-    const ownedElsewhere = !!(state.activeBrowser || state.batchRedeem);
+    const ownedElsewhere = !!(state.activeBrowser || state.batchRedeem || state.steamRedeem);
     btnShowBrowser.disabled = ownedElsewhere;
     btnShowBrowser.textContent = ownedElsewhere ? 'Browser shown' : (userShowBrowser ? 'Hide browser' : 'Show browser');
     btnShowBrowser.classList.toggle('active', userShowBrowser || ownedElsewhere);
@@ -3347,12 +3445,12 @@ function render() {
   if (btnPopoutBrowser) {
     // Pop out only makes sense as a follow-up to Show browser — it'd be noise
     // (or worse, a dead link in degraded networks) if always visible.
-    const iframeMounted = !!(userShowBrowser || state.activeBrowser || state.batchRedeem);
+    const iframeMounted = !!(userShowBrowser || state.activeBrowser || state.batchRedeem || state.steamRedeem);
     btnPopoutBrowser.style.display = iframeMounted ? '' : 'none';
   }
 
   const placeholder = document.getElementById('vncPlaceholder');
-  if (placeholder && !state.activeBrowser && !state.batchRedeem && !showingLog && !userShowBrowser) {
+  if (placeholder && !state.activeBrowser && !state.batchRedeem && !state.steamRedeem && !showingLog && !userShowBrowser) {
     placeholder.style.display = 'flex';
     const wrap = inner => '<div style="max-width:520px;font-size:14px;line-height:1.7;color:#a0b4d4">' + inner + '</div>';
     if (state.startupAutoCheck) {
@@ -3405,7 +3503,11 @@ function render() {
     stripText = null; // activeSession row owns this state
   } else if (isRunning) {
     stripKind = 'warn';
-    const src = state.runSource === 'scheduler' ? 'scheduler' : 'manual';
+    // runSource carries a richer identifier than the original 'scheduler'/
+    // 'panel' constants — the scheduler tags it 'scheduler-main' or
+    // 'scheduler-ms' (with an optional ':site+site' suffix), and the panel's
+    // per-card Run uses 'panel:<id>'. Treat any prefix as the run kind.
+    const src = (state.runSource && /^scheduler/.test(state.runSource)) ? 'scheduler' : 'manual';
     stripText = '● Run in progress (' + src + ')…';
   } else if (activeSites.some(s => s.status === 'not_logged_in')) {
     stripKind = 'err';
@@ -3597,7 +3699,7 @@ function focusCaptcha() {
     sessionsCollapsed = true;
     localStorage.setItem('sessionsCollapsed', '1');
   }
-  if (!userShowBrowser && !state.activeBrowser && !state.batchRedeem) {
+  if (!userShowBrowser && !state.activeBrowser && !state.batchRedeem && !state.steamRedeem) {
     userShowBrowser = true;
     showVnc();
   }
@@ -3622,7 +3724,7 @@ function hideVnc() {
 // No-op during active login / batch redeem — those flows own the iframe
 // and removing it here would break them.
 function toggleBrowserView() {
-  if (state.activeBrowser || state.batchRedeem) return;
+  if (state.activeBrowser || state.batchRedeem || state.steamRedeem) return;
   userShowBrowser = !userShowBrowser;
   if (userShowBrowser) {
     showVnc(); // mounts iframe; also calls hideRunLog() which hides the log el
@@ -3854,10 +3956,46 @@ async function clearBatchRedeem() {
   await refreshState();
 }
 
+async function startSteamRedeem() {
+  busy = true; render();
+  try {
+    const r = await api('POST', '/steam-redeem/start');
+    if (r.success) {
+      showToast('Steam batch redeem started — ' + r.total + ' key(s) queued.', 'success');
+      showVnc();
+    } else {
+      showToast(r.error || 'Failed to start Steam batch redeem.', 'error');
+    }
+  } catch (e) { showToast('Error: ' + e.message, 'error'); }
+  busy = false;
+  await refreshState();
+}
+
+async function stopSteamRedeem() {
+  try {
+    await api('POST', '/steam-redeem/stop');
+    showToast('Steam batch redeem stopped.', 'info');
+  } catch (e) { showToast('Error: ' + e.message, 'error'); }
+  await refreshState();
+}
+
+async function clearSteamRedeem() {
+  try {
+    await api('POST', '/steam-redeem/clear');
+  } catch (e) { showToast('Error: ' + e.message, 'error'); }
+  await refreshPendingSteamCount();
+  await refreshState();
+}
+
 // Faster poll when batch-redeem is active so progress updates feel live.
+// Same timer covers both GOG and Steam batches; only one runs at a time
+// (browserBusy mutex prevents overlap), so a single 2s tick when either
+// is active is enough.
 let batchPollTimer = null;
 function updateBatchPolling() {
-  const active = state.batchRedeem && (state.batchRedeem.phase === 'running' || state.batchRedeem.phase === 'awaiting-captcha');
+  const gogActive = state.batchRedeem && (state.batchRedeem.phase === 'running' || state.batchRedeem.phase === 'awaiting-captcha');
+  const steamActive = state.steamRedeem && (state.steamRedeem.phase === 'running' || state.steamRedeem.phase === 'awaiting-captcha');
+  const active = gogActive || steamActive;
   if (active && !batchPollTimer) {
     batchPollTimer = setInterval(refreshState, 2000);
     showVnc();
@@ -3907,6 +4045,7 @@ async function handleDeepLink() {
 
 async function initialLoad() {
   await refreshPendingGogCount();
+  await refreshPendingSteamCount();
   await refreshState();
   updateBatchPolling();
   await handleDeepLink();
@@ -3915,6 +4054,7 @@ initialLoad();
 setInterval(async () => {
   await refreshState();
   if (!state.batchRedeem) await refreshPendingGogCount();
+  if (!state.steamRedeem) await refreshPendingSteamCount();
   updateBatchPolling();
 }, 10000);
 </script>
@@ -4145,6 +4285,34 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (req.method === 'GET' && req.url === '/api/pending-steam-count') {
+      const count = await countPendingSteamCodes();
+      sendJson(res, { count });
+      return;
+    }
+
+    if (req.method === 'POST' && req.url === '/api/steam-redeem/start') {
+      try {
+        const result = await startSteamRedeem();
+        sendJson(res, result);
+      } catch (e) {
+        sendJson(res, { success: false, error: e.message }, 400);
+      }
+      return;
+    }
+
+    if (req.method === 'POST' && req.url === '/api/steam-redeem/stop') {
+      const result = await stopSteamRedeem();
+      sendJson(res, result);
+      return;
+    }
+
+    if (req.method === 'POST' && req.url === '/api/steam-redeem/clear') {
+      clearFinishedSteamRedeem();
+      sendJson(res, { success: true });
+      return;
+    }
+
     // Static asset serving — branding (logo + favicon set). Path-allowlisted
     // to /assets/ + /favicon.ico to avoid traversal; we never serve arbitrary
     // files. Browser tab favicon hits /favicon.ico without the prefix on
@@ -4184,6 +4352,10 @@ async function gracefulShutdown(sig) {
   if (batchRedeem) {
     batchRedeem.phase = 'stopped';
     try { if (batchRedeem.context) await batchRedeem.context.close(); } catch {}
+  }
+  if (steamRedeem) {
+    steamRedeem.phase = 'stopped';
+    try { if (steamRedeem.context) await steamRedeem.context.close(); } catch {}
   }
   await closeBrowser();
   server.close();
