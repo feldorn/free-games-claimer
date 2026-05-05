@@ -290,6 +290,9 @@ function browserBusy({ allowActiveBrowser = false } = {}) {
   if (batchRedeem && batchRedeem.phase !== 'done' && batchRedeem.phase !== 'stopped' && batchRedeem.phase !== 'error') {
     return 'batch redeem in progress';
   }
+  if (steamRedeem && steamRedeem.phase !== 'done' && steamRedeem.phase !== 'stopped' && steamRedeem.phase !== 'error') {
+    return 'Steam batch redeem in progress';
+  }
   return null;
 }
 
@@ -531,6 +534,317 @@ async function stopBatchRedeem() {
 function clearFinishedBatchRedeem() {
   if (batchRedeem && (batchRedeem.phase === 'done' || batchRedeem.phase === 'stopped' || batchRedeem.phase === 'error')) {
     batchRedeem = null;
+  }
+}
+
+// ----- Steam batch redeem -----
+// Drives store.steampowered.com/account/registerkey for each pending Steam
+// key found across any service's claim DB (CLAIM_DB_FILES). An entry is
+// "pending" when it has store=steampowered.com, a code, and the status
+// hasn't already been marked redeemed/expired/invalid/locked. Steam's
+// activation page returns a structured AJAX JSON response we intercept
+// to determine outcome; we cross-check ambiguous "already_owned" cases
+// only via response text since Steam responses are usually unambiguous
+// (no library cross-check, unlike GOG where code_used is overloaded).
+//
+// Anti-bot: Steam occasionally serves a captcha mid-batch and rate-limits
+// after ~10 failed attempts in a short window. Captcha → pause and let
+// the user solve via VNC, same pattern as GOG. Rate-limit → bail the
+// batch so we don't burn through more keys than necessary.
+let steamRedeem = null;
+
+const STEAM_REDEEM_URL = 'https://store.steampowered.com/account/registerkey';
+const STEAM_AJAX_URL = 'https://store.steampowered.com/account/ajaxregisterkey/';
+
+function collectPendingSteamCodes(dbs) {
+  const pending = [];
+  for (const [dbFile, db] of Object.entries(dbs)) {
+    for (const [user, games] of Object.entries(db.data || {})) {
+      if (!games || typeof games !== 'object') continue;
+      for (const [title, entry] of Object.entries(games)) {
+        if (!entry || typeof entry !== 'object') continue;
+        if (entry.store !== 'steampowered.com' || !entry.code) continue;
+        if (/redeemed|expired|invalid|locked|not available/i.test(String(entry.status || ''))) continue;
+        pending.push({ db, dbFile, user, title, entry });
+      }
+    }
+  }
+  return pending;
+}
+
+async function countPendingSteamCodes() {
+  try {
+    const dbs = {};
+    for (const file of Object.values(getClaimDbFiles())) {
+      try { dbs[file] = await jsonDb(file, {}); } catch { /* DB doesn't exist yet */ }
+    }
+    return collectPendingSteamCodes(dbs).length;
+  } catch {
+    return 0;
+  }
+}
+
+// Parse Steam's ajaxregisterkey JSON response into a normalized outcome.
+// Steam's `success` codes (observed):
+//   1   activated successfully
+//   14  unexpected error / generic failure
+//   15  key already activated by a different account
+//   24  product not available in this region
+//   53  too many activation attempts / rate-limited
+//   58  expired key (not always — sometimes folded into 14)
+// If the user's account already owns the product, success=14 is paired
+// with error_text mentioning "already owns". purchase_receipt_info, when
+// present, indicates a real activation just happened.
+function classifySteamResponse(json) {
+  if (!json || typeof json !== 'object') return { outcome: 'unknown', raw: json };
+  const code = Number(json.success);
+  const errText = String(json.error_text || json.errorText || '').toLowerCase();
+  if (code === 1 && json.purchase_receipt_info) {
+    const desc = json.purchase_receipt_info?.line_items?.[0]?.line_item_description || null;
+    return { outcome: 'redeemed', productTitle: desc };
+  }
+  if (errText.includes('already activated by a different steam account') || code === 15) {
+    return { outcome: 'used-elsewhere' };
+  }
+  if (errText.includes('already owns') || errText.includes('already in your steam library')) {
+    return { outcome: 'already-owned' };
+  }
+  if (errText.includes('not valid') || errText.includes('does not appear to be valid') || errText.includes('expired')) {
+    return { outcome: 'invalid' };
+  }
+  if (errText.includes('not available for purchase in your country') || errText.includes('region') || code === 24) {
+    return { outcome: 'region-locked' };
+  }
+  if (errText.includes('too many') || errText.includes('try again later') || code === 53) {
+    return { outcome: 'rate-limited' };
+  }
+  if (errText.includes('captcha')) return { outcome: 'captcha' };
+  return { outcome: 'unknown', raw: json };
+}
+
+async function processOneSteamKey(page, key) {
+  await page.goto(STEAM_REDEEM_URL, { waitUntil: 'domcontentloaded', timeout: 30000 });
+  await page.waitForTimeout(1500);
+  // The activation form is straightforward: product_key input, agreement
+  // checkbox, register button. Older flows used #register_btn; current
+  // page uses a button with id register_btn_div / inner button. Try both.
+  try { await page.fill('#product_key', key); } catch (e) {
+    return { outcome: 'error', error: 'product_key input not found: ' + e.message };
+  }
+  try { await page.check('#accept_ssa'); } catch { /* checkbox not always present */ }
+  const respPromise = page.waitForResponse(
+    r => r.request().method() === 'POST' && r.url().startsWith(STEAM_AJAX_URL),
+    { timeout: 30000 },
+  ).catch(() => null);
+  // Click the activate button. Selectors observed: #register_btn (legacy),
+  // .btn_blue_steamui (modern). Fall back to first submit-typed button.
+  try {
+    if (await page.locator('#register_btn').count() > 0) await page.click('#register_btn');
+    else if (await page.locator('button:has-text("Continue")').count() > 0) await page.click('button:has-text("Continue")');
+    else await page.click('button[type="submit"], a.btnv6_blue_hoverfade');
+  } catch (e) {
+    return { outcome: 'error', error: 'register button click failed: ' + e.message };
+  }
+  const resp = await respPromise;
+  if (!resp) {
+    // No AJAX response observed. Fall back to DOM scraping for outcome.
+    return await scrapeDomOutcome(page);
+  }
+  let json = {};
+  try { json = await resp.json(); } catch { json = {}; }
+  const result = classifySteamResponse(json);
+  if (result.outcome === 'unknown') {
+    // Augment with DOM scrape — sometimes Steam returns success=0 with no
+    // text but renders a visible error in the page.
+    const dom = await scrapeDomOutcome(page);
+    if (dom.outcome !== 'unknown') return dom;
+  }
+  return result;
+}
+
+async function scrapeDomOutcome(page) {
+  try {
+    if (await page.locator('text=/Welcome to your new game|Your transaction is complete/i').count() > 0) {
+      return { outcome: 'redeemed', productTitle: null };
+    }
+    if (await page.locator('text=/already owns this product|already in your Steam library/i').count() > 0) {
+      return { outcome: 'already-owned' };
+    }
+    if (await page.locator('text=/already activated by a different/i').count() > 0) {
+      return { outcome: 'used-elsewhere' };
+    }
+    if (await page.locator('text=/not valid|expired|incorrect/i').count() > 0) {
+      return { outcome: 'invalid' };
+    }
+    if (await page.locator('text=/not available .* country|region/i').count() > 0) {
+      return { outcome: 'region-locked' };
+    }
+    if (await page.locator('text=/too many .* attempts|try again later/i').count() > 0) {
+      return { outcome: 'rate-limited' };
+    }
+  } catch { /* selector errors fall through */ }
+  return { outcome: 'unknown' };
+}
+
+async function waitForSteamCaptchaResolution(page) {
+  const deadline = Date.now() + 10 * 60 * 1000;
+  while (Date.now() < deadline) {
+    if (!steamRedeem || steamRedeem.phase === 'stopped') return 'stopped';
+    const dom = await scrapeDomOutcome(page).catch(() => ({ outcome: 'unknown' }));
+    if (dom.outcome !== 'unknown' && dom.outcome !== 'captcha') return dom.outcome;
+    await new Promise(r => setTimeout(r, 2000));
+  }
+  return 'timeout';
+}
+
+async function runSteamRedeemLoop() {
+  while (steamRedeem && steamRedeem.index < steamRedeem.pending.length && steamRedeem.phase !== 'stopped') {
+    const { db, title, entry } = steamRedeem.pending[steamRedeem.index];
+    steamRedeem.currentTitle = title;
+    steamRedeem.currentCode = entry.code;
+    steamRedeem.message = `Processing ${title}…`;
+    steamRedeem.updatedAt = datetime();
+
+    let result;
+    try {
+      result = await processOneSteamKey(steamRedeem.page, entry.code);
+    } catch (e) {
+      console.error(`[${datetime()}] Steam redeem: ${title} — ${e.message}`);
+      result = { outcome: 'error', error: e.message };
+    }
+
+    let finalOutcome = result.outcome;
+    if (result.outcome === 'captcha') {
+      steamRedeem.phase = 'awaiting-captcha';
+      steamRedeem.message = `Solve captcha for "${title}" in the browser — auto-continuing when done.`;
+      steamRedeem.updatedAt = datetime();
+      finalOutcome = await waitForSteamCaptchaResolution(steamRedeem.page);
+      if (finalOutcome === 'stopped') break;
+      steamRedeem.phase = 'running';
+    }
+
+    if (finalOutcome === 'redeemed') {
+      entry.status = 'claimed and redeemed (Steam batch)';
+      steamRedeem.stats.redeemed++;
+    } else if (finalOutcome === 'already-owned') {
+      entry.status = 'claimed and redeemed (Steam: already owned)';
+      steamRedeem.stats.alreadyOwned++;
+    } else if (finalOutcome === 'used-elsewhere') {
+      entry.status = 'claimed, code activated on a different Steam account';
+      steamRedeem.stats.usedElsewhere++;
+    } else if (finalOutcome === 'invalid') {
+      entry.status = 'claimed, code expired or invalid (Steam)';
+      steamRedeem.stats.invalid++;
+    } else if (finalOutcome === 'region-locked') {
+      entry.status = 'claimed, code not available in this region';
+      steamRedeem.stats.regionLocked++;
+    } else if (finalOutcome === 'rate-limited') {
+      // Stop the batch — Steam will start failing every key and we don't
+      // want to burn through more attempts.
+      steamRedeem.message = `Steam rate-limited at "${title}" — stopping batch to avoid burning more keys. Retry later.`;
+      steamRedeem.stats.rateLimited++;
+      console.log(`[${datetime()}] Steam redeem: rate-limited at ${title}, halting batch.`);
+      try { await db.write(); } catch {}
+      steamRedeem.phase = 'stopped';
+      break;
+    } else if (finalOutcome === 'timeout') {
+      steamRedeem.stats.timeouts++;
+      console.log(`[${datetime()}] Steam redeem: ${title} — timed out, moving on`);
+    } else if (finalOutcome === 'error') {
+      steamRedeem.stats.errors++;
+    } else {
+      steamRedeem.stats.unknown++;
+    }
+    try { await db.write(); } catch {}
+    steamRedeem.index++;
+  }
+
+  if (steamRedeem) {
+    steamRedeem.phase = steamRedeem.phase === 'stopped' ? 'stopped' : 'done';
+    const s = steamRedeem.stats;
+    const summaryBits = [];
+    if (s.redeemed) summaryBits.push(`${s.redeemed} redeemed`);
+    if (s.alreadyOwned) summaryBits.push(`${s.alreadyOwned} already owned`);
+    if (s.usedElsewhere) summaryBits.push(`${s.usedElsewhere} used elsewhere`);
+    if (s.invalid) summaryBits.push(`${s.invalid} invalid`);
+    if (s.regionLocked) summaryBits.push(`${s.regionLocked} region-locked`);
+    if (s.rateLimited) summaryBits.push(`rate-limited`);
+    if (s.errors) summaryBits.push(`${s.errors} errors`);
+    steamRedeem.message = `Steam batch ${steamRedeem.phase} — ${summaryBits.join(', ') || 'no results'}`;
+    steamRedeem.updatedAt = datetime();
+    try { await steamRedeem.context.close(); } catch {}
+    steamRedeem.context = null;
+    steamRedeem.page = null;
+    console.log(`[${datetime()}] Steam redeem ${steamRedeem.phase}: ${steamRedeem.message}`);
+  }
+}
+
+async function startSteamRedeem() {
+  const busy = browserBusy({ allowActiveBrowser: true });
+  if (busy) throw new Error(`Cannot start Steam batch redeem — ${busy}.`);
+  if (activeBrowser) await closeBrowser();
+
+  // Open every claim DB that the registry knows about. Pending keys can
+  // come from any of them — today only prime-gaming.json carries Steam
+  // entries (rare), but Humble/Fanatical collectors will write into their
+  // own DBs and this loop picks those up automatically.
+  const dbs = {};
+  for (const file of Object.values(getClaimDbFiles())) {
+    try { dbs[file] = await jsonDb(file, {}); }
+    catch (e) { console.warn(`[${datetime()}] Steam redeem: couldn't open ${file}: ${e.message}`); }
+  }
+  const pending = collectPendingSteamCodes(dbs);
+  if (!pending.length) throw new Error('No pending Steam keys to redeem.');
+
+  console.log(`[${datetime()}] Starting Steam batch redeem for ${pending.length} key(s)...`);
+  const context = await chromium.launchPersistentContext(cfg.dir.browser, {
+    headless: false,
+    viewport: { width: cfg.width, height: cfg.height },
+    locale: 'en-US',
+    handleSIGINT: false,
+    args: ['--hide-crash-restore-bubble'],
+  });
+  const page = context.pages()[0] || await context.newPage();
+  try { await page.setViewportSize({ width: cfg.width, height: cfg.height }); } catch {}
+  context.setDefaultTimeout(0);
+
+  steamRedeem = {
+    context, page, pending,
+    index: 0,
+    stats: {
+      redeemed: 0, alreadyOwned: 0, usedElsewhere: 0,
+      invalid: 0, regionLocked: 0, rateLimited: 0,
+      errors: 0, timeouts: 0, unknown: 0,
+    },
+    phase: 'running',
+    currentTitle: null, currentCode: null,
+    message: `Starting — ${pending.length} key(s) queued`,
+    startedAt: datetime(), updatedAt: datetime(),
+  };
+
+  runSteamRedeemLoop().catch(e => {
+    console.error(`[${datetime()}] Steam redeem loop crashed:`, e);
+    if (steamRedeem) {
+      steamRedeem.phase = 'error';
+      steamRedeem.message = `Error: ${e.message}`;
+    }
+  });
+
+  return { success: true, total: pending.length };
+}
+
+async function stopSteamRedeem() {
+  if (!steamRedeem) return { success: false, error: 'No Steam batch redeem active.' };
+  steamRedeem.phase = 'stopped';
+  steamRedeem.message = 'Stopped by user';
+  steamRedeem.updatedAt = datetime();
+  try { if (steamRedeem.context) await steamRedeem.context.close(); } catch {}
+  return { success: true, stats: steamRedeem.stats };
+}
+
+function clearFinishedSteamRedeem() {
+  if (steamRedeem && (steamRedeem.phase === 'done' || steamRedeem.phase === 'stopped' || steamRedeem.phase === 'error')) {
+    steamRedeem = null;
   }
 }
 
@@ -1094,6 +1408,16 @@ function getState() {
       stats: batchRedeem.stats,
       startedAt: batchRedeem.startedAt,
       updatedAt: batchRedeem.updatedAt,
+    } : null,
+    steamRedeem: steamRedeem ? {
+      phase: steamRedeem.phase,
+      message: steamRedeem.message,
+      index: steamRedeem.index,
+      total: steamRedeem.pending.length,
+      currentTitle: steamRedeem.currentTitle,
+      stats: steamRedeem.stats,
+      startedAt: steamRedeem.startedAt,
+      updatedAt: steamRedeem.updatedAt,
     } : null,
     startupAutoCheck,
     lastRun,
@@ -1765,6 +2089,7 @@ const PANEL_HTML = `<!DOCTYPE html>
   <div class="site-cards sessions-only" id="siteCards"></div>
   <div class="available-drawer sessions-only" id="availableDrawer" style="display:none"></div>
   <div class="sessions-only" id="batchRedeemInfo" style="display:none; margin-top: 10px;"></div>
+  <div class="sessions-only" id="steamRedeemInfo" style="display:none; margin-top: 10px;"></div>
   <div class="sessions-only" id="activeSession" style="display:none"></div>
   <div class="compact-sessions sessions-only" id="compactSessions" onclick="toggleSessionsCollapsed()" title="Click to expand session details"></div>
   <button class="header-collapse sessions-only" id="btnHeaderCollapse" onclick="toggleSessionsCollapsed()" title="Collapse session details" aria-label="Collapse session details">▴</button>
@@ -1845,6 +2170,7 @@ let userShowBrowser = false;
 let logOffset = 0;
 let logPollTimer = null;
 let pendingGogCount = 0;
+let pendingSteamCount = 0;
 
 // Drawer expand state lives in JS rather than the DOM because render() rebuilds
 // availableDrawer.innerHTML on every poll — pre-this fix, clicking the caret
@@ -2921,6 +3247,13 @@ async function refreshPendingGogCount() {
   } catch { pendingGogCount = 0; }
 }
 
+async function refreshPendingSteamCount() {
+  try {
+    const r = await api('GET', '/pending-steam-count');
+    pendingSteamCount = r.count || 0;
+  } catch { pendingSteamCount = 0; }
+}
+
 async function api(method, path, body) {
   const opts = { method, headers: { 'Content-Type': 'application/json' } };
   if (body) opts.body = JSON.stringify(body);
@@ -2995,6 +3328,51 @@ function render() {
     batchInfo.style.display = 'none';
   }
 
+  // Steam batch-redeem panel — same pattern, separate state.
+  const steamInfo = document.getElementById('steamRedeemInfo');
+  const sr = state.steamRedeem;
+  if (sr) {
+    steamInfo.style.display = 'block';
+    const s = sr.stats || {};
+    const progressBar = '<span style="color:#888">' + sr.index + ' / ' + sr.total + ' keys</span>';
+    const statsBits = [];
+    if (s.redeemed) statsBits.push(s.redeemed + ' redeemed');
+    if (s.alreadyOwned) statsBits.push(s.alreadyOwned + ' already owned');
+    if (s.usedElsewhere) statsBits.push(s.usedElsewhere + ' used elsewhere');
+    if (s.invalid) statsBits.push(s.invalid + ' invalid');
+    if (s.regionLocked) statsBits.push(s.regionLocked + ' region-locked');
+    if (s.rateLimited) statsBits.push('rate-limited');
+    if (s.timeouts) statsBits.push(s.timeouts + ' timeouts');
+    if (s.errors) statsBits.push(s.errors + ' errors');
+    const statsLine = statsBits.join(', ');
+    const bgColor = sr.phase === 'awaiting-captcha' ? '#3a1a1e' : sr.phase === 'done' ? '#1a3a2e' : sr.phase === 'stopped' || sr.phase === 'error' ? '#3a2a1e' : '#0f3460';
+    const borderColor = sr.phase === 'awaiting-captcha' ? '#e94560' : sr.phase === 'done' ? '#4ecca3' : '#555';
+    let buttonsHtml = '';
+    if (sr.phase === 'running' || sr.phase === 'awaiting-captcha') {
+      buttonsHtml = '<button class="btn btn-stop" onclick="stopSteamRedeem()">Stop</button>';
+    } else {
+      buttonsHtml = '<button class="btn btn-cancel" onclick="clearSteamRedeem()">Dismiss</button>';
+    }
+    steamInfo.innerHTML =
+      '<div style="background:' + bgColor + ';border:1px solid ' + borderColor + ';border-radius:8px;padding:10px 14px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">' +
+      '  <div style="flex:1;min-width:240px">' +
+      '    <div style="font-weight:600;margin-bottom:2px">Steam batch redeem — ' + sr.phase + '</div>' +
+      '    <div style="font-size:13px;margin-bottom:4px">' + sr.message + '</div>' +
+      '    <div style="font-size:12px;color:#888">' + progressBar + ' · ' + (statsLine || 'no results yet') + '</div>' +
+      '  </div>' +
+      '  <div>' + buttonsHtml + '</div>' +
+      '</div>';
+  } else if (pendingSteamCount > 0) {
+    steamInfo.style.display = 'block';
+    steamInfo.innerHTML =
+      '<div style="background:#0f3460;border-radius:8px;padding:10px 14px;display:flex;align-items:center;gap:12px">' +
+      '  <div style="flex:1"><b>' + pendingSteamCount + ' pending Steam key' + (pendingSteamCount === 1 ? '' : 's') + '</b> — auto-redeems each via store.steampowered.com</div>' +
+      '  <button class="btn btn-run" onclick="startSteamRedeem()">Batch Redeem on Steam</button>' +
+      '</div>';
+  } else {
+    steamInfo.style.display = 'none';
+  }
+
   const stepLabels = ['Check sessions', 'Log in to sites', 'First run', 'Done!'];
   steps.innerHTML = stepLabels.map((label, i) => {
     const num = i + 1;
@@ -3043,7 +3421,7 @@ function render() {
     // Login + batch-redeem flows already mount the iframe themselves and
     // would break if we removed it — show the button disabled with a label
     // that matches the actual state.
-    const ownedElsewhere = !!(state.activeBrowser || state.batchRedeem);
+    const ownedElsewhere = !!(state.activeBrowser || state.batchRedeem || state.steamRedeem);
     btnShowBrowser.disabled = ownedElsewhere;
     btnShowBrowser.textContent = ownedElsewhere ? 'Browser shown' : (userShowBrowser ? 'Hide browser' : 'Show browser');
     btnShowBrowser.classList.toggle('active', userShowBrowser || ownedElsewhere);
@@ -3052,12 +3430,12 @@ function render() {
   if (btnPopoutBrowser) {
     // Pop out only makes sense as a follow-up to Show browser — it'd be noise
     // (or worse, a dead link in degraded networks) if always visible.
-    const iframeMounted = !!(userShowBrowser || state.activeBrowser || state.batchRedeem);
+    const iframeMounted = !!(userShowBrowser || state.activeBrowser || state.batchRedeem || state.steamRedeem);
     btnPopoutBrowser.style.display = iframeMounted ? '' : 'none';
   }
 
   const placeholder = document.getElementById('vncPlaceholder');
-  if (placeholder && !state.activeBrowser && !state.batchRedeem && !showingLog && !userShowBrowser) {
+  if (placeholder && !state.activeBrowser && !state.batchRedeem && !state.steamRedeem && !showingLog && !userShowBrowser) {
     placeholder.style.display = 'flex';
     const wrap = inner => '<div style="max-width:520px;font-size:14px;line-height:1.7;color:#a0b4d4">' + inner + '</div>';
     if (state.startupAutoCheck) {
@@ -3302,7 +3680,7 @@ function focusCaptcha() {
     sessionsCollapsed = true;
     localStorage.setItem('sessionsCollapsed', '1');
   }
-  if (!userShowBrowser && !state.activeBrowser && !state.batchRedeem) {
+  if (!userShowBrowser && !state.activeBrowser && !state.batchRedeem && !state.steamRedeem) {
     userShowBrowser = true;
     showVnc();
   }
@@ -3327,7 +3705,7 @@ function hideVnc() {
 // No-op during active login / batch redeem — those flows own the iframe
 // and removing it here would break them.
 function toggleBrowserView() {
-  if (state.activeBrowser || state.batchRedeem) return;
+  if (state.activeBrowser || state.batchRedeem || state.steamRedeem) return;
   userShowBrowser = !userShowBrowser;
   if (userShowBrowser) {
     showVnc(); // mounts iframe; also calls hideRunLog() which hides the log el
@@ -3559,10 +3937,46 @@ async function clearBatchRedeem() {
   await refreshState();
 }
 
+async function startSteamRedeem() {
+  busy = true; render();
+  try {
+    const r = await api('POST', '/steam-redeem/start');
+    if (r.success) {
+      showToast('Steam batch redeem started — ' + r.total + ' key(s) queued.', 'success');
+      showVnc();
+    } else {
+      showToast(r.error || 'Failed to start Steam batch redeem.', 'error');
+    }
+  } catch (e) { showToast('Error: ' + e.message, 'error'); }
+  busy = false;
+  await refreshState();
+}
+
+async function stopSteamRedeem() {
+  try {
+    await api('POST', '/steam-redeem/stop');
+    showToast('Steam batch redeem stopped.', 'info');
+  } catch (e) { showToast('Error: ' + e.message, 'error'); }
+  await refreshState();
+}
+
+async function clearSteamRedeem() {
+  try {
+    await api('POST', '/steam-redeem/clear');
+  } catch (e) { showToast('Error: ' + e.message, 'error'); }
+  await refreshPendingSteamCount();
+  await refreshState();
+}
+
 // Faster poll when batch-redeem is active so progress updates feel live.
+// Same timer covers both GOG and Steam batches; only one runs at a time
+// (browserBusy mutex prevents overlap), so a single 2s tick when either
+// is active is enough.
 let batchPollTimer = null;
 function updateBatchPolling() {
-  const active = state.batchRedeem && (state.batchRedeem.phase === 'running' || state.batchRedeem.phase === 'awaiting-captcha');
+  const gogActive = state.batchRedeem && (state.batchRedeem.phase === 'running' || state.batchRedeem.phase === 'awaiting-captcha');
+  const steamActive = state.steamRedeem && (state.steamRedeem.phase === 'running' || state.steamRedeem.phase === 'awaiting-captcha');
+  const active = gogActive || steamActive;
   if (active && !batchPollTimer) {
     batchPollTimer = setInterval(refreshState, 2000);
     showVnc();
@@ -3612,6 +4026,7 @@ async function handleDeepLink() {
 
 async function initialLoad() {
   await refreshPendingGogCount();
+  await refreshPendingSteamCount();
   await refreshState();
   updateBatchPolling();
   await handleDeepLink();
@@ -3620,6 +4035,7 @@ initialLoad();
 setInterval(async () => {
   await refreshState();
   if (!state.batchRedeem) await refreshPendingGogCount();
+  if (!state.steamRedeem) await refreshPendingSteamCount();
   updateBatchPolling();
 }, 10000);
 </script>
@@ -3850,6 +4266,34 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (req.method === 'GET' && req.url === '/api/pending-steam-count') {
+      const count = await countPendingSteamCodes();
+      sendJson(res, { count });
+      return;
+    }
+
+    if (req.method === 'POST' && req.url === '/api/steam-redeem/start') {
+      try {
+        const result = await startSteamRedeem();
+        sendJson(res, result);
+      } catch (e) {
+        sendJson(res, { success: false, error: e.message }, 400);
+      }
+      return;
+    }
+
+    if (req.method === 'POST' && req.url === '/api/steam-redeem/stop') {
+      const result = await stopSteamRedeem();
+      sendJson(res, result);
+      return;
+    }
+
+    if (req.method === 'POST' && req.url === '/api/steam-redeem/clear') {
+      clearFinishedSteamRedeem();
+      sendJson(res, { success: true });
+      return;
+    }
+
     // Static asset serving — branding (logo + favicon set). Path-allowlisted
     // to /assets/ + /favicon.ico to avoid traversal; we never serve arbitrary
     // files. Browser tab favicon hits /favicon.ico without the prefix on
@@ -3889,6 +4333,10 @@ async function gracefulShutdown(sig) {
   if (batchRedeem) {
     batchRedeem.phase = 'stopped';
     try { if (batchRedeem.context) await batchRedeem.context.close(); } catch {}
+  }
+  if (steamRedeem) {
+    steamRedeem.phase = 'stopped';
+    try { if (steamRedeem.context) await steamRedeem.context.close(); } catch {}
   }
   await closeBrowser();
   server.close();
