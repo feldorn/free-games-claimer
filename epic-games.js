@@ -4,6 +4,7 @@ import path from 'path';
 import { existsSync, writeFileSync } from 'fs';
 import { resolve, jsonDb, datetime, filenamify, prompt, confirm, notify, html_game_list, handleSIGINT, closeContextSafely, log } from './src/util.js';
 import { cfg } from './src/config.js';
+import { siteVersion } from './src/sites.js';
 import { getMobileGames } from './src/epic-games-mobile.js';
 
 const screenshot = (...a) => resolve(cfg.dir.screenshots, 'epic-games', ...a);
@@ -12,7 +13,7 @@ const URL_CLAIM = 'https://store.epicgames.com/en-US/free-games';
 const URL_LOGIN = 'https://www.epicgames.com/id/login?lang=en-US&noHostRedirect=true&redirectUrl=' + URL_CLAIM;
 const URL_PROMOTIONS = 'https://store-site-backend-static-ipv4.ak.epicgames.com/freeGamesPromotions?locale=en-US';
 
-log.section('Epic Games');
+log.section(`Epic Games (v${siteVersion('epic-games')})`);
 log.status('Time', datetime());
 
 const offerIdMap = {};

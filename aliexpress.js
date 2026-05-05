@@ -3,10 +3,14 @@
 // If you run it standalone on the CLI, it always executes; the activation
 // gate lives in interactive-login.js.
 import { chromium } from 'patchright';
-import { datetime, filenamify, prompt, handleSIGINT, jsonDb, awaitUserCaptchaSolve } from './src/util.js';
+import { datetime, filenamify, prompt, handleSIGINT, jsonDb, awaitUserCaptchaSolve, log } from './src/util.js';
 import { cfg } from './src/config.js';
+import { siteVersion } from './src/sites.js';
 import { FingerprintInjector } from 'fingerprint-injector';
 import { FingerprintGenerator } from 'fingerprint-generator';
+
+log.section(`AliExpress (v${siteVersion('aliexpress')})`);
+log.status('Time', datetime());
 
 // Module-level state populated during the run; persisted to
 // data/aliexpress.json so the Stats tab can compute deltas run-over-run.

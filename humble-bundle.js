@@ -2,6 +2,7 @@ import { writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { chromium } from 'patchright';
 import { datetime, notify, log, dataDir, handleSIGINT } from './src/util.js';
 import { cfg } from './src/config.js';
+import { siteVersion } from './src/sites.js';
 
 // Watch-only Humble Bundle free-items tracker. No login, no auto-claim —
 // loads humblebundle.com/store/search?priceMax=0 in a real browser
@@ -23,7 +24,7 @@ import { cfg } from './src/config.js';
 // stable across multiple promo events.
 
 handleSIGINT();
-log.section('Humble Bundle (watch-only)');
+log.section(`Humble Bundle (v${siteVersion('humble-bundle')})`);
 log.status('Time', datetime());
 
 // Humble's `?priceMax=0` URL parameter does NOT actually filter the

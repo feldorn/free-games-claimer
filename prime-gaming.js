@@ -2,6 +2,7 @@ import { chromium } from 'patchright';
 import { authenticator } from 'otplib';
 import { resolve, jsonDb, datetime, filenamify, prompt, confirm, notify, html_game_list, handleSIGINT, log } from './src/util.js';
 import { cfg } from './src/config.js';
+import { siteVersion } from './src/sites.js';
 
 const screenshot = (...a) => resolve(cfg.dir.screenshots, 'prime-gaming', ...a);
 
@@ -9,7 +10,7 @@ const screenshot = (...a) => resolve(cfg.dir.screenshots, 'prime-gaming', ...a);
 const BASE_URL = 'https://luna.amazon.com';
 const URL_CLAIM = `${BASE_URL}/claims/home`;
 
-log.section('Prime Gaming');
+log.section(`Prime Gaming (v${siteVersion('prime-gaming')})`);
 log.status('Time', datetime());
 
 const db = await jsonDb('prime-gaming.json', {});

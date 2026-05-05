@@ -1,12 +1,13 @@
 import { chromium } from 'patchright';
 import { resolve, jsonDb, datetime, filenamify, prompt, confirm, notify, html_game_list, handleSIGINT, log, normalizeTitle, awaitUserCaptchaSolve } from './src/util.js';
 import { cfg } from './src/config.js';
+import { siteVersion } from './src/sites.js';
 
 const screenshot = (...a) => resolve(cfg.dir.screenshots, 'gog', ...a);
 
 const URL_CLAIM = 'https://www.gog.com/en';
 
-log.section('GOG');
+log.section(`GOG (v${siteVersion('gog')})`);
 log.status('Time', datetime());
 
 const db = await jsonDb('gog.json', {});

@@ -518,6 +518,14 @@ export const SITES = [
 
 export const SITES_BY_ID = Object.fromEntries(SITES.map(s => [s.id, s]));
 
+// Lookup helper for runner scripts that want to stamp their version into
+// the run log header. Returns the registry's `version` string for the
+// given id, or null if the id isn't registered. Pattern:
+//   log.section(`Epic Games (v${siteVersion('epic-games')})`);
+export function siteVersion(id) {
+  return SITES_BY_ID[id]?.version || null;
+}
+
 // The login-capable subset (everything with a checkLogin function). The
 // existing engine code paths (Sessions tab, checkAllSites, launchSite,
 // verifyAndClose, closeBrowser) only iterate over login-capable sites.

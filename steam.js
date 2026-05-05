@@ -2,6 +2,7 @@ import { chromium } from 'patchright';
 import { writeFileSync } from 'node:fs';
 import { resolve, jsonDb, datetime, filenamify, prompt, notify, html_game_list, handleSIGINT, log, dataDir } from './src/util.js';
 import { cfg } from './src/config.js';
+import { siteVersion } from './src/sites.js';
 
 const screenshot = (...a) => resolve(cfg.dir.screenshots, 'steam', ...a);
 
@@ -36,7 +37,7 @@ function parsePrice(text) {
   return isNaN(val) ? null : val;
 }
 
-log.section('Steam');
+log.section(`Steam (v${siteVersion('steam')})`);
 log.status('Time', datetime());
 log.status('Min rating', `${cfg.steam_min_rating}/9 (${Object.entries(RATING_MAP).find(([, v]) => v === cfg.steam_min_rating)?.[0] || '?'})`);
 log.status('Min price', `$${cfg.steam_min_price}`);

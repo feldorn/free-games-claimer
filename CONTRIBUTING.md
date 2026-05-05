@@ -74,6 +74,15 @@ Spawned as a standalone Node process by the panel. Use `epic-games.js` or `gog.j
 - Launch the browser via `chromium.launchPersistentContext(cfg.dir.browser, …)` (or your isolated profile if `browserDir` differs).
 - Per game/event, write an entry to the claim DB via `jsonDb('<id>.json', {})` from `src/util.js`.
 - For human-solvable captchas, wrap the wait in `awaitUserCaptchaSolve(page, { service, captchaCheck, … })` from `src/util.js` — emits the `[CAPTCHA-START]` / `[CAPTCHA-END]` markers the panel watches for, and the user solves via the embedded VNC.
+- Stamp the script's run-log header with the registry-defined version. Import `siteVersion` from `./src/sites.js` and use it as the first log line, matching the project convention:
+
+  ```js
+  import { siteVersion } from './src/sites.js';
+  log.section(`Your Site Name (v${siteVersion('your-site-id')})`);
+  log.status('Time', datetime());
+  ```
+
+  The version is single-source-of-truth from the registry, so bumping `version` in the registry entry automatically updates the log header. Useful when triaging old log captures.
 
 ### 4. Claim DB entry shape
 

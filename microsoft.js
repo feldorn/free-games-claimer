@@ -3,6 +3,7 @@ import { authenticator } from 'otplib';
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { delay, datetime, prompt, notify, log, dataDir, jsonDb } from './src/util.js';
 import { cfg } from './src/config.js';
+import { siteVersion } from './src/sites.js';
 
 const BING_REWARDS_URL = 'https://rewards.bing.com';
 const BING_URL = 'https://www.bing.com';
@@ -12,7 +13,7 @@ const BING_REWARDS_ACTIVITY_CARD_SELECTOR = 'mee-card:has(.mee-icon-AddMedium)';
 // (e.g. Docker), which causes log lines to appear in bursts instead of live.
 if (process.stdout._handle?.setBlocking) process.stdout._handle.setBlocking(true);
 
-log.section('Microsoft Rewards');
+log.section(`Microsoft Rewards (v${siteVersion('microsoft')})`);
 log.status('Time', datetime());
 log.status('MS email', cfg.ms_email || '(none — will use EMAIL or prompt)');
 

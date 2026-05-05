@@ -2,6 +2,7 @@ import { writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { chromium } from 'patchright';
 import { datetime, notify, log, dataDir, handleSIGINT } from './src/util.js';
 import { cfg } from './src/config.js';
+import { siteVersion } from './src/sites.js';
 
 // Watch-only Fanatical free-Steam-keys tracker. No login, no auto-claim
 // — loads fanatical.com/en/free-games-keys in a real browser (their
@@ -27,7 +28,7 @@ import { cfg } from './src/config.js';
 // up) once the flow has been observed stable across multiple events.
 
 handleSIGINT();
-log.section('Fanatical (watch-only)');
+log.section(`Fanatical (v${siteVersion('fanatical')})`);
 log.status('Time', datetime());
 
 const URL_PAGE = 'https://www.fanatical.com/en/free-games-keys';
