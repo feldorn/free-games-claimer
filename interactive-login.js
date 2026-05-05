@@ -625,9 +625,12 @@ function classifySteamResponse(json) {
 async function processOneSteamKey(page, key) {
   await page.goto(STEAM_REDEEM_URL, { waitUntil: 'domcontentloaded', timeout: 30000 });
   await page.waitForTimeout(1500);
+  console.log(`[steam-redeem][debug] after goto, url=${page.url()}`);
   // The activation form is straightforward: product_key input, agreement
   // checkbox, register button. Older flows used #register_btn; current
   // page uses a button with id register_btn_div / inner button. Try both.
+  const inputCount = await page.locator('#product_key').count();
+  console.log(`[steam-redeem][debug] #product_key count=${inputCount}`);
   try { await page.fill('#product_key', key); } catch (e) {
     return { outcome: 'error', error: 'product_key input not found: ' + e.message };
   }
@@ -638,25 +641,33 @@ async function processOneSteamKey(page, key) {
   ).catch(() => null);
   // Click the activate button. Selectors observed: #register_btn (legacy),
   // .btn_blue_steamui (modern). Fall back to first submit-typed button.
+  let clickedSelector = 'none';
   try {
-    if (await page.locator('#register_btn').count() > 0) await page.click('#register_btn');
-    else if (await page.locator('button:has-text("Continue")').count() > 0) await page.click('button:has-text("Continue")');
-    else await page.click('button[type="submit"], a.btnv6_blue_hoverfade');
+    if (await page.locator('#register_btn').count() > 0) { await page.click('#register_btn'); clickedSelector = '#register_btn'; }
+    else if (await page.locator('button:has-text("Continue")').count() > 0) { await page.click('button:has-text("Continue")'); clickedSelector = 'button:has-text(Continue)'; }
+    else { await page.click('button[type="submit"], a.btnv6_blue_hoverfade'); clickedSelector = 'button[type=submit]'; }
   } catch (e) {
     return { outcome: 'error', error: 'register button click failed: ' + e.message };
   }
+  console.log(`[steam-redeem][debug] clicked selector=${clickedSelector}`);
   const resp = await respPromise;
   if (!resp) {
-    // No AJAX response observed. Fall back to DOM scraping for outcome.
+    console.log(`[steam-redeem][debug] no AJAX response captured within timeout, falling back to DOM scrape`);
     return await scrapeDomOutcome(page);
   }
+  console.log(`[steam-redeem][debug] response url=${resp.url()} status=${resp.status()}`);
+  let raw = '';
   let json = {};
-  try { json = await resp.json(); } catch { json = {}; }
+  try { raw = await resp.text(); } catch (e) { console.log(`[steam-redeem][debug] resp.text() failed: ${e.message}`); }
+  try { json = JSON.parse(raw); } catch { /* not json */ }
+  console.log(`[steam-redeem][debug] response body (first 500 chars): ${String(raw).slice(0, 500)}`);
   const result = classifySteamResponse(json);
+  console.log(`[steam-redeem][debug] classified as: ${result.outcome}`);
   if (result.outcome === 'unknown') {
     // Augment with DOM scrape — sometimes Steam returns success=0 with no
     // text but renders a visible error in the page.
     const dom = await scrapeDomOutcome(page);
+    console.log(`[steam-redeem][debug] DOM scrape outcome: ${dom.outcome}`);
     if (dom.outcome !== 'unknown') return dom;
   }
   return result;
