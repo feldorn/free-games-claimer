@@ -592,7 +592,7 @@ export function getServiceRows() {
   return SITES
     .filter(s => !subServiceIds.has(s.id))
     .map(s => {
-      const row = { id: s.id, title: s.name, version: s.version || null };
+      const row = { id: s.id, title: s.name, version: s.version || null, scheduleKind: s.scheduleKind || 'daily-chain' };
       if (s.subtitle) row.subtitle = s.subtitle;
       row.fields = (s.configFields || []).map(f => {
         const path = f.schedulerScope ? f.path : `services.${s.id}.${f.key}`;

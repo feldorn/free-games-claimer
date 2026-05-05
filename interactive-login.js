@@ -1395,6 +1395,14 @@ function getState() {
       active: active.has(id),
       ...siteStatus[id],
     })),
+    // Active watch-only collectors (scheduleKind: 'watch-only'). They are
+    // not in `sites` because they have no checkLogin / session state, but
+    // the Sessions tab renders them as compact "Run" cards next to the
+    // login-capable cards. Only active watchers are listed; inactive ones
+    // surface in Settings → Services.
+    watchers: SITE_REGISTRY
+      .filter(s => s.scheduleKind === 'watch-only' && active.has(s.id))
+      .map(s => ({ id: s.id, name: s.name, version: s.version || null })),
     activeBrowser: activeBrowser ? { site: activeBrowser.siteId, name: SITES[activeBrowser.siteId].name } : null,
     allLoggedIn,
     runStatus,
@@ -1775,6 +1783,12 @@ const PANEL_HTML = `<!DOCTYPE html>
   /* Per-service accordion */
   .svc-row { border-top: 1px solid #1a2a48; }
   .svc-row:first-of-type { border-top: none; }
+  /* Section header rows inside Settings → Services. Splits Full Collectors
+     from Notify-Only Collectors so the watcher list grows without diluting
+     the main collector area. */
+  .svc-section-header { padding: 14px 0 6px; font-size: 11px; color: #6a7e9e; letter-spacing: 0.06em; text-transform: uppercase; font-weight: 600; border-top: 1px solid #1a2a48; margin-top: 4px; }
+  .svc-section-header:first-of-type { border-top: none; margin-top: 0; padding-top: 4px; }
+  .svc-section-header + .svc-row { border-top: none; }
   /* Strategy A: the expand button sizes to its content (no flex:1) so the
      master toggle lands ~16px after the count pill, not the far-right edge. */
   .svc-head { display: flex; align-items: center; gap: 16px; }
@@ -1982,6 +1996,19 @@ const PANEL_HTML = `<!DOCTYPE html>
   .site-card.card-inactive { background: #12213a; border: 1px dashed #2a3a5a; opacity: 0.85; }
   .site-card.card-inactive .name { color: #a0b4d4; }
   .site-card.card-inactive .status { color: #8aa0c2; font-style: italic; }
+  /* Compact card variant for watch-only collectors. Lower visual weight
+     (smaller min-height, muted bg) so they sit alongside the main grid
+     without competing for attention. */
+  .site-card.watcher { background: #0a2440; border: 1px solid #1a3a5a; min-height: 78px; gap: 4px; }
+  .site-card.watcher .name { font-weight: 600; font-size: 14px; }
+  .site-card.watcher .status { font-size: 11px; color: #6a7e9e; flex: 0; }
+  .site-card.watcher .card-actions { margin-top: auto; }
+  .watcher-section { margin-top: 16px; }
+  .watcher-section-title { font-size: 11px; color: #6a7e9e; letter-spacing: 0.06em; text-transform: uppercase; font-weight: 600; margin-bottom: 8px; }
+  .watcher-cards { display: grid; grid-template-columns: repeat(1, 1fr); gap: 10px; }
+  @media (min-width: 640px)  { .watcher-cards { grid-template-columns: repeat(2, 1fr); } }
+  @media (min-width: 960px)  { .watcher-cards { grid-template-columns: repeat(3, 1fr); } }
+  @media (min-width: 1400px) { .watcher-cards { grid-template-columns: repeat(4, 1fr); } }
 
   .available-drawer { margin-top: 12px; background: #12213a; border: 1px solid #233454; border-radius: 8px; }
   .available-drawer .drawer-head { width: 100%; text-align: left; padding: 10px 14px; background: transparent; border: none; color: #a0b4d4; font-size: 13px; cursor: pointer; font-family: inherit; display: flex; align-items: center; gap: 8px; }
@@ -2104,6 +2131,7 @@ const PANEL_HTML = `<!DOCTYPE html>
   <div class="steps sessions-only" id="steps"></div>
   <div class="status-strip sessions-only" id="statusStrip" onclick="toggleSessionsCollapsed()" title="Click to collapse session details"></div>
   <div class="site-cards sessions-only" id="siteCards"></div>
+  <div class="watcher-section sessions-only" id="watcherCards" style="display:none"></div>
   <div class="available-drawer sessions-only" id="availableDrawer" style="display:none"></div>
   <div class="sessions-only" id="batchRedeemInfo" style="display:none; margin-top: 10px;"></div>
   <div class="sessions-only" id="steamRedeemInfo" style="display:none; margin-top: 10px;"></div>
@@ -2678,9 +2706,23 @@ function paintSettings() {
           { hint: 'External URL used in notifications so tap-targets land on the panel.' })
       );
   } else if (currentSettingsSection === 'services') {
+    // Split rows into Full Collectors (auto-claim) vs Notify-Only Collectors
+    // (watch-only). Discriminator is scheduleKind on each row, populated
+    // from the registry. Two headed sub-sections within the existing list.
+    const fullCollectors = SERVICE_ROWS.filter(r => r.scheduleKind !== 'watch-only');
+    const watchOnly      = SERVICE_ROWS.filter(r => r.scheduleKind === 'watch-only');
+    let svcInner = '';
+    if (fullCollectors.length) {
+      svcInner += '<div class="svc-section-header">Full Collectors</div>';
+      svcInner += fullCollectors.map(serviceRow).join('');
+    }
+    if (watchOnly.length) {
+      svcInner += '<div class="svc-section-header">Notify-Only Collectors</div>';
+      svcInner += watchOnly.map(serviceRow).join('');
+    }
     html = '<div class="settings-pane-title">Services</div>' +
       '<div class="svc-list">' +
-        SERVICE_ROWS.map(serviceRow).join('') +
+        svcInner +
       '</div>';
   } else if (currentSettingsSection === 'advanced') {
     // Order reflects what someone opening Advanced is usually there for:
@@ -3620,6 +3662,38 @@ function render() {
       '</div>' +
     '</div>';
   }).join('');
+
+  // Compact cards for active watch-only collectors. Smaller than full
+  // session cards (no dot, no Login/Check, just a Run button) so the
+  // page stays scannable as the watcher list grows. Inactive watchers
+  // are surfaced in Settings → Services rather than here, to keep
+  // this page focused on what's currently in play.
+  const watcherEl = document.getElementById('watcherCards');
+  const watchers = state.watchers || [];
+  if (watcherEl) {
+    if (watchers.length === 0 || sessionsCollapsed) {
+      watcherEl.style.display = 'none';
+      watcherEl.innerHTML = '';
+    } else {
+      watcherEl.style.display = 'block';
+      const watcherCardsHtml = watchers.map(w => {
+        const versionLabel = w.version ? '<div class="site-card-version">v' + escapeHtml(w.version) + '</div>' : '';
+        return '<div class="site-card watcher">' +
+          '<div class="site-card-header">' +
+            '<div class="name">' + escapeHtml(w.name) + '</div>' +
+            versionLabel +
+          '</div>' +
+          '<div class="status">Watch-only</div>' +
+          '<div class="card-actions">' +
+            '<button class="btn btn-run-single" onclick="runSite(\\'' + w.id + '\\')" ' + (disabled ? 'disabled' : '') + ' title="Run this watcher now">Run</button>' +
+          '</div>' +
+        '</div>';
+      }).join('');
+      watcherEl.innerHTML =
+        '<div class="watcher-section-title">Watchers</div>' +
+        '<div class="watcher-cards">' + watcherCardsHtml + '</div>';
+    }
+  }
 
   // "Available services" drawer — inactive sites with a single Enable button.
   const drawer = document.getElementById('availableDrawer');
