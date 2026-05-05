@@ -3503,7 +3503,11 @@ function render() {
     stripText = null; // activeSession row owns this state
   } else if (isRunning) {
     stripKind = 'warn';
-    const src = state.runSource === 'scheduler' ? 'scheduler' : 'manual';
+    // runSource carries a richer identifier than the original 'scheduler'/
+    // 'panel' constants — the scheduler tags it 'scheduler-main' or
+    // 'scheduler-ms' (with an optional ':site+site' suffix), and the panel's
+    // per-card Run uses 'panel:<id>'. Treat any prefix as the run kind.
+    const src = (state.runSource && /^scheduler/.test(state.runSource)) ? 'scheduler' : 'manual';
     stripText = '● Run in progress (' + src + ')…';
   } else if (activeSites.some(s => s.status === 'not_logged_in')) {
     stripKind = 'err';
