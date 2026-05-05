@@ -585,52 +585,64 @@ async function countPendingSteamCodes() {
 }
 
 // Parse Steam's ajaxregisterkey JSON response into a normalized outcome.
-// Steam's `success` codes (observed):
-//   1   activated successfully
-//   14  unexpected error / generic failure
-//   15  key already activated by a different account
-//   24  product not available in this region
-//   53  too many activation attempts / rate-limited
-//   58  expired key (not always — sometimes folded into 14)
-// If the user's account already owns the product, success=14 is paired
-// with error_text mentioning "already owns". purchase_receipt_info, when
-// present, indicates a real activation just happened.
+// The actual discriminator is `purchase_result_details` (Steam's enum)
+// — not `success`, which is just 1 (any success) / 2 (any failure).
+// `error_text` is reliably populated only for a small subset of failures;
+// most go through the numeric detail code with empty error_text. Codes
+// observed in this account's test run plus documented values:
+//   0   NoDetail (paired with success=1 → genuine activation)
+//   5   InvalidKey
+//   9   AlreadyOwned by this account
+//   14  alternate already-owned bucket some packages return
+//   15  AlreadyActivatedDifferentAccount
+//   24  RegionLocked / not available in this country
+//   36  ItemAlreadyClaimed
+//   50  ExpiredCdKey
+//   53  RateLimitExceeded
+//   71  RestrictedCountry
 function classifySteamResponse(json) {
   if (!json || typeof json !== 'object') return { outcome: 'unknown', raw: json };
-  const code = Number(json.success);
+  const success = Number(json.success);
+  const detail = Number(
+    json.purchase_result_details ??
+    json.purchase_receipt_info?.result_detail,
+  );
+  const productTitle = json.purchase_receipt_info?.line_items?.[0]?.line_item_description || null;
   const errText = String(json.error_text || json.errorText || '').toLowerCase();
-  if (code === 1 && json.purchase_receipt_info) {
-    const desc = json.purchase_receipt_info?.line_items?.[0]?.line_item_description || null;
-    return { outcome: 'redeemed', productTitle: desc };
+
+  // Genuine new activation: success=1 with no failure detail.
+  if (success === 1 && (!Number.isFinite(detail) || detail === 0)) {
+    return { outcome: 'redeemed', productTitle };
   }
-  if (errText.includes('already activated by a different steam account') || code === 15) {
-    return { outcome: 'used-elsewhere' };
+
+  switch (detail) {
+    case 5:  return { outcome: 'invalid',        productTitle };
+    case 9:  return { outcome: 'already-owned',  productTitle };
+    case 14: return { outcome: 'already-owned',  productTitle };
+    case 15: return { outcome: 'used-elsewhere', productTitle };
+    case 24: return { outcome: 'region-locked',  productTitle };
+    case 36: return { outcome: 'used-elsewhere', productTitle };
+    case 50: return { outcome: 'invalid',        productTitle };
+    case 53: return { outcome: 'rate-limited',   productTitle };
+    case 71: return { outcome: 'region-locked',  productTitle };
   }
-  if (errText.includes('already owns') || errText.includes('already in your steam library')) {
-    return { outcome: 'already-owned' };
-  }
-  if (errText.includes('not valid') || errText.includes('does not appear to be valid') || errText.includes('expired')) {
-    return { outcome: 'invalid' };
-  }
-  if (errText.includes('not available for purchase in your country') || errText.includes('region') || code === 24) {
-    return { outcome: 'region-locked' };
-  }
-  if (errText.includes('too many') || errText.includes('try again later') || code === 53) {
-    return { outcome: 'rate-limited' };
-  }
-  if (errText.includes('captcha')) return { outcome: 'captcha' };
+
+  // Fall back to error_text matching for any code not enumerated above.
+  if (errText.includes('already activated by a different steam account')) return { outcome: 'used-elsewhere', productTitle };
+  if (errText.includes('already owns') || errText.includes('already in your steam library')) return { outcome: 'already-owned', productTitle };
+  if (errText.includes('not valid') || errText.includes('does not appear to be valid') || errText.includes('expired')) return { outcome: 'invalid', productTitle };
+  if (errText.includes('not available') || errText.includes('region')) return { outcome: 'region-locked', productTitle };
+  if (errText.includes('too many') || errText.includes('try again later')) return { outcome: 'rate-limited', productTitle };
+  if (errText.includes('captcha')) return { outcome: 'captcha', productTitle };
+
   return { outcome: 'unknown', raw: json };
 }
 
 async function processOneSteamKey(page, key) {
   await page.goto(STEAM_REDEEM_URL, { waitUntil: 'domcontentloaded', timeout: 30000 });
   await page.waitForTimeout(1500);
-  console.log(`[steam-redeem][debug] after goto, url=${page.url()}`);
   // The activation form is straightforward: product_key input, agreement
-  // checkbox, register button. Older flows used #register_btn; current
-  // page uses a button with id register_btn_div / inner button. Try both.
-  const inputCount = await page.locator('#product_key').count();
-  console.log(`[steam-redeem][debug] #product_key count=${inputCount}`);
+  // checkbox (not always present on every account), and #register_btn.
   try { await page.fill('#product_key', key); } catch (e) {
     return { outcome: 'error', error: 'product_key input not found: ' + e.message };
   }
@@ -639,36 +651,27 @@ async function processOneSteamKey(page, key) {
     r => r.request().method() === 'POST' && r.url().startsWith(STEAM_AJAX_URL),
     { timeout: 30000 },
   ).catch(() => null);
-  // Click the activate button. Selectors observed: #register_btn (legacy),
-  // .btn_blue_steamui (modern). Fall back to first submit-typed button.
-  let clickedSelector = 'none';
   try {
-    if (await page.locator('#register_btn').count() > 0) { await page.click('#register_btn'); clickedSelector = '#register_btn'; }
-    else if (await page.locator('button:has-text("Continue")').count() > 0) { await page.click('button:has-text("Continue")'); clickedSelector = 'button:has-text(Continue)'; }
-    else { await page.click('button[type="submit"], a.btnv6_blue_hoverfade'); clickedSelector = 'button[type=submit]'; }
+    if (await page.locator('#register_btn').count() > 0) await page.click('#register_btn');
+    else if (await page.locator('button:has-text("Continue")').count() > 0) await page.click('button:has-text("Continue")');
+    else await page.click('button[type="submit"], a.btnv6_blue_hoverfade');
   } catch (e) {
     return { outcome: 'error', error: 'register button click failed: ' + e.message };
   }
-  console.log(`[steam-redeem][debug] clicked selector=${clickedSelector}`);
   const resp = await respPromise;
-  if (!resp) {
-    console.log(`[steam-redeem][debug] no AJAX response captured within timeout, falling back to DOM scrape`);
-    return await scrapeDomOutcome(page);
-  }
-  console.log(`[steam-redeem][debug] response url=${resp.url()} status=${resp.status()}`);
-  let raw = '';
+  if (!resp) return await scrapeDomOutcome(page);
   let json = {};
-  try { raw = await resp.text(); } catch (e) { console.log(`[steam-redeem][debug] resp.text() failed: ${e.message}`); }
-  try { json = JSON.parse(raw); } catch { /* not json */ }
-  console.log(`[steam-redeem][debug] response body (first 500 chars): ${String(raw).slice(0, 500)}`);
+  try { json = await resp.json(); } catch { json = {}; }
   const result = classifySteamResponse(json);
-  console.log(`[steam-redeem][debug] classified as: ${result.outcome}`);
   if (result.outcome === 'unknown') {
-    // Augment with DOM scrape — sometimes Steam returns success=0 with no
-    // text but renders a visible error in the page.
+    // Augment with DOM scrape — covers any future success=2 case where
+    // the JSON shape changes but Steam still renders a recognizable
+    // error in the page text.
     const dom = await scrapeDomOutcome(page);
-    console.log(`[steam-redeem][debug] DOM scrape outcome: ${dom.outcome}`);
     if (dom.outcome !== 'unknown') return dom;
+    // Log just enough to diagnose if we ever miss a code in the wild —
+    // not the full body since that includes packageids and timestamps.
+    console.log(`[${datetime()}] Steam redeem: unknown response — success=${json.success} detail=${json.purchase_result_details ?? json.purchase_receipt_info?.result_detail} errText="${(json.error_text || '').slice(0, 100)}"`);
   }
   return result;
 }
