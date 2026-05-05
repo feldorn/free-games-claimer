@@ -88,6 +88,7 @@ export const SITES = [
   {
     id: 'prime-gaming',
     name: 'Prime Gaming',
+    version: '2.0',
     subtitle: null,
     script: 'prime-gaming.js',
     claimOrder: 2,
@@ -134,6 +135,7 @@ export const SITES = [
   {
     id: 'epic-games',
     name: 'Epic Games',
+    version: '2.0',
     subtitle: null,
     script: 'epic-games.js',
     claimOrder: 3,
@@ -170,6 +172,7 @@ export const SITES = [
   {
     id: 'gog',
     name: 'GOG',
+    version: '2.0',
     subtitle: null,
     script: 'gog.js',
     claimOrder: 1,
@@ -266,6 +269,7 @@ export const SITES = [
   {
     id: 'steam',
     name: 'Steam',
+    version: '2.0',
     subtitle: null,
     script: 'steam.js',
     claimOrder: 4,
@@ -309,6 +313,7 @@ export const SITES = [
   {
     id: 'aliexpress',
     name: 'AliExpress',
+    version: '2.0',
     subtitle: null,
     script: 'aliexpress.js',
     claimOrder: 5,
@@ -357,6 +362,7 @@ export const SITES = [
   {
     id: 'microsoft',
     name: 'Microsoft Rewards',
+    version: '2.0',
     subtitle: 'Runs both desktop and mobile sessions in one script.',
     script: 'microsoft.js',
     claimOrder: 7,
@@ -418,6 +424,7 @@ export const SITES = [
   {
     id: 'microsoft-mobile',
     name: 'Microsoft Rewards (Mobile)',
+    version: '2.0',
     subtitle: null,
     // microsoft.js drives both desktop and mobile in one run; this entry is
     // a session-only sibling so the Sessions tab can show login state for
@@ -453,6 +460,7 @@ export const SITES = [
   {
     id: 'ubisoft',
     name: 'Ubisoft Connect',
+    version: '2.0',
     subtitle: 'Watch-only: pings you when a new free game appears at store.ubisoft.com/us/free-games. No login, no auto-claim — go grab it manually.',
     script: 'ubisoft.js',
     claimOrder: 6,
@@ -546,7 +554,7 @@ export function getServiceRows() {
   return SITES
     .filter(s => !subServiceIds.has(s.id))
     .map(s => {
-      const row = { id: s.id, title: s.name };
+      const row = { id: s.id, title: s.name, version: s.version || null };
       if (s.subtitle) row.subtitle = s.subtitle;
       row.fields = (s.configFields || []).map(f => {
         const path = f.schedulerScope ? f.path : `services.${s.id}.${f.key}`;

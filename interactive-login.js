@@ -1391,6 +1391,7 @@ function getState() {
     sites: Object.entries(SITES).map(([id, site]) => ({
       id,
       name: site.name,
+      version: site.version || null,
       active: active.has(id),
       ...siteStatus[id],
     })),
@@ -1786,6 +1787,7 @@ const PANEL_HTML = `<!DOCTYPE html>
   .svc-expand .svc-name { font-size: 15px; font-weight: 600; color: #ffffff; letter-spacing: 0.01em; }
   .svc-expand .svc-count { font-size: 11px; color: #6a7e9e; font-weight: 400; letter-spacing: 0.02em; padding: 2px 7px; border: 1px solid #233454; border-radius: 10px; line-height: 1; }
   .svc-row.expandable .svc-expand:hover .svc-count { color: #4ecca3; border-color: #2a4a3e; }
+  .svc-expand .svc-version { font-size: 10px; color: #4a5e7e; font-weight: 400; letter-spacing: 0.04em; line-height: 1; margin-left: 2px; }
   .svc-expand .svc-summary { grid-row: 2; grid-column: 2; font-size: 12.5px; color: #8aa0c2; line-height: 1.4; }
   .svc-row.inactive .svc-name { color: #c0c8d8; font-weight: 500; }
   .svc-row.inactive .svc-summary { color: #6a7e9e; }
@@ -1995,6 +1997,7 @@ const PANEL_HTML = `<!DOCTYPE html>
   @media (min-width: 1400px) { .available-drawer .drawer-body { grid-template-columns: repeat(4, 1fr); } }
   .site-card-header { display: flex; align-items: center; gap: 8px; }
   .site-card .name { font-weight: 600; font-size: 14px; }
+  .site-card-version { margin-left: auto; font-size: 10px; color: #6a7e9e; font-weight: 400; letter-spacing: 0.04em; line-height: 1; }
   .site-card .status { font-size: 12px; color: #888; flex: 1; }
   .site-card .status.logged-in { color: #4ecca3; }
   .site-card .status.not-logged-in { color: #e94560; }
@@ -2513,6 +2516,7 @@ function serviceRow(entry) {
   const countLabel = hasFields
     ? '<span class="svc-count">' + entry.fields.length + ' setting' + (entry.fields.length === 1 ? '' : 's') + ' ' + (open ? '▾' : '▸') + '</span>'
     : '';
+  const versionLabel = entry.version ? '<span class="svc-version">v' + escapeHtml(entry.version) + '</span>' : '';
   return '<div class="svc-row' + (active ? '' : ' inactive') + (expandable ? ' expandable' : '') + '">' +
     '<div class="svc-head">' +
       '<label class="svc-toggle" title="' + (active ? 'Active' : 'Inactive') + '" aria-label="' + (active ? 'Disable' : 'Enable') + ' ' + escapeHtml(entry.title) + '">' +
@@ -2525,6 +2529,7 @@ function serviceRow(entry) {
         '<span class="svc-name-line">' +
           '<span class="svc-name">' + escapeHtml(entry.title) + '</span>' +
           (expandable ? countLabel : '') +
+          versionLabel +
         '</span>' +
         '<span class="svc-summary">' + escapeHtml(serviceSummary(entry.id)) + '</span>' +
       '</button>' +
@@ -3600,10 +3605,12 @@ function render() {
     else if (s.status === 'not_logged_in') statusText = 'Not logged in';
     else if (s.status === 'error') statusText = 'Error checking';
     if (s.checkedAt) statusText += ' (' + String(s.checkedAt).slice(11, 19) + ')';
+    const versionLabel = s.version ? '<div class="site-card-version">v' + escapeHtml(s.version) + '</div>' : '';
     return '<div class="site-card">' +
       '<div class="site-card-header">' +
         '<div class="dot ' + dotClass + '"></div>' +
         '<div class="name">' + s.name + '</div>' +
+        versionLabel +
       '</div>' +
       '<div class="status ' + statusClass + '">' + statusText + '</div>' +
       '<div class="card-actions">' +
