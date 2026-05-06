@@ -379,7 +379,7 @@ export const SITES = [
   {
     id: 'microsoft',
     name: 'Microsoft Rewards',
-    version: '2.0',
+    version: '2.1',
     subtitle: 'Runs both desktop and mobile sessions in one script.',
     script: 'microsoft.js',
     claimOrder: 9,
@@ -441,7 +441,7 @@ export const SITES = [
   {
     id: 'microsoft-mobile',
     name: 'Microsoft Rewards (Mobile)',
-    version: '2.0',
+    version: '2.1',
     subtitle: null,
     // microsoft.js drives both desktop and mobile in one run; this entry is
     // a session-only sibling so the Sessions tab can show login state for

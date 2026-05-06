@@ -581,6 +581,36 @@ async function dismissDashboardPopup(page) {
   return true;
 }
 
+// MS Rewards shows a separate "Claim your N bonus points before they start
+// expiring on <date>" banner at the top of the dashboard, distinct from the
+// daily activity cards. It uses a custom element <mee-rewards-pointclaim-
+// banner> with its own Claim button — the activity-card scraper above
+// (`mee-card:has(.mee-icon-AddMedium)`) doesn't match it, so before this
+// fix those points sat unclaimed until they actually expired.
+async function claimPendingBonusPoints(page) {
+  await page.goto(BING_REWARDS_URL, { waitUntil: 'load' });
+  await dismissDashboardPopup(page);
+  const banner = page.locator('mee-rewards-pointclaim-banner').first();
+  try {
+    await banner.waitFor({ state: 'visible', timeout: 3000 });
+  } catch {
+    log.info('No pending point-claim banner.');
+    return;
+  }
+  let title = '';
+  try { title = (await banner.locator('.title').first().innerText()).trim(); } catch {}
+  if (title) log.info(`Point-claim banner: "${title}"`);
+  const claimBtn = banner.locator('button[aria-label="Claim"]').first();
+  try {
+    await claimBtn.click({ timeout: 5000 });
+    log.info('Clicked Claim — bonus points credited to balance.');
+    // Brief settle so the banner can disappear before subsequent navigation.
+    await page.waitForTimeout(2000);
+  } catch (e) {
+    log.warn(`Claim button click failed: ${e.message.split('\n')[0]}`);
+  }
+}
+
 async function clickEveryPendingActivityCard(page) {
   await page.goto(BING_REWARDS_URL, { waitUntil: 'load' });
   await dismissDashboardPopup(page);
@@ -736,6 +766,7 @@ log.section('Desktop');
       before = await readPointsBalance(page);
       if (before != null) log.status('Points before', before);
       await clickEveryPendingActivityCard(page);
+      await claimPendingBonusPoints(page);
       await executeBingSearches(page, searchTerms.slice(0, desktopSearchCount));
       after = await readPointsBalance(page);
       if (after != null) log.status('Points after', after + (before != null ? ` (+${after - before})` : ''));
@@ -779,6 +810,7 @@ log.section('Mobile');
       before = await readPointsBalance(page);
       if (before != null) log.status('Points before', before);
       await clickEveryPendingActivityCard(page);
+      await claimPendingBonusPoints(page);
       await executeBingSearches(page, searchTerms.slice(-mobileSearchCount));
       after = await readPointsBalance(page);
       if (after != null) log.status('Points after', after + (before != null ? ` (+${after - before})` : ''));
