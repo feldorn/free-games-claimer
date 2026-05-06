@@ -4,6 +4,15 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.3.9
+
+Two reports from #15/#16:
+
+- **Healthcheck no longer 401s when `PANEL_PASSWORD` is set** ([#16](https://github.com/feldorn/free-games-claimer/issues/16)). The Docker `HEALTHCHECK` previously hit `/api/state`, which is gated by the panel-auth middleware — once a password was set, the check returned 401 and orchestrators (TrueNAS, Portainer, etc.) marked the container unhealthy even though the panel was fine. Added a dedicated unauthenticated `/api/health` endpoint that returns `{"ok":true}` and pointed the Dockerfile healthcheck at it. No state is exposed beyond "the process is alive".
+- **Microsoft card-fail diagnostic dumps moved to a subfolder** ([#15](https://github.com/feldorn/free-games-claimer/issues/15)). When the Bing-rewards card-click retry fails, the script saves a screenshot + page HTML for later debugging. Those previously landed at `data/ms-card-fail-*.png` / `*.html` next to the per-service JSON DBs, cluttering the data folder. Now writes to `data/diagnostics/microsoft/` (auto-created on first failure).
+
+---
+
 ## What's new in 2.3.8
 
 Polish on the 2.3.7 log refactor.

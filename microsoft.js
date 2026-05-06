@@ -1,6 +1,6 @@
 import { chromium, devices } from 'patchright';
 import { authenticator } from 'otplib';
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { delay, datetime, prompt, notify, log, dataDir, jsonDb } from './src/util.js';
 import { cfg } from './src/config.js';
 import { siteVersion } from './src/sites.js';
@@ -606,10 +606,15 @@ async function clickEveryPendingActivityCard(page) {
           savedDiag = true;
           const ts = new Date().toISOString().replace(/[:.]/g, '-');
           const base = `ms-card-fail-${ts}`;
+          // Diagnostic artefacts go in their own subfolder so they don't
+          // clutter the data root alongside the per-service JSON DBs
+          // (issue #15). mkdirSync is recursive and idempotent.
+          const diagDir = dataDir('diagnostics/microsoft');
           try {
-            await page.screenshot({ path: dataDir(`${base}.png`), fullPage: true });
-            writeFileSync(dataDir(`${base}.html`), await page.content());
-            log.warn(`Saved diagnostic: data/${base}.{png,html}`);
+            mkdirSync(diagDir, { recursive: true });
+            await page.screenshot({ path: `${diagDir}/${base}.png`, fullPage: true });
+            writeFileSync(`${diagDir}/${base}.html`, await page.content());
+            log.warn(`Saved diagnostic: data/diagnostics/microsoft/${base}.{png,html}`);
           } catch (diagErr) {
             log.warn(`Failed to save diagnostic: ${diagErr.message.split('\n')[0]}`);
           }

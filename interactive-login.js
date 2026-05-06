@@ -4628,6 +4628,20 @@ const server = http.createServer(async (req, res) => {
       req.url = req.url.slice(BASE_PATH.length) || '/';
     }
 
+    // Unauthenticated health probe for the Docker HEALTHCHECK and any
+    // external monitoring (Uptime Kuma, NPM, etc.). Pointing the
+    // healthcheck at /api/state breaks once PANEL_PASSWORD is set —
+    // it returns 401 and the orchestrator marks the container
+    // unhealthy even though the panel is fine. This endpoint stays
+    // open: it returns 200 + a tiny JSON body if the HTTP server is
+    // accepting requests, which is what a healthcheck actually needs.
+    // No state is exposed beyond "the process is alive".
+    if (req.method === 'GET' && req.url === '/api/health') {
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+      res.end(JSON.stringify({ ok: true }));
+      return;
+    }
+
     if (req.method === 'POST' && req.url === '/api/auth') {
       const { password } = await parseBody(req);
       if (password === PANEL_PASSWORD) {
