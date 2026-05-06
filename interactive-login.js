@@ -1600,6 +1600,12 @@ function getState() {
       version: site.version || null,
       active: active.has(id),
       lastSuccessfulRun: lastRunSuccess[id] || null,
+      // External-link target for the Sessions card "↗" icon. homeUrl
+      // (where the user actually wants to land — store landing page,
+      // rewards dashboard, etc.) wins; loginUrl is the fallback for
+      // sites where it's already a useful destination (Prime, GOG,
+      // MS, AliExpress all have homeUrl == loginUrl semantically).
+      siteUrl: site.homeUrl || site.loginUrl || null,
       ...siteStatus[id],
     })),
     // Active watch-only collectors (scheduleKind: 'watch-only'). They are
@@ -1609,7 +1615,7 @@ function getState() {
     // surface in Settings → Services.
     watchers: SITE_REGISTRY
       .filter(s => s.scheduleKind === 'watch-only' && active.has(s.id))
-      .map(s => ({ id: s.id, name: s.name, version: s.version || null })),
+      .map(s => ({ id: s.id, name: s.name, version: s.version || null, siteUrl: s.homeUrl || s.loginUrl || null })),
     activeBrowser: activeBrowser ? { site: activeBrowser.siteId, name: SITES[activeBrowser.siteId].name } : null,
     allLoggedIn,
     runStatus,
@@ -2330,6 +2336,8 @@ const PANEL_HTML = `<!DOCTYPE html>
   .site-card-relogin { background: none; border: none; color: #6a7e9e; font-size: 14px; cursor: pointer; padding: 0 2px; line-height: 1; margin-left: 4px; }
   .site-card-relogin:hover:not(:disabled) { color: #4ecca3; }
   .site-card-relogin:disabled { opacity: 0.3; cursor: not-allowed; }
+  .site-card-extlink { color: #6a7e9e; font-size: 14px; padding: 0 2px; line-height: 1; margin-left: 4px; text-decoration: none; }
+  .site-card-extlink:hover { color: #4ecca3; }
   /* Cookie-import button in the card-actions row. Styled like the other
      action buttons but in a slightly muted blue so it sits between
      Login (red) and Check (gray) in visual weight. */
@@ -4025,11 +4033,15 @@ function render() {
     const reloginIcon = isLoggedIn
       ? '<button class="site-card-relogin" onclick="confirmRelogin(\\'' + s.id + '\\')" ' + (disabled ? 'disabled' : '') + ' title="Change account / force re-login" aria-label="Change account">↻</button>'
       : '';
+    const extLinkIcon = s.siteUrl
+      ? '<a class="site-card-extlink" href="' + escapeHtml(s.siteUrl) + '" target="_blank" rel="noopener noreferrer" title="Open ' + escapeHtml(s.name) + ' in a new tab" aria-label="Open ' + escapeHtml(s.name) + ' in a new tab">↗</a>'
+      : '';
     return '<div class="site-card">' +
       '<div class="site-card-header">' +
         '<div class="dot ' + dotClass + '"></div>' +
         '<div class="name">' + s.name + '</div>' +
         versionLabel +
+        extLinkIcon +
         reloginIcon +
       '</div>' +
       '<div class="status ' + statusClass + '">' + statusText + '</div>' +
@@ -4056,10 +4068,14 @@ function render() {
       watcherEl.style.display = 'block';
       const watcherCardsHtml = watchers.map(w => {
         const versionLabel = w.version ? '<div class="site-card-version">v' + escapeHtml(w.version) + '</div>' : '';
+        const extLinkIcon = w.siteUrl
+          ? '<a class="site-card-extlink" href="' + escapeHtml(w.siteUrl) + '" target="_blank" rel="noopener noreferrer" title="Open ' + escapeHtml(w.name) + ' in a new tab" aria-label="Open ' + escapeHtml(w.name) + ' in a new tab">↗</a>'
+          : '';
         return '<div class="site-card watcher">' +
           '<div class="site-card-header">' +
             '<div class="name">' + escapeHtml(w.name) + '</div>' +
             versionLabel +
+            extLinkIcon +
           '</div>' +
           '<div class="status">Watch-only</div>' +
           '<div class="card-actions">' +

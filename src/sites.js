@@ -145,6 +145,11 @@ export const SITES = [
     script: 'epic-games.js',
     claimOrder: 3,
     loginUrl: 'https://www.epicgames.com/id/login?lang=en-US&noHostRedirect=true&redirectUrl=https://store.epicgames.com/en-US/free-games',
+    // Sessions tab "open in new tab" target. loginUrl points to the login
+    // form which is unhelpful for an already-authenticated user; homeUrl
+    // sends them to the free-games landing page where they actually want
+    // to go to verify their library or check what's on offer.
+    homeUrl: 'https://store.epicgames.com/en-US/free-games',
     get browserDir() { return cfg.dir.browser; },
     contextOptions: null,
     defaultActive: true,
@@ -279,6 +284,7 @@ export const SITES = [
     script: 'steam.js',
     claimOrder: 4,
     loginUrl: 'https://store.steampowered.com/login/',
+    homeUrl: 'https://store.steampowered.com/',
     get browserDir() { return cfg.dir.browser; },
     contextOptions: null,
     defaultActive: true,
@@ -476,6 +482,7 @@ export const SITES = [
     script: 'ubisoft.js',
     claimOrder: 6,
     loginUrl: null,
+    homeUrl: 'https://store.ubisoft.com/us/free-games',
     browserDir: null,
     contextOptions: null,
     defaultActive: false,
@@ -495,6 +502,7 @@ export const SITES = [
     script: 'humble-bundle.js',
     claimOrder: 7,
     loginUrl: null,
+    homeUrl: 'https://www.humblebundle.com/store/search?sort=discount&filter=onsale&min=0&max=0',
     browserDir: null,
     contextOptions: null,
     defaultActive: false,
@@ -514,6 +522,7 @@ export const SITES = [
     script: 'fanatical.js',
     claimOrder: 8,
     loginUrl: null,
+    homeUrl: 'https://www.fanatical.com/en/free-games-keys',
     browserDir: null,
     contextOptions: null,
     defaultActive: false,
