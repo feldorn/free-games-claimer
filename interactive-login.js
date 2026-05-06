@@ -3943,7 +3943,8 @@ function render() {
     if (s.status === 'logged_in') statusText = 'Logged in' + (s.user ? ' as ' + s.user : '') + '.';
     else if (s.status === 'not_logged_in') statusText = 'Not logged in.';
     else if (s.status === 'error') statusText = 'Error checking.';
-    if (s.lastSuccessfulRun) statusText += ' Last Successful Run ' + s.lastSuccessfulRun;
+    if (s.lastSuccessfulRun) statusText += ' Successful Run ' + s.lastSuccessfulRun + '.';
+    else statusText += ' Successful Run: never.';
     const versionLabel = s.version ? '<div class="site-card-version">v' + escapeHtml(s.version) + '</div>' : '';
     // Login OR Check button, status-driven. The "force re-login" override
     // is rendered separately as a small bare icon in the card header

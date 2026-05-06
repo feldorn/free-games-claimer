@@ -310,6 +310,7 @@ export const log = {
   // Marker emitted by service scripts at the end of a successful run.
   // The runner in interactive-login.js parses these out of stdout and
   // persists per-site completion timestamps to data/last-runs.json so the
-  // Sessions tab can show "Last Successful Run …" on each card.
-  runSuccess: (siteId) => console.log(`[RUN-SUCCESS] service=${siteId}`),
+  // Sessions tab can show "Successful Run …" on each card. Two-space
+  // indent matches the other in-section lines (Time:, User:, etc.).
+  runSuccess: (siteId) => console.log(`  [RUN-SUCCESS] service=${siteId}`),
 };
