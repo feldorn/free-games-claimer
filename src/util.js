@@ -320,9 +320,9 @@ export const log = {
     const claimed = o.claimed ?? 0;
     const skipped = o.skipped ?? 0;
     if (o.display && o[o.display] != null && fieldLabels[o.display]) {
-      console.log(`  summary: ${claimed} claimed, ${skipped} skipped, ${o[o.display]} ${fieldLabels[o.display]}`);
+      console.log(`  Summary: ${claimed} claimed, ${skipped} skipped, ${o[o.display]} ${fieldLabels[o.display]}`);
     } else {
-      console.log(`  summary: ${claimed} claimed, ${skipped} skipped`);
+      console.log(`  Summary: ${claimed} claimed, ${skipped} skipped`);
     }
     if (o.siteId) {
       const parts = [`claimed=${claimed}`, `skipped=${skipped}`];
