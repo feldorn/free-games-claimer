@@ -4,6 +4,12 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.3.11
+
+- **Sessions card "open in new tab" icon now uses `window.open` instead of `<a target="_blank">`**. Reverse proxies that inject `Cross-Origin-Embedder-Policy: require-corp` (a SWAG default in some configs) can cause Chromium to block cross-origin top-level anchor navigations with `ERR_BLOCKED_BY_RESPONSE` — even for benign destinations like google.com. Switched to a `<button>` that calls `window.open(url, '_blank', 'noopener')` from a click handler; this opens a fresh top-level browsing context and bypasses the policy enforcement that was blocking the anchor flow.
+
+---
+
 ## What's new in 2.3.10
 
 - **Microsoft Rewards: claim pending bonus points before they expire**. The dashboard shows a separate banner at the top — `Claim your N bonus points before they start expiring on <date>` with its own Claim button — distinct from the daily activity cards. The script's existing `mee-card:has(.mee-icon-AddMedium)` selector only matched the activity cards, missing the banner entirely. Result: bonus points sat unclaimed until they actually expired. Added `claimPendingBonusPoints()` that locates the `<mee-rewards-pointclaim-banner>` element and clicks its Claim button; runs in both desktop and mobile session blocks after the activity cards. No-op when the banner isn't present (most days). Microsoft collectors bumped to v2.1.
