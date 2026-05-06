@@ -177,7 +177,7 @@ export const SITES = [
   {
     id: 'gog',
     name: 'GOG',
-    version: '2.1',
+    version: '2.2',
     subtitle: null,
     script: 'gog.js',
     claimOrder: 1,

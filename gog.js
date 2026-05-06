@@ -110,63 +110,133 @@ try {
     await page.waitForSelector(loggedInSel);
     if (!cfg.debug) context.setDefaultTimeout(cfg.timeout);
   }
-  const userSelectors = '#menuUsername, [hook-test="menuUsername"], .menu-username, .menu-username-text';
-  const userEl = page.locator(userSelectors).first();
-  try {
-    await userEl.waitFor({ timeout: 10000 });
-    // Read only direct text nodes to exclude nested notification badges (e.g., unread-count "0").
-    user = await userEl.evaluate(el => {
-      const direct = Array.from(el.childNodes)
-        .filter(n => n.nodeType === Node.TEXT_NODE)
-        .map(n => n.textContent)
-        .join('')
-        .replace(/\s+/g, ' ')
-        .trim();
-      if (direct) return direct;
-      return (el.textContent || '').replace(/\s+/g, ' ').trim();
-    });
-  } catch {
-    try {
-      user = await page.locator(userSelectors).first().getAttribute('title', { timeout: 5000 });
-    } catch {}
-  }
-  if (!user) {
-    try {
-      user = await page.evaluate(() => {
-        // Cookie first — authoritative and immune to DOM drift.
-        const cookies = document.cookie.split(';');
-        for (const c of cookies) {
-          const [k, v] = c.trim().split('=');
-          if (k === 'gog_username' || k === 'gog-username') return decodeURIComponent(v);
-        }
-        // Fallback: profile link (e.g. /u/<name>). Avoid href*="/account" because
-        // GOG's sub-nav has /account/games, /account/orders, etc., whose textContent
-        // looks like "Games 0" (label + unread badge) and would poison the username.
-        const profile = document.querySelector('a[href^="/u/"]');
-        if (profile) {
-          const text = (profile.textContent || '').replace(/\s+/g, ' ').trim();
-          if (text) return text;
-        }
-        return null;
-      });
-    } catch {}
-  }
-  // Guard against known GOG sub-nav labels leaking in (badges append a count).
-  // Reported labels seen in the wild: Games, Orders, Wishlist, Friends,
+  // Reported nav-label leaks (in the wild): Games, Orders, Wishlist, Friends,
   // Library, Account, Settings, Reviews, Cart, News, Search, Sign in.
-  // Issue #9 surfaced "Reviews" leaking through the original guard.
-  if (user && /^(Games|Orders|Wishlist|Friends|Library|Account|Settings|Reviews|Cart|News|Search|Sign\s*in)(\s+\d+)?$/i.test(user)) {
-    log.warn(`Detected username looked like a nav label ("${user}") — discarding`);
-    user = null;
+  const navLabelRx = /^(Games|Orders|Wishlist|Friends|Library|Account|Settings|Reviews|Cart|News|Search|Sign\s*in)(\s+\d+)?$/i;
+  const cleanCandidate = v => {
+    if (!v) return null;
+    const t = String(v).replace(/\s+/g, ' ').trim();
+    if (!t) return null;
+    if (navLabelRx.test(t)) {
+      log.warn(`Detected username looked like a nav label ("${t}") — discarding`);
+      return null;
+    }
+    return t;
+  };
+  // userTrustworthy: tracks whether the canonical username came from an
+  // authoritative source (API or guarded DOM/cookie) vs. the email-prefix
+  // last-resort. Migration below only runs when trustworthy — otherwise
+  // we'd consolidate stale keys into another fallback bucket and make
+  // things worse. Today's regression report (#9 follow-up): when GOG's
+  // chrome rendered "Reviews" instead of the username, the previous fix
+  // discarded it and fell to email-prefix → fragmented DB further.
+  let userTrustworthy = false;
+  // 1. Primary: GOG's own account APIs. page.request inherits browser
+  // cookies so a valid session authenticates automatically. Same source the
+  // panel's checkLogin uses, which has been reliable across GOG's header
+  // redesigns. The DOM path stays as fallback for environments where the
+  // APIs ever return non-2xx.
+  const apis = [
+    'https://menu.gog.com/v1/account/basic',
+    'https://www.gog.com/userData.json',
+    'https://embed.gog.com/userData.json',
+  ];
+  for (const endpoint of apis) {
+    try {
+      const res = await page.request.get(endpoint, { timeout: 10000 });
+      if (!res.ok()) continue;
+      const data = await res.json();
+      const name = data && (data.username || data.userName || data.name);
+      const cleaned = cleanCandidate(name);
+      if (cleaned) { user = cleaned; userTrustworthy = true; break; }
+    } catch { /* try next endpoint */ }
   }
+  // 2. DOM #menuUsername direct text — fallback when APIs are all unreachable.
+  if (!user) {
+    const userSelectors = '#menuUsername, [hook-test="menuUsername"], .menu-username, .menu-username-text';
+    const userEl = page.locator(userSelectors).first();
+    try {
+      await userEl.waitFor({ timeout: 10000 });
+      const direct = await userEl.evaluate(el => {
+        const t = Array.from(el.childNodes)
+          .filter(n => n.nodeType === Node.TEXT_NODE)
+          .map(n => n.textContent)
+          .join('')
+          .replace(/\s+/g, ' ')
+          .trim();
+        if (t) return t;
+        return (el.textContent || '').replace(/\s+/g, ' ').trim();
+      });
+      const cleaned = cleanCandidate(direct);
+      if (cleaned) { user = cleaned; userTrustworthy = true; }
+    } catch {}
+    if (!user) {
+      try {
+        const title = await page.locator(userSelectors).first().getAttribute('title', { timeout: 5000 });
+        const cleaned = cleanCandidate(title);
+        if (cleaned) { user = cleaned; userTrustworthy = true; }
+      } catch {}
+    }
+    // Cookie / profile-link — only useful when DOM returns nav-label noise.
+    if (!user) {
+      try {
+        const candidate = await page.evaluate(() => {
+          const cookies = document.cookie.split(';');
+          for (const c of cookies) {
+            const [k, v] = c.trim().split('=');
+            if (k === 'gog_username' || k === 'gog-username') return decodeURIComponent(v);
+          }
+          const profile = document.querySelector('a[href^="/u/"]');
+          if (profile) {
+            const text = (profile.textContent || '').replace(/\s+/g, ' ').trim();
+            if (text) return text;
+          }
+          return null;
+        });
+        const cleaned = cleanCandidate(candidate);
+        if (cleaned) { user = cleaned; userTrustworthy = true; }
+      } catch {}
+    }
+  }
+  // 3. Email-prefix — last resort. Not trustworthy enough for migration.
   if (!user) {
     user = cfg.gog_email?.split('@')[0] || 'unknown';
     log.warn(`Could not detect GOG username — using "${user}"`);
   }
-  // Safety-net: collapse any residual whitespace (tabs, newlines, unicode separators)
-  // in case a code path above leaked a notification-badge count into the string.
   user = user.replace(/\s+/g, ' ').trim();
   log.status('User', user);
+
+  // One-time DB cleanup: prior detection bugs fragmented one user's claim
+  // history across multiple buckets. Migrate unambiguously-bad legacy keys
+  // into the canonical bucket. Gate on userTrustworthy — never migrate into
+  // an email-prefix fallback bucket. Idempotent: once merged, source keys
+  // are deleted so subsequent runs find nothing to migrate.
+  if (userTrustworthy) {
+    const stale = Object.keys(db.data).filter(k => {
+      if (k === user) return false;
+      if (k === 'unknown') return true;
+      if (navLabelRx.test(k)) return true;
+      // Older form before the whitespace safety-net trimmed badge linebreaks.
+      if (/^Games\s+\d+$/.test(k.replace(/\s+/g, ' '))) return true;
+      return false;
+    });
+    if (stale.length) {
+      log.status('GOG DB cleanup', `merging ${stale.length} legacy username key(s) into "${user}"`);
+      db.data[user] ||= {};
+      for (const k of stale) {
+        const games = db.data[k];
+        if (games && typeof games === 'object') {
+          for (const [title, entry] of Object.entries(games)) {
+            // Canonical user wins on conflict — its entries are likely newer/correct.
+            if (!db.data[user][title]) db.data[user][title] = entry;
+          }
+        }
+        delete db.data[k];
+      }
+      try { await db.write(); }
+      catch (e) { log.warn(`GOG DB cleanup write failed: ${e.message}`); }
+    }
+  }
   db.data[user] ||= {};
 
   const banner = page.locator('#giveaway');
