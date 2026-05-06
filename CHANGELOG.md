@@ -4,6 +4,12 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.3.13
+
+- **Sessions card "↗" icon: handle iframed-panel + cross-origin-isolated destinations**. Sites like Epic Games, Microsoft Rewards, and Steam all send strict cross-origin isolation headers (`Cross-Origin-Resource-Policy: same-origin`, `Cross-Origin-Embedder-Policy: require-corp`, `Cross-Origin-Opener-Policy: same-origin`). When the panel is iframed inside Organizr (or any sandboxed iframe), Chromium's interaction between iframe sandbox flags and cross-origin isolation requirements blocks `target="_blank"` navigation to those destinations with `ERR_BLOCKED_BY_RESPONSE` — even with the `allow-popups-to-escape-sandbox` token. Added an `onclick` handler that detects iframe context and uses `window.top.location.href` to navigate the top browsing context instead, escaping the iframe entirely. Top-level panel users still get new-tab behaviour as before. Middle-click on the icon also still produces a new tab via the browser's native mechanism. GOG and Ubisoft (which don't set the strict isolation headers) work either way; this fix specifically unblocks the strict-isolation set.
+
+---
+
 ## What's new in 2.3.12
 
 - **Sessions card "open in new tab" icon now works inside Organizr's iframe**. The 2.3.11 attempt (`window.open(url, '_blank', 'noopener')`) still failed with `ERR_BLOCKED_BY_RESPONSE` when the panel was iframed inside Organizr — turns out the `noopener` feature interacts badly with iframe sandbox restrictions on cross-origin top-level navigation. Reverted to a plain `<a target="_blank">` anchor with no `rel` attribute, which matches what Organizr's own bookmarks plugin uses (and works in the same sandbox context). Modern browsers (Chrome 88+, Firefox 79+, Safari 12.1+) default `target=_blank` to noopener for cross-origin links anyway, so dropping the `rel` attribute doesn't lose security.

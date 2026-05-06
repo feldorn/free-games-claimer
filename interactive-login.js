@@ -4033,18 +4033,18 @@ function render() {
     const reloginIcon = isLoggedIn
       ? '<button class="site-card-relogin" onclick="confirmRelogin(\\'' + s.id + '\\')" ' + (disabled ? 'disabled' : '') + ' title="Change account / force re-login" aria-label="Change account">↻</button>'
       : '';
-    // Plain <a target="_blank"> with no rel attribute — matches what
-    // Organizr's bookmarks plugin uses, which works inside the same
-    // sandboxed iframe context. Earlier versions added rel="noopener
-    // noreferrer" or used window.open(url, '_blank', 'noopener'); both
-    // failed with ERR_BLOCKED_BY_RESPONSE when the panel was iframed
-    // inside Organizr because the noopener feature interacts with the
-    // iframe sandbox to block cross-origin top-level navigation. Modern
-    // browsers default target=_blank to noopener for cross-origin links
-    // anyway (Chrome 88+, Firefox 79+, Safari 12.1+), so dropping the
-    // rel attribute doesn't lose security.
+    // Site-link target needs both target="_blank" (open in new tab when
+    // the panel is at top-level) AND target="_top" (navigate the parent
+    // tab when iframed inside Organizr / similar). The latter is the
+    // only way to escape iframe-sandbox context for destinations that
+    // send strict cross-origin-isolation headers — Epic, Microsoft
+    // Rewards, Steam all set CORP/COEP/COOP same-origin, which combined
+    // with iframe sandbox produces ERR_BLOCKED_BY_RESPONSE even with
+    // allow-popups-to-escape-sandbox. Plain anchor with target="_top"
+    // tagged uses an onclick handler that picks the right target at
+    // click time based on whether we're framed.
     const extLinkIcon = s.siteUrl
-      ? '<a class="site-card-extlink" href="' + escapeHtml(s.siteUrl) + '" target="_blank" title="Open ' + escapeHtml(s.name) + ' in a new tab" aria-label="Open ' + escapeHtml(s.name) + ' in a new tab">↗</a>'
+      ? '<a class="site-card-extlink" href="' + escapeHtml(s.siteUrl) + '" onclick="return openSiteUrl(this)" target="_blank" title="Open ' + escapeHtml(s.name) + ' (replaces tab if inside Organizr; middle-click for new tab)" aria-label="Open ' + escapeHtml(s.name) + '">↗</a>'
       : '';
     return '<div class="site-card">' +
       '<div class="site-card-header">' +
@@ -4079,7 +4079,7 @@ function render() {
       const watcherCardsHtml = watchers.map(w => {
         const versionLabel = w.version ? '<div class="site-card-version">v' + escapeHtml(w.version) + '</div>' : '';
         const extLinkIcon = w.siteUrl
-          ? '<a class="site-card-extlink" href="' + escapeHtml(w.siteUrl) + '" target="_blank" title="Open ' + escapeHtml(w.name) + ' in a new tab" aria-label="Open ' + escapeHtml(w.name) + ' in a new tab">↗</a>'
+          ? '<a class="site-card-extlink" href="' + escapeHtml(w.siteUrl) + '" onclick="return openSiteUrl(this)" target="_blank" title="Open ' + escapeHtml(w.name) + ' (replaces tab if inside Organizr; middle-click for new tab)" aria-label="Open ' + escapeHtml(w.name) + '">↗</a>'
           : '';
         return '<div class="site-card watcher">' +
           '<div class="site-card-header">' +
@@ -4308,6 +4308,25 @@ async function refreshState() {
     if (typeof updateBatchPolling === 'function') updateBatchPolling();
     applyUrlFocus();
   } catch {}
+}
+
+// Sessions card "↗" click handler. When the panel is at top-level
+// (most users), default anchor behaviour (target="_blank") opens a new
+// tab — return true and the browser handles it. When the panel is
+// iframed inside Organizr (or similar), Chromium's iframe-sandbox
+// interactions with cross-origin-isolation headers (CORP/COEP/COOP
+// same-origin) on destinations like Epic / MS Rewards / Steam cause
+// new-tab navigation to fail with ERR_BLOCKED_BY_RESPONSE even with
+// allow-popups-to-escape-sandbox set. Workaround: navigate the top
+// browsing context (window.top.location), which breaks free of the
+// iframe entirely. Middle-click still uses the browser's native new-
+// tab mechanism (independent of this handler) and works regardless.
+function openSiteUrl(linkEl) {
+  if (window.self === window.top) return true; // not iframed — let target="_blank" do its thing
+  const url = linkEl.href;
+  try { window.top.location.href = url; }
+  catch { return true; } // iframe blocked top-nav for some reason — fall back to anchor default
+  return false; // we handled it
 }
 
 async function launchSite(siteId) {
