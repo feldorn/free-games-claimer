@@ -103,4 +103,5 @@ export const cfg = {
   // Preserve old NaN semantics when unset (comparisons always false → skip
   // filter disabled); a set null override also yields NaN.
   pg_timeLeft: pg.timeLeftDays != null ? Number(pg.timeLeftDays) : NaN,
+  pg_pending_max_age_days: pg.pendingMaxAgeDays != null ? Number(pg.pendingMaxAgeDays) : NaN,
 };

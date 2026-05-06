@@ -4,6 +4,14 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.3.2
+
+Prime Gaming pending-redeem age filter ([#14](https://github.com/feldorn/free-games-claimer/issues/14)).
+
+- **Hide stale pending entries** — Settings → Per-Store → Prime Gaming → "Hide pending manual-redeem entries older than N days" (env: `PG_PENDING_MAX_AGE_DAYS`). Filters the per-run notification only; DB entries are preserved so flipping the value off restores them. Default unset = old behavior, every pending entry always shown. Designed for the Microsoft Store / Xbox tail where there's no automated library reconciliation: codes that were either redeemed long ago or have since expired stop spamming the daily notification once you set a sensible cutoff (180 days is a reasonable starting point).
+
+---
+
 ## What's new in 2.3.1
 
 Anti-detection hardening (Layers 1+2 of the [#2](https://github.com/feldorn/free-games-claimer/issues/2) plan).

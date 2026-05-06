@@ -112,6 +112,11 @@ export const SITES = [
         unit: 'days',
         hint: 'Leave blank to claim everything regardless of how long is left.',
         coerce: { kind: 'nullableNumber' } },
+      { key: 'pendingMaxAgeDays', env: 'PG_PENDING_MAX_AGE_DAYS', type: 'number', default: null, nullable: true,
+        label: 'Hide pending manual-redeem entries older than N days',
+        unit: 'days',
+        hint: 'Filters the per-run notification only — DB entries are preserved. Leave blank to show all pending entries regardless of age.',
+        coerce: { kind: 'nullableNumber' } },
     ],
     async checkLogin(page) {
       try {

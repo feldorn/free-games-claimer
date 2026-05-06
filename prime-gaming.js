@@ -114,22 +114,32 @@ try {
     xbox: 'https://account.microsoft.com/billing/redeem',
   };
   const terminalRx = /redeemed|expired|invalid/i;
+  // Optional age cutoff for the pending-redeem notification. NaN when unset,
+  // which makes the comparison below always false so every non-terminal entry
+  // surfaces (old behavior). Hidden entries stay in the DB unmodified.
+  const cutoffMs = Number.isFinite(cfg.pg_pending_max_age_days) && cfg.pg_pending_max_age_days > 0
+    ? Date.now() - cfg.pg_pending_max_age_days * 86400 * 1000
+    : null;
   const pending = [];
+  let hiddenByAge = 0;
   for (const [dbTitle, entry] of Object.entries(db.data[user])) {
     if (!entry || typeof entry !== 'object') continue;
     if (!entry.code) continue;
     if (!keyStores.has(entry.store)) continue;
     if (terminalRx.test(String(entry.status || ''))) continue;
+    if (cutoffMs && entry.time && Date.parse(entry.time) < cutoffMs) { hiddenByAge++; continue; }
     pending.push({ dbTitle, entry });
   }
   if (pending.length) {
-    log.status('Pending manual redeem', `${pending.length} code(s)`);
+    log.status('Pending manual redeem', `${pending.length} code(s)${hiddenByAge ? ` (${hiddenByAge} hidden by age filter)` : ''}`);
     for (const { dbTitle, entry } of pending) {
       const base = redeemBaseUrls[entry.store];
       const redeem_url = entry.store === 'gog.com' ? `${base}/${entry.code}` : base;
       log.warn(`${dbTitle} — pending manual redeem on ${entry.store}`);
       notify_pending.push({ title: dbTitle, url: redeem_url });
     }
+  } else if (hiddenByAge) {
+    log.status('Pending manual redeem', `0 visible (${hiddenByAge} hidden by age filter)`);
   }
 
   const waitUntilStable = async (f, act) => {
