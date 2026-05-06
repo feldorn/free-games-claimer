@@ -196,6 +196,110 @@ async function checkSiteStatus(siteId) {
   }
 }
 
+// Cookie import — accepts a JSON-array cookie export (EditThisCookie /
+// Cookie-Editor browser extensions both produce this shape with minor
+// field-name variation), normalizes to Playwright's addCookies signature,
+// validates that at least one cookie's domain matches the target site,
+// applies them via a fresh persistent context against the site's
+// browserDir, then re-runs checkSiteStatus to confirm the session was
+// activated. Used by the Sessions-tab "↑ Cookie" button on each card.
+const COOKIE_MAX_COUNT = 500;
+const COOKIE_MAX_BYTES = 256 * 1024;
+
+function normalizeCookieEntry(c) {
+  if (!c || typeof c !== 'object') return null;
+  if (!c.name || c.value == null || !c.domain) return null;
+  const out = {
+    name: String(c.name),
+    value: String(c.value),
+    domain: String(c.domain),
+    path: c.path ? String(c.path) : '/',
+  };
+  // EditThisCookie uses expirationDate (seconds since epoch as float);
+  // Playwright wants `expires` as a number (-1 means session cookie).
+  const expRaw = c.expires != null ? c.expires : c.expirationDate;
+  if (expRaw != null) {
+    const n = Number(expRaw);
+    if (Number.isFinite(n)) out.expires = Math.floor(n);
+  }
+  if (c.httpOnly) out.httpOnly = true;
+  if (c.secure)   out.secure = true;
+  if (c.sameSite) {
+    const s = String(c.sameSite).toLowerCase();
+    out.sameSite = s === 'strict' ? 'Strict' : s === 'none' ? 'None' : 'Lax';
+  }
+  return out;
+}
+
+async function importSiteCookies(siteId, rawCookies) {
+  const site = SITES[siteId];
+  if (!site) throw new Error(`Unknown site: ${siteId}`);
+  if (!site.loginUrl) throw new Error(`${site.name} has no login flow — cookie import doesn't apply`);
+
+  const busy = browserBusy({ allowActiveBrowser: true });
+  if (busy) throw new Error(`Cannot import cookies — ${busy}.`);
+  if (activeBrowser) await closeBrowser();
+
+  // Coerce single-cookie object into a one-element array; reject anything
+  // that isn't object-or-array.
+  let arr = rawCookies;
+  if (!Array.isArray(arr)) {
+    if (arr && typeof arr === 'object') arr = [arr];
+    else throw new Error('cookies must be a JSON array of cookie objects');
+  }
+  if (arr.length === 0) throw new Error('no cookies in upload');
+  if (arr.length > COOKIE_MAX_COUNT) throw new Error(`too many cookies (${arr.length} > ${COOKIE_MAX_COUNT})`);
+
+  // Approximate byte cap to prevent runaway uploads. JSON-stringify is
+  // the cheapest way to count without storing payloads server-side.
+  const approxBytes = JSON.stringify(arr).length;
+  if (approxBytes > COOKIE_MAX_BYTES) throw new Error(`cookie payload too large (${approxBytes} > ${COOKIE_MAX_BYTES} bytes)`);
+
+  const normalized = arr.map(normalizeCookieEntry).filter(Boolean);
+  if (!normalized.length) throw new Error('no valid cookies (each cookie needs name, value, and domain)');
+
+  // Domain match: cookie domain (with or without leading dot) must be
+  // a suffix of the site's loginUrl host. Catches the common foot-gun
+  // of pasting cookies for the wrong site into the wrong card.
+  const targetHost = new URL(site.loginUrl).hostname;
+  const matches = normalized.filter(c => {
+    const cd = c.domain.replace(/^\./, '');
+    return targetHost === cd || targetHost.endsWith('.' + cd);
+  });
+  if (!matches.length) {
+    const sample = normalized[0].domain;
+    throw new Error(`no cookies for ${targetHost} (uploaded cookies appear to be for ${sample})`);
+  }
+
+  console.log(`[${datetime()}] Importing ${normalized.length} cookie(s) into ${site.name} profile (${matches.length} match host ${targetHost})`);
+  let context;
+  try {
+    context = await chromium.launchPersistentContext(site.browserDir, {
+      headless: false,
+      viewport: { width: cfg.width, height: cfg.height },
+      locale: 'en-US',
+      handleSIGINT: false,
+      args: ['--hide-crash-restore-bubble'],
+      ...(site.contextOptions || {}),
+    });
+    await context.addCookies(normalized);
+  } finally {
+    if (context) { try { await context.close(); } catch {} }
+  }
+
+  // Re-check the session so the Sessions card flips to "logged in" if
+  // the cookies actually activated a session, or stays at "not logged
+  // in" if they didn't (expired, missing the auth cookie, etc.).
+  const checkResult = await checkSiteStatus(siteId);
+  return {
+    applied: normalized.length,
+    matchedDomain: matches.length,
+    targetHost,
+    loggedIn: !!checkResult.loggedIn,
+    user: checkResult.user || null,
+  };
+}
+
 let runProcess = null;
 let runDone = null; // Promise that resolves when runProcess finishes (for scheduler to await)
 let runLog = [];
@@ -2092,6 +2196,42 @@ const PANEL_HTML = `<!DOCTYPE html>
   .unsaved-modal-body { font-size: 14px; color: #c0c8d8; line-height: 1.5; margin-bottom: 18px; }
   .unsaved-modal-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
   .unsaved-modal-actions .btn { font-size: 13px; padding: 8px 14px; }
+  /* Cookie-import modal — paste-or-upload entry, file input above the
+     textarea, with a status line that flips between info / error /
+     success below. Reuses the unsaved-modal overlay styling for
+     consistency, just larger card to fit the textarea. */
+  .cookie-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.65); z-index: 200; display: flex; align-items: center; justify-content: center; }
+  .cookie-modal-card { background: #16213e; border: 1px solid #2a3a5a; border-radius: 8px; padding: 22px 24px; max-width: 580px; width: 92%; box-shadow: 0 8px 32px rgba(0,0,0,0.5); }
+  .cookie-modal-title { font-size: 16px; font-weight: 600; color: #ffffff; margin-bottom: 10px; }
+  .cookie-modal-body { font-size: 14px; color: #c0c8d8; line-height: 1.5; margin-bottom: 18px; }
+  .cookie-modal-help { font-size: 12.5px; color: #8aa0c2; margin: 0 0 12px 0; }
+  .cookie-modal-body textarea { width: 100%; box-sizing: border-box; background: #0e1726; color: #e0e0e0; border: 1px solid #233454; border-radius: 4px; padding: 8px 10px; font-family: monospace; font-size: 12px; resize: vertical; margin-top: 8px; }
+  .cookie-modal-body textarea:focus { outline: none; border-color: #4ecca3; }
+  .cookie-modal-body input[type="file"] { color: #c0c8d8; font-size: 13px; }
+  .cookie-modal-msg { font-size: 12px; margin-top: 10px; min-height: 16px; }
+  .cookie-modal-msg.info  { color: #8aa0c2; }
+  .cookie-modal-msg.error { color: #e94560; }
+  .cookie-modal-msg.success { color: #4ecca3; }
+  .cookie-modal-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+  .cookie-modal-actions .btn { font-size: 13px; padding: 8px 14px; }
+  /* Change-accounts confirm — small, two-button modal. */
+  .relogin-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.65); z-index: 200; display: flex; align-items: center; justify-content: center; }
+  .relogin-modal-card { background: #16213e; border: 1px solid #2a3a5a; border-radius: 8px; padding: 22px 24px; max-width: 460px; width: 90%; box-shadow: 0 8px 32px rgba(0,0,0,0.5); }
+  .relogin-modal-title { font-size: 16px; font-weight: 600; color: #ffffff; margin-bottom: 10px; }
+  .relogin-modal-body { font-size: 14px; color: #c0c8d8; line-height: 1.5; margin-bottom: 18px; }
+  .relogin-modal-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+  .relogin-modal-actions .btn { font-size: 13px; padding: 8px 14px; }
+  /* Bare-icon affordance in the card header (top-right) for force
+     re-login. Same subdued color as the version stamp; lights up on
+     hover. Not styled like a button — it's metadata-adjacent. */
+  .site-card-relogin { background: none; border: none; color: #6a7e9e; font-size: 14px; cursor: pointer; padding: 0 2px; line-height: 1; margin-left: 4px; }
+  .site-card-relogin:hover:not(:disabled) { color: #4ecca3; }
+  .site-card-relogin:disabled { opacity: 0.3; cursor: not-allowed; }
+  /* Cookie-import button in the card-actions row. Styled like the other
+     action buttons but in a slightly muted blue so it sits between
+     Login (red) and Check (gray) in visual weight. */
+  .btn-cookie { background: #2a3a5a; color: #c0c8d8; }
+  .btn-cookie:hover:not(:disabled) { background: #3a4a6a; color: #ffffff; }
   .toast { position: fixed; bottom: 20px; right: 20px; background: #16213e; border: 1px solid #0f3460; border-radius: 8px; padding: 12px 20px; font-size: 14px; z-index: 100; animation: slideIn 0.3s ease; max-width: 400px; }
   .toast.success { border-color: #4ecca3; }
   .toast.error { border-color: #e94560; }
@@ -2220,6 +2360,31 @@ const PANEL_HTML = `<!DOCTYPE html>
       <button class="btn btn-cancel unsaved-stay">Stay on Settings</button>
       <button class="btn btn-stop unsaved-discard">Discard and continue</button>
       <button class="btn btn-run unsaved-save">Save and continue</button>
+    </div>
+  </div>
+</div>
+<div class="cookie-modal" id="cookieModal" role="dialog" aria-modal="true" aria-labelledby="cookieModalTitle" style="display:none">
+  <div class="cookie-modal-card">
+    <div class="cookie-modal-title" id="cookieModalTitle">Import cookies — <span id="cookieModalSite"></span></div>
+    <div class="cookie-modal-body">
+      <p class="cookie-modal-help">Paste a JSON cookie export below, or upload a file. Compatible with EditThisCookie and Cookie-Editor browser extensions. Cookies whose domain doesn't match this site are rejected.</p>
+      <input type="file" id="cookieFileInput" accept=".json,application/json,.txt" />
+      <textarea id="cookiePasteInput" placeholder="Or paste JSON here..." rows="8"></textarea>
+      <div class="cookie-modal-msg" id="cookieModalMsg"></div>
+    </div>
+    <div class="cookie-modal-actions">
+      <button class="btn btn-cancel cookie-cancel">Cancel</button>
+      <button class="btn btn-run cookie-submit">Import</button>
+    </div>
+  </div>
+</div>
+<div class="relogin-modal" id="reloginModal" role="dialog" aria-modal="true" aria-labelledby="reloginModalTitle" style="display:none">
+  <div class="relogin-modal-card">
+    <div class="relogin-modal-title" id="reloginModalTitle">Change accounts?</div>
+    <div class="relogin-modal-body">Open the Login flow for <span id="reloginModalSite"></span>? Use this when you want to switch accounts or force a fresh login despite the current session looking healthy.</div>
+    <div class="relogin-modal-actions">
+      <button class="btn btn-cancel relogin-cancel">No</button>
+      <button class="btn btn-run relogin-confirm">Yes, log in</button>
     </div>
   </div>
 </div>
@@ -3738,16 +3903,29 @@ function render() {
     else if (s.status === 'error') statusText = 'Error checking';
     if (s.checkedAt) statusText += ' (' + String(s.checkedAt).slice(11, 19) + ')';
     const versionLabel = s.version ? '<div class="site-card-version">v' + escapeHtml(s.version) + '</div>' : '';
+    // Login OR Check button, status-driven. The "force re-login" override
+    // is rendered separately as a small bare icon in the card header
+    // (top-right, next to the version) so it doesn't look like a primary
+    // action button — only shown when logged in, since when not-logged-in
+    // the Login button is already directly available.
+    const isLoggedIn = s.status === 'logged_in';
+    const loginOrCheck = isLoggedIn
+      ? '<button class="btn btn-check" onclick="checkSite(\\'' + s.id + '\\')" ' + (disabled ? 'disabled' : '') + '>Check</button>'
+      : '<button class="btn btn-login" onclick="launchSite(\\'' + s.id + '\\')" ' + (disabled ? 'disabled' : '') + '>Login</button>';
+    const reloginIcon = isLoggedIn
+      ? '<button class="site-card-relogin" onclick="confirmRelogin(\\'' + s.id + '\\')" ' + (disabled ? 'disabled' : '') + ' title="Change account / force re-login" aria-label="Change account">↻</button>'
+      : '';
     return '<div class="site-card">' +
       '<div class="site-card-header">' +
         '<div class="dot ' + dotClass + '"></div>' +
         '<div class="name">' + s.name + '</div>' +
         versionLabel +
+        reloginIcon +
       '</div>' +
       '<div class="status ' + statusClass + '">' + statusText + '</div>' +
       '<div class="card-actions">' +
-        '<button class="btn btn-login" onclick="launchSite(\\'' + s.id + '\\')" ' + (disabled ? 'disabled' : '') + '>Login</button>' +
-        '<button class="btn btn-check" onclick="checkSite(\\'' + s.id + '\\')" ' + (disabled ? 'disabled' : '') + '>Check</button>' +
+        loginOrCheck +
+        '<button class="btn btn-cookie" onclick="openCookieModal(\\'' + s.id + '\\')" ' + (disabled ? 'disabled' : '') + ' title="Import cookies for this site (paste JSON or upload a file)">↑ Cookie</button>' +
         '<button class="btn btn-run-single" onclick="runSite(\\'' + s.id + '\\')" ' + (disabled ? 'disabled' : '') + ' title="Run this service now">Run</button>' +
       '</div>' +
     '</div>';
@@ -4057,6 +4235,103 @@ async function checkAll() {
   await refreshState();
 }
 
+// Cookie-import modal — paste-or-upload entry, validate JSON shape on
+// the client before sending so trivial typos surface fast, then
+// dispatch to /api/site/cookies which handles domain validation,
+// addCookies, and a follow-up checkSiteStatus.
+let cookieModalSiteId = null;
+function openCookieModal(siteId) {
+  cookieModalSiteId = siteId;
+  const site = state.sites.find(s => s.id === siteId);
+  if (!site) return;
+  const modal = document.getElementById('cookieModal');
+  document.getElementById('cookieModalSite').textContent = site.name;
+  document.getElementById('cookieFileInput').value = '';
+  document.getElementById('cookiePasteInput').value = '';
+  setCookieMsg('', '');
+  modal.style.display = 'flex';
+  // Wire up the action buttons each open so closures capture the
+  // current siteId without a global handler reference.
+  const cancelBtn = modal.querySelector('.cookie-cancel');
+  const submitBtn = modal.querySelector('.cookie-submit');
+  cancelBtn.onclick = closeCookieModal;
+  submitBtn.onclick = () => submitCookies();
+  modal.onclick = (e) => { if (e.target === modal) closeCookieModal(); };
+  document.addEventListener('keydown', cookieModalEscHandler);
+}
+function cookieModalEscHandler(e) { if (e.key === 'Escape') closeCookieModal(); }
+function closeCookieModal() {
+  const modal = document.getElementById('cookieModal');
+  modal.style.display = 'none';
+  modal.onclick = null;
+  cookieModalSiteId = null;
+  document.removeEventListener('keydown', cookieModalEscHandler);
+}
+function setCookieMsg(text, kind) {
+  const el = document.getElementById('cookieModalMsg');
+  el.textContent = text;
+  el.className = 'cookie-modal-msg ' + (kind || '');
+}
+async function submitCookies() {
+  if (!cookieModalSiteId) return;
+  const fileInput = document.getElementById('cookieFileInput');
+  const pasteInput = document.getElementById('cookiePasteInput');
+  let raw = pasteInput.value.trim();
+  if (fileInput.files && fileInput.files[0]) {
+    try { raw = await fileInput.files[0].text(); }
+    catch (e) { setCookieMsg('Could not read file: ' + e.message, 'error'); return; }
+  }
+  if (!raw) { setCookieMsg('Paste a cookie JSON or pick a file first', 'error'); return; }
+  let parsed;
+  try { parsed = JSON.parse(raw); }
+  catch (e) { setCookieMsg('Invalid JSON: ' + e.message, 'error'); return; }
+  setCookieMsg('Importing...', 'info');
+  const submitBtn = document.querySelector('#cookieModal .cookie-submit');
+  if (submitBtn) submitBtn.disabled = true;
+  try {
+    const result = await api('POST', '/site/cookies', { site: cookieModalSiteId, cookies: parsed });
+    if (result.success) {
+      const note = result.loggedIn
+        ? 'Imported ' + result.applied + ' cookie(s); session check passed' + (result.user ? ' (logged in as ' + result.user + ')' : '')
+        : 'Imported ' + result.applied + ' cookie(s); session check still says not logged in (cookies may be expired or missing the auth cookie)';
+      closeCookieModal();
+      showToast(note, result.loggedIn ? 'success' : 'info', 6000);
+      await refreshState();
+    } else {
+      setCookieMsg(result.error || 'Import failed', 'error');
+    }
+  } catch (e) {
+    setCookieMsg('Upload failed: ' + e.message, 'error');
+  } finally {
+    if (submitBtn) submitBtn.disabled = false;
+  }
+}
+
+// Change-accounts confirm — opens the Login flow for the site only
+// after the user confirms, so a stray click on ↻ next to a working
+// session doesn't drop them into a fresh browser cold-start.
+function confirmRelogin(siteId) {
+  const site = state.sites.find(s => s.id === siteId);
+  if (!site) return;
+  const modal = document.getElementById('reloginModal');
+  document.getElementById('reloginModalSite').textContent = site.name;
+  const cancelBtn = modal.querySelector('.relogin-cancel');
+  const confirmBtn = modal.querySelector('.relogin-confirm');
+  const close = () => {
+    modal.style.display = 'none';
+    cancelBtn.onclick = confirmBtn.onclick = null;
+    modal.onclick = null;
+    document.removeEventListener('keydown', onKey);
+  };
+  const onKey = (e) => { if (e.key === 'Escape') close(); };
+  cancelBtn.onclick = close;
+  confirmBtn.onclick = () => { close(); launchSite(siteId); };
+  modal.onclick = (e) => { if (e.target === modal) close(); };
+  document.addEventListener('keydown', onKey);
+  modal.style.display = 'flex';
+  cancelBtn.focus();
+}
+
 async function runSite(siteId) {
   const siteName = state.sites.find(s => s.id === siteId)?.name || siteId;
   busy = true; render();
@@ -4308,6 +4583,21 @@ const server = http.createServer(async (req, res) => {
       }
       const result = await checkSiteStatus(site);
       sendJson(res, result);
+      return;
+    }
+
+    if (req.method === 'POST' && req.url === '/api/site/cookies') {
+      try {
+        const body = await parseBody(req);
+        if (!body || !body.site || body.cookies == null) {
+          sendJson(res, { success: false, error: 'site and cookies required' }, 400);
+          return;
+        }
+        const result = await importSiteCookies(body.site, body.cookies);
+        sendJson(res, { success: true, ...result });
+      } catch (e) {
+        sendJson(res, { success: false, error: e.message }, 400);
+      }
       return;
     }
 
