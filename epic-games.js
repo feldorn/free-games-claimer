@@ -496,6 +496,7 @@ try {
       log.warn(`Cart fallback — 0/${failedGames.length} failed game(s) matched to offer IDs`);
     }
   }
+  log.runSuccess('epic-games');
 } catch (error) {
   process.exitCode ||= 1;
   log.fail(`Exception: ${error.message || error}`);

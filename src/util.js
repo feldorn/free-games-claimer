@@ -307,4 +307,9 @@ export const log = {
   progressAppend: (msg) => process.stdout.write(msg),
   progressEnd: (msg = '') => process.stdout.write(`${msg}\n`),
   progressInfo: (msg) => process.stdout.write(`  ${chalk.green('✓')} ${msg}`),
+  // Marker emitted by service scripts at the end of a successful run.
+  // The runner in interactive-login.js parses these out of stdout and
+  // persists per-site completion timestamps to data/last-runs.json so the
+  // Sessions tab can show "Last Successful Run …" on each card.
+  runSuccess: (siteId) => console.log(`[RUN-SUCCESS] service=${siteId}`),
 };

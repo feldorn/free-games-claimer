@@ -735,6 +735,7 @@ log.section('Desktop');
       await executeBingSearches(page, searchTerms.slice(0, desktopSearchCount));
       after = await readPointsBalance(page);
       if (after != null) log.status('Points after', after + (before != null ? ` (+${after - before})` : ''));
+      log.runSuccess('microsoft');
     } else {
       log.fail('Login failed or timed out — skipping desktop session');
     }
@@ -771,6 +772,7 @@ log.section('Mobile');
       await executeBingSearches(page, searchTerms.slice(-mobileSearchCount));
       after = await readPointsBalance(page);
       if (after != null) log.status('Points after', after + (before != null ? ` (+${after - before})` : ''));
+      log.runSuccess('microsoft-mobile');
     } else {
       log.fail('Login failed or timed out — skipping mobile session');
     }

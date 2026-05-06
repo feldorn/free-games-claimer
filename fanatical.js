@@ -31,6 +31,8 @@ handleSIGINT();
 log.section(`Fanatical (v${siteVersion('fanatical')})`);
 log.status('Time', datetime());
 
+process.on('exit', code => { if (!code) log.runSuccess('fanatical'); });
+
 const URL_PAGE = 'https://www.fanatical.com/en/free-games-keys';
 const STATE_FILE = dataDir('fanatical-watch.json');
 

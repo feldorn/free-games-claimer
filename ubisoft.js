@@ -14,6 +14,8 @@ handleSIGINT();
 log.section(`Ubisoft (v${siteVersion('ubisoft')})`);
 log.status('Time', datetime());
 
+process.on('exit', code => { if (!code) log.runSuccess('ubisoft'); });
+
 const URL_FREE = 'https://store.ubisoft.com/us/free-games';
 const STATE_FILE = dataDir('ubisoft-watch.json');
 

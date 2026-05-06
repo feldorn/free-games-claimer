@@ -1046,6 +1046,13 @@ function runAllScripts({ source = 'panel', sites = null, extraEnv = null } = {})
       if (endMatch && captchaPending && captchaPending.service === endMatch[1]) {
         captchaPending = null;
       }
+      // Run-success markers from src/util.js#log.runSuccess, emitted by each
+      // service's process.on('exit') handler at clean exit. matchAll because
+      // microsoft.js can emit two markers (microsoft + microsoft-mobile) in
+      // one stdout chunk at the very end of the run.
+      for (const m of text.matchAll(/\[RUN-SUCCESS\] service=(\S+)/g)) {
+        recordLastRunSuccess(m[1]);
+      }
       const lines = text.split('\n').filter(l => l.length);
       lines.forEach(l => {
         runLog.push({ type: 'stdout', text: l, time: datetime() });
@@ -1169,6 +1176,40 @@ function pickMsTargetFor(dateKey, c) {
   target.setHours(startHour, offsetMinutes, 0, 0);
   return { date: dateKey, target: target.toISOString(), status: 'pending' };
 }
+
+// Per-service last-success-run timestamps. Updated when service scripts
+// emit their `[RUN-SUCCESS] service=<id>` marker (parsed in the stdout
+// handler), persisted to data/last-runs.json so the Sessions tab can show
+// "Last Successful Run …" on each card across panel restarts.
+const LAST_RUNS_FILE = path.resolve(__panelDirname, 'data', 'last-runs.json');
+let lastRunSuccess = {};
+function loadLastRuns() {
+  try {
+    if (!existsSync(LAST_RUNS_FILE)) return;
+    const raw = readFileSync(LAST_RUNS_FILE, 'utf8');
+    if (!raw.trim()) return;
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object') lastRunSuccess = parsed;
+  } catch (e) {
+    console.error(`[${datetime()}] last-runs: failed to load: ${e.message}`);
+  }
+}
+function saveLastRuns() {
+  try {
+    mkdirSync(path.dirname(LAST_RUNS_FILE), { recursive: true });
+    writeFileSync(LAST_RUNS_FILE, JSON.stringify(lastRunSuccess, null, 2) + '\n');
+  } catch (e) {
+    console.error(`[${datetime()}] last-runs: failed to persist: ${e.message}`);
+  }
+}
+function recordLastRunSuccess(siteId, ts = datetime()) {
+  if (!siteId) return;
+  // Trim millisecond suffix so cards render "2026-05-06 09:13:43" not
+  // "…09:13:43.137" — the user-visible value is to-the-second precision.
+  lastRunSuccess[siteId] = String(ts).slice(0, 19);
+  saveLastRuns();
+}
+loadLastRuns();
 
 // Called from runAllScripts close handler when any successful run included
 // microsoft.js. Flips today's MS schedule to fired so the msSchedulerLoop
@@ -1497,6 +1538,7 @@ function getState() {
       name: site.name,
       version: site.version || null,
       active: active.has(id),
+      lastSuccessfulRun: lastRunSuccess[id] || null,
       ...siteStatus[id],
     })),
     // Active watch-only collectors (scheduleKind: 'watch-only'). They are
@@ -3898,10 +3940,10 @@ function render() {
     const dotClass = s.status === 'logged_in' ? 'logged-in' : s.status === 'not_logged_in' ? 'not-logged-in' : s.status === 'error' ? 'error' : 'unknown';
     const statusClass = dotClass;
     let statusText = 'Not checked';
-    if (s.status === 'logged_in') statusText = 'Logged in' + (s.user ? ' as ' + s.user : '');
-    else if (s.status === 'not_logged_in') statusText = 'Not logged in';
-    else if (s.status === 'error') statusText = 'Error checking';
-    if (s.checkedAt) statusText += ' (' + String(s.checkedAt).slice(11, 19) + ')';
+    if (s.status === 'logged_in') statusText = 'Logged in' + (s.user ? ' as ' + s.user : '') + '.';
+    else if (s.status === 'not_logged_in') statusText = 'Not logged in.';
+    else if (s.status === 'error') statusText = 'Error checking.';
+    if (s.lastSuccessfulRun) statusText += ' Last Successful Run ' + s.lastSuccessfulRun;
     const versionLabel = s.version ? '<div class="site-card-version">v' + escapeHtml(s.version) + '</div>' : '';
     // Login OR Check button, status-driven. The "force re-login" override
     // is rendered separately as a small bare icon in the card header

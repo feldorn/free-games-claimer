@@ -510,6 +510,7 @@ try {
     if (cfg.debug) console.error(e);
   }
 
+  log.runSuccess('gog');
 } catch (error) {
   process.exitCode ||= 1;
   log.fail(`Exception: ${error.message || error}`);

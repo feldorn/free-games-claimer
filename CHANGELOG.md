@@ -4,6 +4,12 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.3.5
+
+- **Sessions cards show last successful run** — replaced the ambiguous `(HH:MM:SS)` session-check suffix with a meaningful "Last Successful Run YYYY-MM-DD HH:MM:SS" line. Each service script emits a `[RUN-SUCCESS] service=<id>` marker via `process.on('exit')` only on clean exit; the runner parses these from stdout and persists per-site completion timestamps to `data/last-runs.json`. Microsoft Rewards is split per-session (microsoft + microsoft-mobile), so each card shows its own last-success time independently. Cards with no recorded run (fresh install) just show the login status without the second sentence.
+
+---
+
 ## What's new in 2.3.4
 
 GOG username detection regression fix + DB cleanup ([#9](https://github.com/feldorn/free-games-claimer/issues/9)).

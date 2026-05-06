@@ -494,6 +494,7 @@ try {
   if (needsActionCount) summaryParts.push(`${needsActionCount} needs manual redeem`);
   if (failedCount) summaryParts.push(`${failedCount} failed`);
   if (summaryParts.length) log.summary(summaryParts);
+  log.runSuccess('prime-gaming');
 } catch (error) {
   process.exitCode ||= 1;
   log.fail(`Exception: ${error.message || error}`);

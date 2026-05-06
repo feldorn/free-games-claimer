@@ -439,6 +439,7 @@ try {
   existed += notify_games.filter(g => g.status === 'existed').length;
   log.summary([`${claimed} claimed`, `${skipped} skipped`, `${existed} already owned`]);
 
+  log.runSuccess('steam');
 } catch (error) {
   process.exitCode ||= 1;
   log.fail(`Exception: ${error.message || error}`);

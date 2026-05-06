@@ -221,6 +221,7 @@ try {
     await f();
     console.log();
   }), Promise.resolve());
+  log.runSuccess('aliexpress');
 } catch (error) {
   process.exitCode ||= 1;
   console.error('--- Exception:');
