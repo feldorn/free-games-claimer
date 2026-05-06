@@ -2336,7 +2336,7 @@ const PANEL_HTML = `<!DOCTYPE html>
   .site-card-relogin { background: none; border: none; color: #6a7e9e; font-size: 14px; cursor: pointer; padding: 0 2px; line-height: 1; margin-left: 4px; }
   .site-card-relogin:hover:not(:disabled) { color: #4ecca3; }
   .site-card-relogin:disabled { opacity: 0.3; cursor: not-allowed; }
-  .site-card-extlink { background: none; border: none; color: #6a7e9e; font-size: 14px; cursor: pointer; padding: 0 2px; line-height: 1; margin-left: 4px; font-family: inherit; }
+  .site-card-extlink { color: #6a7e9e; font-size: 14px; padding: 0 2px; line-height: 1; margin-left: 4px; text-decoration: none; cursor: pointer; }
   .site-card-extlink:hover { color: #4ecca3; }
   /* Cookie-import button in the card-actions row. Styled like the other
      action buttons but in a slightly muted blue so it sits between
@@ -4033,15 +4033,18 @@ function render() {
     const reloginIcon = isLoggedIn
       ? '<button class="site-card-relogin" onclick="confirmRelogin(\\'' + s.id + '\\')" ' + (disabled ? 'disabled' : '') + ' title="Change account / force re-login" aria-label="Change account">↻</button>'
       : '';
-    // Note: button + window.open instead of <a target="_blank" rel="noopener
-    // noreferrer">. The anchor-tag form was running into ERR_BLOCKED_BY_RESPONSE
-    // on cross-origin destinations when the panel's reverse proxy injects
-    // Cross-Origin-Embedder-Policy: require-corp (a SWAG default in some
-    // configs). window.open creates an explicit top-level browsing context
-    // and isn't subject to the same fetch-equivalence checks Chromium
-    // applies to anchor navigations under that policy.
+    // Plain <a target="_blank"> with no rel attribute — matches what
+    // Organizr's bookmarks plugin uses, which works inside the same
+    // sandboxed iframe context. Earlier versions added rel="noopener
+    // noreferrer" or used window.open(url, '_blank', 'noopener'); both
+    // failed with ERR_BLOCKED_BY_RESPONSE when the panel was iframed
+    // inside Organizr because the noopener feature interacts with the
+    // iframe sandbox to block cross-origin top-level navigation. Modern
+    // browsers default target=_blank to noopener for cross-origin links
+    // anyway (Chrome 88+, Firefox 79+, Safari 12.1+), so dropping the
+    // rel attribute doesn't lose security.
     const extLinkIcon = s.siteUrl
-      ? '<button class="site-card-extlink" onclick="openSiteUrl(\\'' + s.siteUrl.replace(/\\'/g, "&apos;") + '\\')" title="Open ' + escapeHtml(s.name) + ' in a new tab" aria-label="Open ' + escapeHtml(s.name) + ' in a new tab">↗</button>'
+      ? '<a class="site-card-extlink" href="' + escapeHtml(s.siteUrl) + '" target="_blank" title="Open ' + escapeHtml(s.name) + ' in a new tab" aria-label="Open ' + escapeHtml(s.name) + ' in a new tab">↗</a>'
       : '';
     return '<div class="site-card">' +
       '<div class="site-card-header">' +
@@ -4076,7 +4079,7 @@ function render() {
       const watcherCardsHtml = watchers.map(w => {
         const versionLabel = w.version ? '<div class="site-card-version">v' + escapeHtml(w.version) + '</div>' : '';
         const extLinkIcon = w.siteUrl
-          ? '<button class="site-card-extlink" onclick="openSiteUrl(\\'' + w.siteUrl.replace(/\\'/g, "&apos;") + '\\')" title="Open ' + escapeHtml(w.name) + ' in a new tab" aria-label="Open ' + escapeHtml(w.name) + ' in a new tab">↗</button>'
+          ? '<a class="site-card-extlink" href="' + escapeHtml(w.siteUrl) + '" target="_blank" title="Open ' + escapeHtml(w.name) + ' in a new tab" aria-label="Open ' + escapeHtml(w.name) + ' in a new tab">↗</a>'
           : '';
         return '<div class="site-card watcher">' +
           '<div class="site-card-header">' +
@@ -4305,17 +4308,6 @@ async function refreshState() {
     if (typeof updateBatchPolling === 'function') updateBatchPolling();
     applyUrlFocus();
   } catch {}
-}
-
-// Open the per-card external-site link via window.open instead of an
-// <a target="_blank"> anchor. SWAG (and similar reverse proxies) sometimes
-// inject Cross-Origin-Embedder-Policy: require-corp on responses, which
-// can cause Chromium to block cross-origin top-level anchor navigations
-// with ERR_BLOCKED_BY_RESPONSE. window.open creates a fresh top-level
-// browsing context and bypasses the issue.
-function openSiteUrl(url) {
-  const w = window.open(url, '_blank', 'noopener');
-  if (!w) showToast('Browser blocked the new tab — allow popups for this site.', 'error');
 }
 
 async function launchSite(siteId) {

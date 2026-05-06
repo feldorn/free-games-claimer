@@ -4,6 +4,12 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.3.12
+
+- **Sessions card "open in new tab" icon now works inside Organizr's iframe**. The 2.3.11 attempt (`window.open(url, '_blank', 'noopener')`) still failed with `ERR_BLOCKED_BY_RESPONSE` when the panel was iframed inside Organizr — turns out the `noopener` feature interacts badly with iframe sandbox restrictions on cross-origin top-level navigation. Reverted to a plain `<a target="_blank">` anchor with no `rel` attribute, which matches what Organizr's own bookmarks plugin uses (and works in the same sandbox context). Modern browsers (Chrome 88+, Firefox 79+, Safari 12.1+) default `target=_blank` to noopener for cross-origin links anyway, so dropping the `rel` attribute doesn't lose security.
+
+---
+
 ## What's new in 2.3.11
 
 - **Sessions card "open in new tab" icon now uses `window.open` instead of `<a target="_blank">`**. Reverse proxies that inject `Cross-Origin-Embedder-Policy: require-corp` (a SWAG default in some configs) can cause Chromium to block cross-origin top-level anchor navigations with `ERR_BLOCKED_BY_RESPONSE` — even for benign destinations like google.com. Switched to a `<button>` that calls `window.open(url, '_blank', 'noopener')` from a click handler; this opens a fresh top-level browsing context and bypasses the policy enforcement that was blocking the anchor flow.
