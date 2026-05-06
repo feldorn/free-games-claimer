@@ -220,11 +220,16 @@ try {
     await f();
     console.log();
   }), Promise.resolve());
-  // Marker-only summary — visible balance/streak/collected lines already
-  // appear above. Marker ensures the runner counts AliExpress as a
-  // completed service in the run footer aggregation.
-  log.summary({ siteId: 'aliexpress' });
-  log.runSuccess('aliexpress');
+  // claimed=1 when today's daily reward was just collected, 0 if it was
+  // already collected before this run (semantically: "did we do today's
+  // job?"). coins shows the current balance as the third field.
+  log.summary({
+    siteId: 'aliexpress',
+    claimed: collected ? 1 : 0,
+    skipped: 0,
+    display: 'coins',
+    coins: userCoinsNum || 0,
+  });
 } catch (error) {
   process.exitCode ||= 1;
   console.error('--- Exception:');

@@ -143,7 +143,6 @@ async function getGameDetails(p, url) {
 }
 
 async function discoverFreeGames(p) {
-  log.status('Source', 'Steam search (specials, max price free)');
   return await discoverViaSteamSearch(p);
 }
 
@@ -440,9 +439,9 @@ try {
     siteId: 'steam',
     claimed,
     skipped,
+    display: 'alreadyOwned',
     alreadyOwned: existed,
   });
-  log.runSuccess('steam');
 } catch (error) {
   process.exitCode ||= 1;
   log.fail(`Exception: ${error.message || error}`);
@@ -450,7 +449,6 @@ try {
   if (error.message && process.exitCode != 130) await notify(`steam failed: ${error.message.split('\n')[0]}`, { attachLatestScreenshot: true });
 } finally {
   await db.write();
-  log.sectionEnd();
   if (notify_games.filter(g => g.status === 'claimed' || g.status === 'failed').length) {
     await notify(`steam (${user}):<br>${html_game_list(notify_games)}`);
   }

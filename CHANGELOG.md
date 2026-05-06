@@ -4,6 +4,20 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.3.7
+
+Run log second pass — strict consistency, less noise.
+
+- **One marker per service instead of two**: collapsed `[RUN-SUMMARY]` + `[RUN-SUCCESS]` into a single `[run] service=<id> ok claimed=N skipped=N <key>=<v> …` line. The `ok` token is the success signal; metrics ride along. Three lines saying the same thing → two (`summary:` for humans, `[run]` for the runner).
+- **Strict 3-field summary shape**: every service now emits exactly `summary: <claimed> claimed, <skipped> skipped, <n> <context>` — same column layout, scannable vertically. Service-specific metrics still ride in the `[run]` marker but stop crowding the human line. Watchers always show `0 claimed, 0 skipped` for consistency. Per-service third field: GOG `tracked`, Prime/Epic/Steam `already owned`, Ubisoft/Humble/Fanatical `on page`, Microsoft `points earned`, AliExpress `coins`.
+- **Date header / run-complete footer no longer get timestamp-prefixed in the panel**. The header (`=== Free Games Run — 2026-05-06 ===`) is meant as a visual delimiter, not another data row; the runner pushes its `runLog` entry with `time: null` so the Logs tab renders without a `HH:MM:SS` column.
+- **Removed the `Scripts finished with exit code N` line** that immediately followed the run-complete footer. The footer already carries the exit code.
+- **Run-complete footer always shows `claimed`** (even at 0) so users can scan vertically across days for the headline number.
+- **Removed all closing `─────` rulers** at end of service blocks — they were inconsistent (claim scripts had them, watchers didn't) and the leading blank line in `log.section` is enough delimiter. `log.sectionEnd` helper deleted.
+- **Steam's `Source:` line dropped** — informational only, didn't pull weight against the consistency cost.
+
+---
+
 ## What's new in 2.3.6
 
 Run log readability pass.

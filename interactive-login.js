@@ -1025,15 +1025,19 @@ function runAllScripts({ source = 'panel', sites = null, extraEnv = null } = {})
   }
 
   // Run header — one line per claim run with the date, so the docker
-  // logs / Logs tab clearly delimit one day's run from the next.
+  // logs / Logs tab clearly delimit one day's run from the next. The
+  // runLog entry sets time:null so the Logs tab renders the header
+  // without a redundant timestamp prefix (`=== Free Games Run — … ===`
+  // is meant to be a clean visual delimiter, not another data row).
   const runDate = new Date().toISOString().slice(0, 10);
   const runHeader = `=== Free Games Run — ${runDate} ===`;
   process.stdout.write(`\n${runHeader}\n\n`);
-  runLog.push({ type: 'system', text: runHeader, time: datetime() });
+  runLog.push({ type: 'system', text: runHeader, time: null });
 
-  // Aggregator for the run-level footer. Counts per-service [RUN-SUMMARY]
-  // markers as they stream out of the child's stdout. Reset per run.
-  const runAgg = { services: 0, claimed: 0, skipped: 0, failed: 0, alreadyOwned: 0, tracked: 0, newCount: 0, pointsEarned: 0 };
+  // Aggregator for the run-level footer. Each service emits one [run]
+  // marker on clean exit; the runner sums the metrics across all of
+  // them into a single run-complete line.
+  const runAgg = { services: 0, claimed: 0, skipped: 0, failed: 0, alreadyOwned: 0, tracked: 0, new: 0, pointsEarned: 0, onPage: 0, coins: 0 };
 
   const child = spawn('bash', ['-c', cmd], {
     cwd: process.cwd(),
@@ -1057,26 +1061,28 @@ function runAllScripts({ source = 'panel', sites = null, extraEnv = null } = {})
       if (endMatch && captchaPending && captchaPending.service === endMatch[1]) {
         captchaPending = null;
       }
-      // Run-success markers from src/util.js#log.runSuccess, emitted by each
-      // service's process.on('exit') handler at clean exit. matchAll because
-      // microsoft.js can emit two markers (microsoft + microsoft-mobile) in
-      // one stdout chunk at the very end of the run.
-      for (const m of text.matchAll(/\[RUN-SUCCESS\] service=(\S+)/g)) {
+      // [run] markers from src/util.js#log.summary — combined success +
+      // metrics signal, replacing the prior separate [RUN-SUCCESS] +
+      // [RUN-SUMMARY] pair. Shape:
+      //   [run] service=<id> ok claimed=<n> skipped=<n> <key>=<v> ...
+      // The `ok` keyword carries success — `recordLastRunSuccess` only
+      // fires when present. matchAll because microsoft.js emits two
+      // markers (microsoft + microsoft-mobile) at the end of the run.
+      for (const m of text.matchAll(/\[run\] service=(\S+) ok((?:\s+\w+=\d+)*)/g)) {
         recordLastRunSuccess(m[1]);
-      }
-      // Run-summary markers — also from src/util.js#log.summary. Aggregated
-      // into the run-level footer printed in the close handler. Marker shape:
-      //   [RUN-SUMMARY] service=<id> claimed=<n> skipped=<n> ...
-      // `new` is shortened from `newCount` in the marker; remap on read.
-      for (const m of text.matchAll(/\[RUN-SUMMARY\] service=(\S+)((?:\s+\w+=\d+)*)/g)) {
         runAgg.services++;
         for (const f of m[2].matchAll(/(\w+)=(\d+)/g)) {
-          const key = f[1] === 'new' ? 'newCount' : f[1];
-          if (runAgg[key] != null) runAgg[key] += Number(f[2]);
+          if (runAgg[f[1]] != null) runAgg[f[1]] += Number(f[2]);
         }
       }
       const lines = text.split('\n').filter(l => l.length);
       lines.forEach(l => {
+        // [run] markers are the parser-only sibling of the human "summary:"
+        // line — same data, twice. Hide them from the panel's Logs tab
+        // (they still show up in `docker logs` for developer debugging,
+        // and the matchAll above has already extracted what the runner
+        // needs for lastSuccessfulRun + footer aggregation).
+        if (/^\s*\[run\]\s/.test(l)) return;
         runLog.push({ type: 'stdout', text: l, time: datetime() });
         if (runLog.length > 500) runLog.shift();
       });
@@ -1093,22 +1099,30 @@ function runAllScripts({ source = 'panel', sites = null, extraEnv = null } = {})
 
     child.on('close', code => {
       runStatus = code === 0 ? 'success' : 'finished';
-      // Run-level footer summarises the aggregated [RUN-SUMMARY] markers.
-      // Only emits if at least one service reported in — runs with zero
-      // markers (config error, all services skipped) get no footer.
+      // Run-level footer summarises the aggregated [run] markers. claimed
+      // and skipped always show (even when zero) so users can scan
+      // vertically for the headline counts. Other fields appear only when
+      // non-zero to avoid clutter. Footer skipped entirely if no service
+      // reported in (config error, all services skipped).
       if (runAgg.services > 0) {
-        const footerParts = [`${runAgg.services} services`];
-        if (runAgg.claimed) footerParts.push(`${runAgg.claimed} claimed`);
-        if (runAgg.skipped) footerParts.push(`${runAgg.skipped} skipped`);
+        const footerParts = [
+          `${runAgg.services} services`,
+          `${runAgg.claimed} claimed`,
+          `${runAgg.skipped} skipped`,
+        ];
         if (runAgg.failed) footerParts.push(`${runAgg.failed} failed`);
         if (runAgg.alreadyOwned) footerParts.push(`${runAgg.alreadyOwned} already owned`);
-        if (runAgg.newCount) footerParts.push(`${runAgg.newCount} new tracked`);
+        if (runAgg.new) footerParts.push(`${runAgg.new} new tracked`);
         if (runAgg.pointsEarned) footerParts.push(`${runAgg.pointsEarned} points earned`);
         const footer = `=== Run complete: ${footerParts.join(', ')}, exit ${code} ===`;
         process.stdout.write(`\n${footer}\n`);
-        runLog.push({ type: 'system', text: footer, time: datetime() });
+        // time:null suppresses the Logs tab's per-line timestamp prefix —
+        // the "===" delimiter reads cleaner without it.
+        runLog.push({ type: 'system', text: footer, time: null });
       }
-      runLog.push({ type: 'system', text: `Scripts finished with exit code ${code}`, time: datetime() });
+      // "Scripts finished with exit code N" runLog push removed —
+      // the run-complete footer above carries the exit code, and
+      // duplicating it in two consecutive lines was redundant.
       lastRun = {
         at: datetime(),
         source: runSource,

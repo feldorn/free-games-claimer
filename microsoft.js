@@ -736,9 +736,11 @@ log.section('Desktop');
       if (after != null) log.status('Points after', after + (before != null ? ` (+${after - before})` : ''));
       log.summary({
         siteId: 'microsoft',
+        claimed: 0,
+        skipped: 0,
+        display: 'pointsEarned',
         pointsEarned: (before != null && after != null) ? Math.max(0, after - before) : 0,
       });
-      log.runSuccess('microsoft');
     } else {
       log.fail('Login failed or timed out — skipping desktop session');
     }
@@ -777,9 +779,11 @@ log.section('Mobile');
       if (after != null) log.status('Points after', after + (before != null ? ` (+${after - before})` : ''));
       log.summary({
         siteId: 'microsoft-mobile',
+        claimed: 0,
+        skipped: 0,
+        display: 'pointsEarned',
         pointsEarned: (before != null && after != null) ? Math.max(0, after - before) : 0,
       });
-      log.runSuccess('microsoft-mobile');
     } else {
       log.fail('Login failed or timed out — skipping mobile session');
     }

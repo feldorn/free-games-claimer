@@ -505,10 +505,10 @@ try {
     siteId: 'epic-games',
     claimed: notify_games.filter(g => g.status === 'claimed').length,
     skipped: notify_games.filter(g => g.status === 'skipped').length,
-    failed: notify_games.filter(g => g.status === 'failed').length,
+    display: 'alreadyOwned',
     alreadyOwned: notify_games.filter(g => g.status === 'existed').length,
+    failed: notify_games.filter(g => g.status === 'failed').length,
   });
-  log.runSuccess('epic-games');
 } catch (error) {
   process.exitCode ||= 1;
   log.fail(`Exception: ${error.message || error}`);
@@ -517,7 +517,6 @@ try {
 } finally {
   if (cfg.time) console.timeEnd('claim all games');
   await db.write();
-  log.sectionEnd();
   if (notify_games.filter(g => g.status == 'claimed' || g.status == 'failed' || g.status == 'action').length) {
     await notify(`epic-games (${user}):<br>${html_game_list(notify_games)}`);
   }

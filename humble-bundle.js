@@ -26,11 +26,9 @@ import { siteVersion } from './src/sites.js';
 handleSIGINT();
 log.section(`Humble Bundle (v${siteVersion('humble-bundle')})`);
 
-let _summaryStats = null;
+let _summaryStats = { siteId: 'humble-bundle', claimed: 0, skipped: 0, display: 'onPage', onPage: 0, new: 0 };
 process.on('exit', code => {
-  if (code) return;
-  if (_summaryStats) log.summary(_summaryStats);
-  log.runSuccess('humble-bundle');
+  if (!code) log.summary(_summaryStats);
 });
 
 // Humble's `?priceMax=0` URL parameter does NOT actually filter the
@@ -158,7 +156,14 @@ for (const [id, info] of products) {
 const isFirstRun = Object.keys(prev.products || {}).length === 0;
 saveState({ products: current });
 
-_summaryStats = { siteId: 'humble-bundle', tracked: products.size, newCount: newEntries.length };
+_summaryStats = {
+  siteId: 'humble-bundle',
+  claimed: 0,
+  skipped: 0,
+  display: 'onPage',
+  onPage: products.size,
+  new: newEntries.length,
+};
 
 if (newEntries.length === 0) {
   log.info('No new Humble Bundle free items since last check');

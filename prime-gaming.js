@@ -491,11 +491,12 @@ try {
   log.summary({
     siteId: 'prime-gaming',
     claimed: claimedCount,
+    skipped: 0,
+    display: 'alreadyOwned',
+    alreadyOwned: alreadyClaimed,
     failed: failedCount,
     needsAction: needsActionCount,
-    alreadyOwned: alreadyClaimed,
   });
-  log.runSuccess('prime-gaming');
 } catch (error) {
   process.exitCode ||= 1;
   log.fail(`Exception: ${error.message || error}`);
@@ -503,7 +504,6 @@ try {
   if (error.message && process.exitCode != 130) await notify(`prime-gaming failed: ${error.message.split('\n')[0]}`, { attachLatestScreenshot: true });
 } finally {
   await db.write();
-  log.sectionEnd();
   if (notify_games.length) {
     await notify(`prime-gaming (${user}):<br>${html_game_list(notify_games)}`);
   }

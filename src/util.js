@@ -274,9 +274,9 @@ export const log = {
     const pad = SECTION_WIDTH - title.length - 5;
     console.log(`\n${'─'.repeat(3)} ${title} ${'─'.repeat(Math.max(3, pad))}`);
   },
-  sectionEnd: () => {
-    console.log('─'.repeat(SECTION_WIDTH));
-  },
+  // sectionEnd removed — service blocks are now delimited by the leading
+  // blank line in log.section. Closing rulers were inconsistent across
+  // claim vs watch scripts and added visual noise without information.
   status: (label, value) => {
     console.log(`  ${label}: ${value}`);
   },
@@ -298,43 +298,38 @@ export const log = {
   fail: (msg) => {
     console.log(`  ${chalk.red('✗')} ${msg}`);
   },
-  // Standardized per-service summary. Object signature:
-  //   { siteId, claimed, skipped, alreadyOwned }     — claim services
-  //   { siteId, tracked, newCount }                  — watch-only services
-  // Emits a human-readable "summary: …" line plus a parser-friendly
-  // "[RUN-SUMMARY] service=<id> claimed=<n> …" marker that the runner
-  // aggregates into the run-level footer. Pass siteId to enable the
-  // marker; omit it to print only the visible line.
+  // Per-service end-of-run summary + combined success+metrics marker.
+  // Strict 3-field human line: "claimed, skipped, <n> <context-label>",
+  // identical shape across all services so the run log scans vertically.
+  // Caller selects which field surfaces in the third column via `display`.
+  // Marker shape: "[run] service=<id> ok claimed=N skipped=N <key>=<v>…"
+  // — the `ok` token is the success signal (subsumes the prior separate
+  // [RUN-SUCCESS] marker); failure paths simply don't reach this call.
   summary: (opts) => {
-    if (Array.isArray(opts)) {
-      // Legacy fallback for any straggling array callers — render but
-      // skip the marker (no siteId available).
-      console.log(`  summary: ${opts.join(', ')}`);
-      return;
-    }
+    const fieldLabels = {
+      alreadyOwned: 'already owned',
+      onPage:       'on page',
+      tracked:      'tracked',
+      pointsEarned: 'points earned',
+      coins:        'coins',
+      new:          'new',
+      failed:       'failed',
+      needsAction:  'needs manual redeem',
+    };
     const o = opts || {};
-    const labels = [
-      ['claimed',      'claimed'],
-      ['skipped',      'skipped'],
-      ['failed',       'failed'],
-      ['needsAction',  'needs manual redeem'],
-      ['alreadyOwned', 'already owned'],
-      ['pointsEarned', 'points earned'],
-      ['tracked',      'tracked'],
-      ['newCount',     'new'],
-    ];
-    const markerKeys = { newCount: 'new' };
-    const visible = labels
-      .filter(([k]) => o[k] != null)
-      .map(([k, label]) => `${o[k]} ${label}`)
-      .join(', ');
-    if (visible) console.log(`  summary: ${visible}`);
+    const claimed = o.claimed ?? 0;
+    const skipped = o.skipped ?? 0;
+    if (o.display && o[o.display] != null && fieldLabels[o.display]) {
+      console.log(`  summary: ${claimed} claimed, ${skipped} skipped, ${o[o.display]} ${fieldLabels[o.display]}`);
+    } else {
+      console.log(`  summary: ${claimed} claimed, ${skipped} skipped`);
+    }
     if (o.siteId) {
-      const fields = labels
-        .filter(([k]) => o[k] != null)
-        .map(([k]) => `${markerKeys[k] || k}=${o[k]}`)
-        .join(' ');
-      console.log(`  [RUN-SUMMARY] service=${o.siteId}${fields ? ' ' + fields : ''}`);
+      const parts = [`claimed=${claimed}`, `skipped=${skipped}`];
+      for (const k of Object.keys(fieldLabels)) {
+        if (o[k] != null) parts.push(`${k}=${o[k]}`);
+      }
+      console.log(`  [run] service=${o.siteId} ok ${parts.join(' ')}`);
     }
   },
   // Already-owned game line. Distinguishes "no work needed" (`•`) from
@@ -349,10 +344,4 @@ export const log = {
   progressAppend: (msg) => process.stdout.write(msg),
   progressEnd: (msg = '') => process.stdout.write(`${msg}\n`),
   progressInfo: (msg) => process.stdout.write(`  ${chalk.green('✓')} ${msg}`),
-  // Marker emitted by service scripts at the end of a successful run.
-  // The runner in interactive-login.js parses these out of stdout and
-  // persists per-site completion timestamps to data/last-runs.json so the
-  // Sessions tab can show "Successful Run …" on each card. Two-space
-  // indent matches the other in-section lines (Time:, User:, etc.).
-  runSuccess: (siteId) => console.log(`  [RUN-SUCCESS] service=${siteId}`),
 };
