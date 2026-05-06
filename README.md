@@ -57,6 +57,8 @@ If you set `LOOP=86400` (or similar), the panel's built-in scheduler will then c
 
 Sessions are stored in the `fgc` Docker volume and persist across container restarts. You should not need to log in again unless a session expires (you'll get a notification if that happens — come back to the panel and click **Login** on the affected site).
 
+If a site's in-container login is too brittle to complete (AliExpress's slider, Cloudflare gating, hardware MFA, etc.), use **Cookie upload** instead: solve login on your desktop with the EditThisCookie or Cookie-Editor extension, export to JSON, paste into the panel's Cookie button on that site's card. See [Cookie upload](#cookie-upload).
+
 ---
 
 ## Docker Compose
@@ -272,7 +274,7 @@ To add it to another script, see `awaitUserCaptchaSolve(page, opts)` in `src/uti
 
 ### Known limitations
 
-- Manual solve via noVNC works for sites that gate on **behaviour** (slide gesture, click challenge, etc.). Sites that gate on **fingerprint** (e.g. AliExpress in our testing) will reject the human-solved slide too because the bot detector fires on the container's browser fingerprint, not the slide itself. For those, manual login from a real desktop is the workaround until the fingerprint side gets attention.
+- Manual solve via noVNC works for sites that gate on **behaviour** (slide gesture, click challenge, etc.). Sites that gate on **fingerprint** (e.g. AliExpress in our testing) will reject the human-solved slide too because the bot detector fires on the container's browser fingerprint, not the slide itself. For those, [Cookie upload](#cookie-upload) — solve login on your desktop, export cookies, paste into the panel — is the practical workaround. v2.3.1 also persists AliExpress's fingerprint across runs to reduce device-instability flagging; further fingerprint work is tracked in [#2](https://github.com/feldorn/free-games-claimer/issues/2).
 - The poll watches for the captcha element to *disappear* and treats that as "solved". Refreshing the page or navigating away also clears the element, so technically a false positive is possible — in practice the surrounding code re-checks login state right after, so a false positive just means we proceed to that check.
 
 ---
@@ -288,6 +290,28 @@ To get OTP keys for automatic 2FA:
 - **Steam**: Uses Steam Guard (5-character code prompted in terminal or via VNC)
 
 > **Security note:** Storing passwords and OTP keys as environment variables in plain text is a security risk. Use unique/generated passwords.
+
+---
+
+## Cookie upload
+
+Some sites are hostile to in-container browsers in ways no fingerprint shim can fully fix — AliExpress's AWSC slider, Cloudflare-gated stores, hardware-key MFA, etc. For those, **solve login on your desktop, export the cookies, and paste them into the panel**. The panel writes them into that site's persistent profile and re-runs the session check to confirm login took.
+
+**One-time setup:**
+
+1. Install [EditThisCookie](https://chromewebstore.google.com/detail/editthiscookie/fngmhnnpilhplaeedifhccceomclgfbg) or [Cookie-Editor](https://cookie-editor.com/) in your everyday browser.
+2. Log in to the target site (e.g. `aliexpress.com`) on your desktop, solve any captcha there.
+3. Click the extension on the site's tab, **Export → JSON**, copy the result.
+4. In the panel, click **Cookie** on the site's Sessions card, paste the JSON, **Apply**.
+
+The panel applies the cookies to the site's persistent profile via Playwright's `addCookies`, then runs the same `checkLogin` probe the **Check** button uses. If the probe says "logged in", you're done — the next claim run uses the desktop's authenticated session. If the probe still says "not logged in", the cookies you exported probably scope to a different domain (some stores split auth across e.g. `accounts.example.com` and `www.example.com`); export from a tab on the exact domain the site logs into and try again.
+
+**When to use this vs Login:**
+
+- **Login button** — works everywhere the in-container Chromium can complete the flow. Cheapest path; use it first.
+- **Cookie button** — fallback when in-container login fails for fingerprint or device-trust reasons. Currently the only practical path for AliExpress on accounts that escalate past the slider.
+
+Cookie upload uses the same browser-busy mutex as Login / Check / Run, so it can't race a concurrent claim. Malformed JSON is rejected before it touches the profile dir.
 
 ---
 
@@ -365,9 +389,16 @@ depending on viewport width.
   Solve captchas / MFA / phone verification manually, then click **I'm Logged
   In** to verify and persist the session. The browser's yours while it's open
   — clear captcha cookies, verify game ownership, redeem codes in a side tab;
-  anything stays in the session.
-- **Check button** re-runs the session probe without opening a visible
-  browser.
+  anything stays in the session. The button label is status-driven: shows
+  **Login** when the site is not authenticated and **Check** when it is.
+- **Cookie button** writes a JSON cookie export from the browser of your
+  choice into the site's persistent profile, then re-runs the session check
+  to confirm login took. Solves the case where in-container login is too
+  brittle (fingerprint-gated bot challenges, hardware MFA, etc.) — see
+  [Cookie upload](#cookie-upload) below.
+- **↻ icon** (top-right of card) forces a re-login on a session that's
+  already healthy. Useful before a suspected ban or when rotating accounts.
+  Prompts for confirmation so a stray click can't nuke a working session.
 - **Run button** (per-card) triggers a single-service claim run. For
   Microsoft Rewards this also passes `MS_SKIP_WINDOW=1` so a manual test
   click doesn't sleep until the next scheduled MS window.
