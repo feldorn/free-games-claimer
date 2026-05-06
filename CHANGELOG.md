@@ -4,6 +4,14 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.3.3
+
+AliExpress post-collect false-positive fix ([#2](https://github.com/feldorn/free-games-claimer/issues/2)).
+
+- **Recognise "already collected today" as logged-in** — both `aliexpress.js` auth() and the panel's `checkLogin` raced two markers: `button:has-text("Log in")` (logged out) vs `h3:text-is("day streak")` (logged in). When the user had already collected today's coins (manually on another device, or on an earlier run), the streak h3 disappears and the page shows "Earn more coins" — neither marker visible, so both code paths false-failed with "AliExpress page never finished loading" or "Login not detected". Added `button:has-text("Earn more coins")` as a third logged-in signal in both spots. Surfaced by dabziuebu4egh2 in #2 after their cookie-upload login worked at the API level (coin balance returned correctly) but the DOM check still failed. AliExpress collector bumped to v2.2.
+
+---
+
 ## What's new in 2.3.2
 
 Prime Gaming pending-redeem age filter ([#14](https://github.com/feldorn/free-games-claimer/issues/14)).

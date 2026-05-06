@@ -318,7 +318,7 @@ export const SITES = [
   {
     id: 'aliexpress',
     name: 'AliExpress',
-    version: '2.1',
+    version: '2.2',
     subtitle: null,
     script: 'aliexpress.js',
     claimOrder: 5,
@@ -339,9 +339,14 @@ export const SITES = [
     async checkLogin(page) {
       const loginBtn = page.locator('button:has-text("Log in")');
       const streak = page.locator('h3:text-is("day streak")');
+      // Post-collect state — the "day streak" h3 disappears once the user has
+      // claimed today's coins, but "Earn more coins" stays visible. Treat that
+      // as logged-in too so users who already collected manually don't get a
+      // false "session expired" report from the panel.
+      const collectedToday = page.locator('button:has-text("Earn more coins")');
       // AliExpress mobile frequently hangs on initial load — same issue as in
       // aliexpress.js auth(). Auto-reload up to 3 times until either the login
-      // button or the logged-in "day streak" marker appears, then short-circuit.
+      // button or either logged-in marker appears, then short-circuit.
       const QUICK_WAIT_MS = 15000;
       const MAX_RELOADS = 3;
       try {
@@ -354,8 +359,9 @@ export const SITES = [
           const which = await Promise.any([
             loginBtn.waitFor({ state: 'visible', timeout: QUICK_WAIT_MS }).then(() => 'login'),
             streak.waitFor({ state: 'visible', timeout: QUICK_WAIT_MS }).then(() => 'streak'),
+            collectedToday.waitFor({ state: 'visible', timeout: QUICK_WAIT_MS }).then(() => 'collectedToday'),
           ]).catch(() => null);
-          if (which === 'streak') return { loggedIn: true, user: 'member' };
+          if (which === 'streak' || which === 'collectedToday') return { loggedIn: true, user: 'member' };
           if (which === 'login') return { loggedIn: false };
         }
         return { loggedIn: false };

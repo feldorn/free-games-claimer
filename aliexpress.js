@@ -62,8 +62,14 @@ const auth = async url => {
   console.log('auth', url);
   const loginBtn = page.locator('button:has-text("Log in")');
   const loggedIn = page.locator('h3:text-is("day streak")');
+  // Post-collect state: when the user has already collected today's coins
+  // (manually on another device or earlier in the day), the "day streak"
+  // h3 disappears and the page shows "Earn more coins" instead. Counts as
+  // logged-in for the purpose of this race so we don't false-positive into
+  // the login flow against an already-authenticated session.
+  const collectedToday = page.locator('button:has-text("Earn more coins")');
   // AliExpress mobile sometimes hangs on initial load — a manual F5 recovers it.
-  // Auto-reload up to 3 times if neither the login button nor the logged-in
+  // Auto-reload up to 3 times if neither the login button nor either logged-in
   // marker shows up within a short window. Track which marker resolved so we
   // can dispatch directly: re-racing afterwards with `loggedIn.waitFor()`
   // under the default timeout would prematurely abort the login branch when
@@ -80,9 +86,10 @@ const auth = async url => {
     const which = await Promise.any([
       loginBtn.waitFor({ timeout: QUICK_WAIT_MS }).then(_ => 'loginBtn'),
       loggedIn.waitFor({ timeout: QUICK_WAIT_MS }).then(_ => 'loggedIn'),
+      collectedToday.waitFor({ timeout: QUICK_WAIT_MS }).then(_ => 'collectedToday'),
     ]).catch(_ => null);
     if (which) {
-      alreadyLoggedIn = which === 'loggedIn';
+      alreadyLoggedIn = which === 'loggedIn' || which === 'collectedToday';
       break;
     }
     if (attempt === MAX_RELOADS) throw new Error('AliExpress page never finished loading (login button / logged-in marker never appeared)');
