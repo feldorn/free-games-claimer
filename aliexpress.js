@@ -10,7 +10,6 @@ import { FingerprintInjector } from 'fingerprint-injector';
 import { FingerprintGenerator } from 'fingerprint-generator';
 
 log.section(`AliExpress (v${siteVersion('aliexpress')})`);
-log.status('Time', datetime());
 
 // Module-level state populated during the run; persisted to
 // data/aliexpress.json so the Stats tab can compute deltas run-over-run.
@@ -221,6 +220,10 @@ try {
     await f();
     console.log();
   }), Promise.resolve());
+  // Marker-only summary — visible balance/streak/collected lines already
+  // appear above. Marker ensures the runner counts AliExpress as a
+  // completed service in the run footer aggregation.
+  log.summary({ siteId: 'aliexpress' });
   log.runSuccess('aliexpress');
 } catch (error) {
   process.exitCode ||= 1;

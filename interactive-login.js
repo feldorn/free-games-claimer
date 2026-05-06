@@ -1024,6 +1024,17 @@ function runAllScripts({ source = 'panel', sites = null, extraEnv = null } = {})
       : 'No active services configured. Enable at least one in Settings → Services.' };
   }
 
+  // Run header — one line per claim run with the date, so the docker
+  // logs / Logs tab clearly delimit one day's run from the next.
+  const runDate = new Date().toISOString().slice(0, 10);
+  const runHeader = `=== Free Games Run — ${runDate} ===`;
+  process.stdout.write(`\n${runHeader}\n\n`);
+  runLog.push({ type: 'system', text: runHeader, time: datetime() });
+
+  // Aggregator for the run-level footer. Counts per-service [RUN-SUMMARY]
+  // markers as they stream out of the child's stdout. Reset per run.
+  const runAgg = { services: 0, claimed: 0, skipped: 0, failed: 0, alreadyOwned: 0, tracked: 0, newCount: 0, pointsEarned: 0 };
+
   const child = spawn('bash', ['-c', cmd], {
     cwd: process.cwd(),
     env: childEnv,
@@ -1053,6 +1064,17 @@ function runAllScripts({ source = 'panel', sites = null, extraEnv = null } = {})
       for (const m of text.matchAll(/\[RUN-SUCCESS\] service=(\S+)/g)) {
         recordLastRunSuccess(m[1]);
       }
+      // Run-summary markers — also from src/util.js#log.summary. Aggregated
+      // into the run-level footer printed in the close handler. Marker shape:
+      //   [RUN-SUMMARY] service=<id> claimed=<n> skipped=<n> ...
+      // `new` is shortened from `newCount` in the marker; remap on read.
+      for (const m of text.matchAll(/\[RUN-SUMMARY\] service=(\S+)((?:\s+\w+=\d+)*)/g)) {
+        runAgg.services++;
+        for (const f of m[2].matchAll(/(\w+)=(\d+)/g)) {
+          const key = f[1] === 'new' ? 'newCount' : f[1];
+          if (runAgg[key] != null) runAgg[key] += Number(f[2]);
+        }
+      }
       const lines = text.split('\n').filter(l => l.length);
       lines.forEach(l => {
         runLog.push({ type: 'stdout', text: l, time: datetime() });
@@ -1071,6 +1093,21 @@ function runAllScripts({ source = 'panel', sites = null, extraEnv = null } = {})
 
     child.on('close', code => {
       runStatus = code === 0 ? 'success' : 'finished';
+      // Run-level footer summarises the aggregated [RUN-SUMMARY] markers.
+      // Only emits if at least one service reported in — runs with zero
+      // markers (config error, all services skipped) get no footer.
+      if (runAgg.services > 0) {
+        const footerParts = [`${runAgg.services} services`];
+        if (runAgg.claimed) footerParts.push(`${runAgg.claimed} claimed`);
+        if (runAgg.skipped) footerParts.push(`${runAgg.skipped} skipped`);
+        if (runAgg.failed) footerParts.push(`${runAgg.failed} failed`);
+        if (runAgg.alreadyOwned) footerParts.push(`${runAgg.alreadyOwned} already owned`);
+        if (runAgg.newCount) footerParts.push(`${runAgg.newCount} new tracked`);
+        if (runAgg.pointsEarned) footerParts.push(`${runAgg.pointsEarned} points earned`);
+        const footer = `=== Run complete: ${footerParts.join(', ')}, exit ${code} ===`;
+        process.stdout.write(`\n${footer}\n`);
+        runLog.push({ type: 'system', text: footer, time: datetime() });
+      }
       runLog.push({ type: 'system', text: `Scripts finished with exit code ${code}`, time: datetime() });
       lastRun = {
         at: datetime(),

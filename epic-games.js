@@ -14,7 +14,6 @@ const URL_LOGIN = 'https://www.epicgames.com/id/login?lang=en-US&noHostRedirect=
 const URL_PROMOTIONS = 'https://store-site-backend-static-ipv4.ak.epicgames.com/freeGamesPromotions?locale=en-US';
 
 log.section(`Epic Games (v${siteVersion('epic-games')})`);
-log.status('Time', datetime());
 
 const offerIdMap = {};
 try {
@@ -78,6 +77,12 @@ if (cfg.debug_network) {
 }
 
 const notify_games = [];
+// Epic returns each free game twice — once for PC, once for Mobile (or
+// both PC variants for a single title). We process each entry to capture
+// per-variant state in the DB, but the human-readable "already in library"
+// log line is the same string regardless of variant — collapse repeats so
+// the run log isn't visually noisy.
+const ownedLogged = new Set();
 let user;
 
 try {
@@ -264,7 +269,7 @@ try {
     notify_games.push(notify_game); // status is updated below
 
     if (btnText == 'in library') {
-      log.ok(`${title} — already in library`);
+      if (!ownedLogged.has(title)) { log.owned(title); ownedLogged.add(title); }
       notify_game.status = 'existed';
       db.data[user][game_id].status ||= 'existed'; // does not overwrite claimed or failed
       if (db.data[user][game_id].status.startsWith('failed')) db.data[user][game_id].status = 'manual'; // was failed but now it's claimed
@@ -496,6 +501,13 @@ try {
       log.warn(`Cart fallback — 0/${failedGames.length} failed game(s) matched to offer IDs`);
     }
   }
+  log.summary({
+    siteId: 'epic-games',
+    claimed: notify_games.filter(g => g.status === 'claimed').length,
+    skipped: notify_games.filter(g => g.status === 'skipped').length,
+    failed: notify_games.filter(g => g.status === 'failed').length,
+    alreadyOwned: notify_games.filter(g => g.status === 'existed').length,
+  });
   log.runSuccess('epic-games');
 } catch (error) {
   process.exitCode ||= 1;

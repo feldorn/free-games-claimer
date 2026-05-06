@@ -4,6 +4,21 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.3.6
+
+Run log readability pass.
+
+- **Run header** at the start of each claim run: `=== Free Games Run — YYYY-MM-DD ===`. Makes it cheap to scroll back through `docker logs` and find a specific day.
+- **Run footer** at the end: `=== Run complete: 7 services, 1 claimed, 2 skipped, 142 points earned, exit 0 ===`. Aggregated from per-service markers so it always reflects what actually happened.
+- **Universal per-service summary** — every service now ends its block with a one-line `summary: …` (claim services: claimed/skipped/failed/needs manual redeem/already owned; watchers: tracked/new; Microsoft: points earned). Previously only Steam reliably emitted one. Drives the run footer too.
+- **Drop redundant `Time:` lines** from each section. The runner already prefixes every log line with HH:MM:SS, so the second timestamp added nothing.
+- **`•` glyph for already-owned games** (`log.owned()` helper) — distinguishes "no work needed" from "new action this run" (`✓` via `log.ok`). Applied on Epic and Steam already-in-library messages and GOG already-claimed messages.
+- **Epic dedups platform-variant noise** — Epic's API returns each free game twice (PC + Mobile), and the script processed both. The "already in library" log line now appears once per title instead of repeating per platform; per-variant DB state is still updated.
+
+`[RUN-SUMMARY]` markers are emitted alongside `[RUN-SUCCESS]` (parser-friendly key=value shape) so the runner aggregates without scraping human-readable text.
+
+---
+
 ## What's new in 2.3.5
 
 - **Sessions cards show last successful run** — replaced the ambiguous `(HH:MM:SS)` session-check suffix with a meaningful "Last Successful Run YYYY-MM-DD HH:MM:SS" line. Each service script emits a `[RUN-SUCCESS] service=<id>` marker via `process.on('exit')` only on clean exit; the runner parses these from stdout and persists per-site completion timestamps to `data/last-runs.json`. Microsoft Rewards is split per-session (microsoft + microsoft-mobile), so each card shows its own last-success time independently. Cards with no recorded run (fresh install) just show the login status without the second sentence.

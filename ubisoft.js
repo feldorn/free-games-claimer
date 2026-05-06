@@ -12,9 +12,15 @@ import { siteVersion } from './src/sites.js';
 
 handleSIGINT();
 log.section(`Ubisoft (v${siteVersion('ubisoft')})`);
-log.status('Time', datetime());
 
-process.on('exit', code => { if (!code) log.runSuccess('ubisoft'); });
+// Stats populated before any process.exit(0) so the summary fires on
+// every clean exit path (no-new, baseline, all-F2P, normal end).
+let _summaryStats = null;
+process.on('exit', code => {
+  if (code) return;
+  if (_summaryStats) log.summary(_summaryStats);
+  log.runSuccess('ubisoft');
+});
 
 const URL_FREE = 'https://store.ubisoft.com/us/free-games';
 const STATE_FILE = dataDir('ubisoft-watch.json');
@@ -99,6 +105,8 @@ for (const [pid, info] of products) {
 
 const isFirstRun = Object.keys(prev.products).length === 0;
 saveState({ products: current });
+
+_summaryStats = { siteId: 'ubisoft', tracked: products.size, newCount: newEntries.length };
 
 if (newEntries.length === 0) {
   log.info('No new Ubisoft free games since last check');

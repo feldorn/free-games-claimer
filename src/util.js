@@ -298,8 +298,50 @@ export const log = {
   fail: (msg) => {
     console.log(`  ${chalk.red('✗')} ${msg}`);
   },
-  summary: (parts) => {
-    console.log(`  ${chalk.dim('Summary:')} ${parts.join(', ')}`);
+  // Standardized per-service summary. Object signature:
+  //   { siteId, claimed, skipped, alreadyOwned }     — claim services
+  //   { siteId, tracked, newCount }                  — watch-only services
+  // Emits a human-readable "summary: …" line plus a parser-friendly
+  // "[RUN-SUMMARY] service=<id> claimed=<n> …" marker that the runner
+  // aggregates into the run-level footer. Pass siteId to enable the
+  // marker; omit it to print only the visible line.
+  summary: (opts) => {
+    if (Array.isArray(opts)) {
+      // Legacy fallback for any straggling array callers — render but
+      // skip the marker (no siteId available).
+      console.log(`  summary: ${opts.join(', ')}`);
+      return;
+    }
+    const o = opts || {};
+    const labels = [
+      ['claimed',      'claimed'],
+      ['skipped',      'skipped'],
+      ['failed',       'failed'],
+      ['needsAction',  'needs manual redeem'],
+      ['alreadyOwned', 'already owned'],
+      ['pointsEarned', 'points earned'],
+      ['tracked',      'tracked'],
+      ['newCount',     'new'],
+    ];
+    const markerKeys = { newCount: 'new' };
+    const visible = labels
+      .filter(([k]) => o[k] != null)
+      .map(([k, label]) => `${o[k]} ${label}`)
+      .join(', ');
+    if (visible) console.log(`  summary: ${visible}`);
+    if (o.siteId) {
+      const fields = labels
+        .filter(([k]) => o[k] != null)
+        .map(([k]) => `${markerKeys[k] || k}=${o[k]}`)
+        .join(' ');
+      console.log(`  [RUN-SUMMARY] service=${o.siteId}${fields ? ' ' + fields : ''}`);
+    }
+  },
+  // Already-owned game line. Distinguishes "no work needed" (`•`) from
+  // "new action this run" (`✓` via log.ok). Same indent as log.ok and
+  // log.skip so the per-service block reads as a uniform table.
+  owned: (name) => {
+    console.log(`    ${chalk.dim('•')} ${chalk.dim(name + ' — already owned')}`);
   },
   // Progressive line helpers — write pieces without newline, then end the line.
   // Use these when you want log output to appear incrementally (e.g. during sleeps).

@@ -14,7 +14,6 @@ const BING_REWARDS_ACTIVITY_CARD_SELECTOR = 'mee-card:has(.mee-icon-AddMedium)';
 if (process.stdout._handle?.setBlocking) process.stdout._handle.setBlocking(true);
 
 log.section(`Microsoft Rewards (v${siteVersion('microsoft')})`);
-log.status('Time', datetime());
 log.status('MS email', cfg.ms_email || '(none — will use EMAIL or prompt)');
 
 // MS_SKIP_WINDOW=1 bypasses the internal wait-until-window sleep regardless
@@ -735,6 +734,10 @@ log.section('Desktop');
       await executeBingSearches(page, searchTerms.slice(0, desktopSearchCount));
       after = await readPointsBalance(page);
       if (after != null) log.status('Points after', after + (before != null ? ` (+${after - before})` : ''));
+      log.summary({
+        siteId: 'microsoft',
+        pointsEarned: (before != null && after != null) ? Math.max(0, after - before) : 0,
+      });
       log.runSuccess('microsoft');
     } else {
       log.fail('Login failed or timed out — skipping desktop session');
@@ -772,6 +775,10 @@ log.section('Mobile');
       await executeBingSearches(page, searchTerms.slice(-mobileSearchCount));
       after = await readPointsBalance(page);
       if (after != null) log.status('Points after', after + (before != null ? ` (+${after - before})` : ''));
+      log.summary({
+        siteId: 'microsoft-mobile',
+        pointsEarned: (before != null && after != null) ? Math.max(0, after - before) : 0,
+      });
       log.runSuccess('microsoft-mobile');
     } else {
       log.fail('Login failed or timed out — skipping mobile session');

@@ -8,7 +8,6 @@ const screenshot = (...a) => resolve(cfg.dir.screenshots, 'gog', ...a);
 const URL_CLAIM = 'https://www.gog.com/en';
 
 log.section(`GOG (v${siteVersion('gog')})`);
-log.status('Time', datetime());
 
 const db = await jsonDb('gog.json', {});
 
@@ -41,6 +40,11 @@ await page.setViewportSize({ width: cfg.width, height: cfg.height }); // TODO wo
 
 const notify_games = [];
 let user;
+// Catalog watch counters surfaced in the run summary. Populated inside the
+// catalog watch try block; default null so a watch-skip leaves them out
+// of the summary line entirely rather than reporting "0 tracked, 0 new".
+let catalogTracked = null;
+let catalogNew = null;
 
 try {
   await context.addCookies([{ name: 'CookieConsent', value: '{stamp:%274oR8MJL+bxVlG6g+kl2we5+suMJ+Tv7I4C5d4k+YY4vrnhCD+P23RQ==%27%2Cnecessary:true%2Cpreferences:true%2Cstatistics:true%2Cmarketing:true%2Cmethod:%27explicit%27%2Cver:1%2Cutc:1672331618201%2Cregion:%27de%27}', domain: 'www.gog.com', path: '/' }]); // to not waste screen space when non-headless
@@ -272,7 +276,7 @@ try {
       const message = JSON.parse(response).message;
       if (message == 'Already claimed') {
         status = 'existed';
-        log.ok(`${title} — already in library`);
+        log.owned(title);
       } else {
         log.warn(`${title} — ${message}`);
         status = message;
@@ -352,6 +356,8 @@ try {
       }
       watchDb.data._baseline = true;
       await watchDb.write();
+      catalogTracked = free.length;
+      catalogNew = 0;
       log.info(`Catalog watch — baseline established (${free.length} free game(s) recorded silently). Subsequent runs notify on new additions only.`);
     } else {
       const newPromos = [];
@@ -371,6 +377,8 @@ try {
         newPromos.push({ title: p.title, url: promoUrl });
       }
       await watchDb.write();
+      catalogTracked = free.length;
+      catalogNew = newPromos.length;
       if (newPromos.length) {
         log.info(`Catalog watch — ${newPromos.length} new free game(s): ${newPromos.map(g => g.title).join(', ')}`);
         // Bare URLs (no <a href>) so Pushover's HTML-stripping doesn't drop
@@ -510,6 +518,13 @@ try {
     if (cfg.debug) console.error(e);
   }
 
+  log.summary({
+    siteId: 'gog',
+    claimed: notify_games.filter(g => g.status === 'claimed').length,
+    alreadyOwned: notify_games.filter(g => g.status === 'existed').length,
+    tracked: catalogTracked,
+    newCount: catalogNew,
+  });
   log.runSuccess('gog');
 } catch (error) {
   process.exitCode ||= 1;

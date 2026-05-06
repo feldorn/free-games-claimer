@@ -29,9 +29,13 @@ import { siteVersion } from './src/sites.js';
 
 handleSIGINT();
 log.section(`Fanatical (v${siteVersion('fanatical')})`);
-log.status('Time', datetime());
 
-process.on('exit', code => { if (!code) log.runSuccess('fanatical'); });
+let _summaryStats = null;
+process.on('exit', code => {
+  if (code) return;
+  if (_summaryStats) log.summary(_summaryStats);
+  log.runSuccess('fanatical');
+});
 
 const URL_PAGE = 'https://www.fanatical.com/en/free-games-keys';
 const STATE_FILE = dataDir('fanatical-watch.json');
@@ -145,6 +149,8 @@ for (const [id, info] of products) {
 
 const isFirstRun = Object.keys(prev.products || {}).length === 0;
 saveState({ products: current });
+
+_summaryStats = { siteId: 'fanatical', tracked: products.size, newCount: newEntries.length };
 
 if (newEntries.length === 0) {
   log.info('No new Fanatical free items since last check');

@@ -11,7 +11,6 @@ const BASE_URL = 'https://luna.amazon.com';
 const URL_CLAIM = `${BASE_URL}/claims/home`;
 
 log.section(`Prime Gaming (v${siteVersion('prime-gaming')})`);
-log.status('Time', datetime());
 
 const db = await jsonDb('prime-gaming.json', {});
 
@@ -489,11 +488,13 @@ try {
     }
     } // end of "lootTab exists" branch
   }
-  const summaryParts = [];
-  if (claimedCount) summaryParts.push(`${claimedCount} claimed`);
-  if (needsActionCount) summaryParts.push(`${needsActionCount} needs manual redeem`);
-  if (failedCount) summaryParts.push(`${failedCount} failed`);
-  if (summaryParts.length) log.summary(summaryParts);
+  log.summary({
+    siteId: 'prime-gaming',
+    claimed: claimedCount,
+    failed: failedCount,
+    needsAction: needsActionCount,
+    alreadyOwned: alreadyClaimed,
+  });
   log.runSuccess('prime-gaming');
 } catch (error) {
   process.exitCode ||= 1;

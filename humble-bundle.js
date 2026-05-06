@@ -25,9 +25,13 @@ import { siteVersion } from './src/sites.js';
 
 handleSIGINT();
 log.section(`Humble Bundle (v${siteVersion('humble-bundle')})`);
-log.status('Time', datetime());
 
-process.on('exit', code => { if (!code) log.runSuccess('humble-bundle'); });
+let _summaryStats = null;
+process.on('exit', code => {
+  if (code) return;
+  if (_summaryStats) log.summary(_summaryStats);
+  log.runSuccess('humble-bundle');
+});
 
 // Humble's `?priceMax=0` URL parameter does NOT actually filter the
 // search to free items (verified live: the response returned 20
@@ -153,6 +157,8 @@ for (const [id, info] of products) {
 
 const isFirstRun = Object.keys(prev.products || {}).length === 0;
 saveState({ products: current });
+
+_summaryStats = { siteId: 'humble-bundle', tracked: products.size, newCount: newEntries.length };
 
 if (newEntries.length === 0) {
   log.info('No new Humble Bundle free items since last check');

@@ -38,7 +38,6 @@ function parsePrice(text) {
 }
 
 log.section(`Steam (v${siteVersion('steam')})`);
-log.status('Time', datetime());
 log.status('Min rating', `${cfg.steam_min_rating}/9 (${Object.entries(RATING_MAP).find(([, v]) => v === cfg.steam_min_rating)?.[0] || '?'})`);
 log.status('Min price', `$${cfg.steam_min_price}`);
 
@@ -330,7 +329,7 @@ try {
 
     if (db.data[user][appId]?.status === 'claimed' || db.data[user][appId]?.status === 'existed') {
       const knownTitle = db.data[user][appId]?.title || game.name;
-      log.ok(`${knownTitle} — already in library`);
+      log.owned(knownTitle);
       existed++;
       continue;
     }
@@ -342,7 +341,7 @@ try {
     db.data[user][appId] ||= { title, time: datetime(), url: game.url };
 
     if (details.alreadyOwned) {
-      log.ok(`${title} — already in library`);
+      log.owned(title);
       db.data[user][appId].status ||= 'existed';
       notify_games.push({ title, url: game.url, status: 'existed' });
       continue;
@@ -437,8 +436,12 @@ try {
   }
 
   existed += notify_games.filter(g => g.status === 'existed').length;
-  log.summary([`${claimed} claimed`, `${skipped} skipped`, `${existed} already owned`]);
-
+  log.summary({
+    siteId: 'steam',
+    claimed,
+    skipped,
+    alreadyOwned: existed,
+  });
   log.runSuccess('steam');
 } catch (error) {
   process.exitCode ||= 1;
