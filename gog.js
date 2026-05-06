@@ -152,7 +152,10 @@ try {
     } catch {}
   }
   // Guard against known GOG sub-nav labels leaking in (badges append a count).
-  if (user && /^(Games|Orders|Wishlist|Friends|Library|Account|Settings)(\s+\d+)?$/i.test(user)) {
+  // Reported labels seen in the wild: Games, Orders, Wishlist, Friends,
+  // Library, Account, Settings, Reviews, Cart, News, Search, Sign in.
+  // Issue #9 surfaced "Reviews" leaking through the original guard.
+  if (user && /^(Games|Orders|Wishlist|Friends|Library|Account|Settings|Reviews|Cart|News|Search|Sign\s*in)(\s+\d+)?$/i.test(user)) {
     log.warn(`Detected username looked like a nav label ("${user}") — discarding`);
     user = null;
   }
