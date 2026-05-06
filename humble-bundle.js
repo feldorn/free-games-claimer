@@ -108,7 +108,7 @@ try {
   try { if (context) await context.close(); } catch {}
 }
 
-log.status('Humble API responses captured', captured.length);
+log.status('API responses captured', captured.length);
 if (captured.length === 0) {
   log.warn('Humble store rendered no API products — endpoint or page URL may need updating');
   process.exit(0);
@@ -142,7 +142,7 @@ for (const r of captured) {
   if (!products.has(id)) products.set(id, { name, url, note });
 }
 
-log.status('Free Humble products on page', products.size);
+log.status('Free products on page', products.size);
 
 const prev = loadState();
 const newEntries = [];

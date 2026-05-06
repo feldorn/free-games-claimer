@@ -1083,7 +1083,17 @@ function runAllScripts({ source = 'panel', sites = null, extraEnv = null } = {})
         // and the matchAll above has already extracted what the runner
         // needs for lastSuccessfulRun + footer aggregation).
         if (/^\s*\[run\]\s/.test(l)) return;
-        runLog.push({ type: 'stdout', text: l, time: datetime() });
+        // Structural lines (─── section headers, === run delimiters) render
+        // without a per-line timestamp prefix — they're visual delimiters,
+        // not log events. ─── headers also get a synthetic blank line above
+        // them so per-service blocks read as discrete chunks.
+        const isSection = /^───/.test(l);
+        const isHeader  = /^===/.test(l);
+        if (isSection) {
+          const last = runLog[runLog.length - 1];
+          if (last && last.text !== '') runLog.push({ type: 'stdout', text: '', time: null });
+        }
+        runLog.push({ type: 'stdout', text: l, time: (isSection || isHeader) ? null : datetime() });
         if (runLog.length > 500) runLog.shift();
       });
     });
@@ -3636,7 +3646,13 @@ async function pollLogsTab() {
         const div = document.createElement('div');
         div.className = 'line ' + l.type;
         const t = (l.time && String(l.time).slice(11, 19)) || '';
-        div.innerHTML = '<span class="time">' + t + '</span>' + escapeHtml(l.text);
+        // Hard space after the time span so even copy-pasted plaintext
+        // (which strips CSS margin-right) keeps timestamps separated
+        // from the section's "───" or content. Skip the span entirely
+        // when there's no time — structural lines (=== / ───) render
+        // flush-left for visual emphasis.
+        const timeSpan = t ? '<span class="time">' + t + '</span> ' : '';
+        div.innerHTML = timeSpan + escapeHtml(l.text);
         body.appendChild(div);
       });
       body.scrollTop = body.scrollHeight;
@@ -4219,7 +4235,10 @@ async function pollLog() {
       r.lines.forEach(l => {
         const div = document.createElement('div');
         div.className = 'line ' + l.type;
-        const timeSpan = '<span class="time">' + (l.time ? String(l.time).slice(11, 19) : '') + '</span>';
+        // See parallel comment in the Logs-tab render: hard space after
+        // the time span keeps copy-pasted plaintext readable; null time
+        // omits the span entirely for structural === / ─── lines.
+        const timeSpan = l.time ? '<span class="time">' + String(l.time).slice(11, 19) + '</span> ' : '';
         div.innerHTML = timeSpan + escapeHtml(l.text);
         logEl.appendChild(div);
       });

@@ -501,13 +501,19 @@ try {
       log.warn(`Cart fallback — 0/${failedGames.length} failed game(s) matched to offer IDs`);
     }
   }
+  // Epic returns each free game twice (PC + Mobile platform variants) and
+  // notify_games has one entry per variant. Dedupe by title so the summary
+  // counts match the per-title body lines (which are also already deduped
+  // via `ownedLogged` for the "already in library" message).
+  const uniqueByTitle = status =>
+    new Set(notify_games.filter(g => g.status === status).map(g => g.title)).size;
   log.summary({
     siteId: 'epic-games',
-    claimed: notify_games.filter(g => g.status === 'claimed').length,
-    skipped: notify_games.filter(g => g.status === 'skipped').length,
+    claimed: uniqueByTitle('claimed'),
+    skipped: uniqueByTitle('skipped'),
     display: 'alreadyOwned',
-    alreadyOwned: notify_games.filter(g => g.status === 'existed').length,
-    failed: notify_games.filter(g => g.status === 'failed').length,
+    alreadyOwned: uniqueByTitle('existed'),
+    failed: uniqueByTitle('failed'),
   });
 } catch (error) {
   process.exitCode ||= 1;

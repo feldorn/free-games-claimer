@@ -4,6 +4,17 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.3.8
+
+Polish on the 2.3.7 log refactor.
+
+- **Epic dedupes summary counts by title** — the body lines were already deduped (one row per unique title even when Epic returns each game twice for PC + Mobile), but the summary count was still adding up the variants. So the body would list 4 owned games and the summary would say "6 already owned". Both numbers now agree on the unique-title count.
+- **Visual gap between service blocks** — runner injects a blank runLog entry above each `───` section header so per-service blocks read as discrete chunks in the panel's Logs tab.
+- **No more timestamp jam against `───` / `===`** — section headers and run delimiters render without the per-line `HH:MM:SS` prefix (panel renderer skips the time span entirely when `l.time` is null). Plus a hard space added after the time span on regular lines so even copy-pasted plaintext keeps timestamps visually separated from content (CSS margins don't survive copy-paste).
+- **Humble Bundle and Fanatical drop their own name from their own field labels** — `Humble API responses captured: 20` → `API responses captured: 20`, `Free Fanatical products on page: 0` → `Free products on page: 0`. The section header already says which service is running.
+
+---
+
 ## What's new in 2.3.7
 
 Run log second pass — strict consistency, less noise.

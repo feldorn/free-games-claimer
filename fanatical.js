@@ -107,7 +107,7 @@ try {
   try { if (context) await context.close(); } catch {}
 }
 
-log.status('Fanatical API responses captured', captured.length);
+log.status('API responses captured', captured.length);
 if (captured.length === 0) {
   log.warn('Fanatical free-games page rendered no API products — endpoint may need updating');
   process.exit(0);
@@ -134,7 +134,7 @@ for (const r of captured) {
   if (!products.has(id)) products.set(id, { name, url, note: drm });
 }
 
-log.status('Free Fanatical products on page', products.size);
+log.status('Free products on page', products.size);
 
 const prev = loadState();
 const newEntries = [];
