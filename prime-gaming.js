@@ -88,6 +88,13 @@ try {
     await page.waitForURL(`${BASE_URL}/claims/home?signedIn=true`);
     if (!cfg.debug) context.setDefaultTimeout(cfg.timeout);
   }
+  // This is the Amazon account holder's first name (e.g. "Christopher"), not
+  // a Luna gamertag. Luna's claims page only exposes the Amazon account
+  // identity in its top-right user dropdown — the per-game gamertag (visible
+  // in-game / on amazon.com profile pages) is on a different surface that
+  // the claims page doesn't link to. We use this as the per-user DB key
+  // because it cleanly separates multi-account setups; the bare gamertag
+  // wouldn't be reachable here without launching a game.
   user = await page.locator('[data-a-target="user-dropdown-first-name-text"]').first().innerText();
   log.status('User', user);
   // await page.click('button[aria-label="User dropdown and more options"]');
