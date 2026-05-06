@@ -1566,7 +1566,7 @@ async function msSchedulerLoop() {
   }
 }
 
-function getState() {
+async function getState() {
   const active = activeServices();
   // allLoggedIn counts only services the user opted into — an inactive
   // service can't invalidate the "All sessions OK" summary strip.
@@ -1658,6 +1658,14 @@ function getState() {
     startupAutoCheck,
     lastRun,
     captchaPending,
+    // Pending batch-redeem counts rolled into the main state response
+    // (issue #17). Previously the panel polled /api/pending-gog-count
+    // and /api/pending-steam-count separately on every cycle, tripling
+    // the request count. Both helpers read small JSON files and are
+    // cheap; folding them in here drops the steady-state poll load
+    // from 3 requests to 1 per cycle.
+    pendingGogCount: await countPendingGogCodes(),
+    pendingSteamCount: await countPendingSteamCodes(),
   };
 }
 
@@ -4304,6 +4312,12 @@ function applyUrlFocus() {
 async function refreshState() {
   try {
     state = await api('GET', '/state');
+    // Pending-redeem counts are now folded into /api/state (issue #17).
+    // Keep the standalone pendingGogCount / pendingSteamCount module
+    // variables in sync so the existing render paths that read them
+    // (Sessions tab batch-redeem badge, etc.) don't need to change.
+    if (typeof state.pendingGogCount === 'number') pendingGogCount = state.pendingGogCount;
+    if (typeof state.pendingSteamCount === 'number') pendingSteamCount = state.pendingSteamCount;
     render();
     if (typeof updateBatchPolling === 'function') updateBatchPolling();
     applyUrlFocus();
@@ -4648,19 +4662,38 @@ async function handleDeepLink() {
 }
 
 async function initialLoad() {
-  await refreshPendingGogCount();
-  await refreshPendingSteamCount();
   await refreshState();
   updateBatchPolling();
   await handleDeepLink();
 }
 initialLoad();
-setInterval(async () => {
-  await refreshState();
-  if (!state.batchRedeem) await refreshPendingGogCount();
-  if (!state.steamRedeem) await refreshPendingSteamCount();
-  updateBatchPolling();
-}, 10000);
+
+// Background poll that keeps Sessions cards / Schedule countdown / etc.
+// in sync with server state. Pending-redeem counts are folded into
+// /api/state since 2.3.14 (issue #17), so this is now a single request
+// per tick. Pauses entirely when the tab is hidden — no point polling
+// a panel the user isn't looking at — and resumes with an immediate
+// refresh on visibility-change so re-focused tabs are never stale.
+let pollTimer = null;
+function startPolling() {
+  if (pollTimer) return;
+  pollTimer = setInterval(async () => {
+    await refreshState();
+    updateBatchPolling();
+  }, 10000);
+}
+function stopPolling() {
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') {
+    stopPolling();
+  } else {
+    refreshState().then(() => updateBatchPolling()).catch(() => {});
+    startPolling();
+  }
+});
+if (document.visibilityState !== 'hidden') startPolling();
 </script>
 </body>
 </html>`;
@@ -4716,7 +4749,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'GET' && req.url === '/api/state') {
-      sendJson(res, getState());
+      sendJson(res, await getState());
       return;
     }
 

@@ -4,6 +4,17 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.3.14
+
+Panel polling cleanup ([#17](https://github.com/feldorn/free-games-claimer/issues/17)).
+
+- **Pending-redeem counts folded into `/api/state`**. The panel's 10-second background poll previously fired three sequential requests per tick (`/api/state` + `/api/pending-gog-count` + `/api/pending-steam-count`). Counts are cheap to compute (one small JSON read each) and now ride along with state, so the steady-state load drops from 3 requests per cycle to 1. Standalone `/api/pending-gog-count` and `/api/pending-steam-count` endpoints remain for one-off post-redeem refreshes.
+- **Polling pauses when the tab is hidden** (Page Visibility API). When you switch away from the panel's browser tab, the poll loop stops entirely — zero requests until you switch back. Re-focusing the tab triggers an immediate refresh so the view is never stale, then the regular 10-second cadence resumes.
+
+Combined effect: a backgrounded panel now generates **zero** background traffic, and a foregrounded panel generates **one-third** of the previous traffic. Bandwidth was always negligible, but the DevTools-network noise is gone.
+
+---
+
 ## What's new in 2.3.13
 
 - **Sessions card "↗" icon: handle iframed-panel + cross-origin-isolated destinations**. Sites like Epic Games, Microsoft Rewards, and Steam all send strict cross-origin isolation headers (`Cross-Origin-Resource-Policy: same-origin`, `Cross-Origin-Embedder-Policy: require-corp`, `Cross-Origin-Opener-Policy: same-origin`). When the panel is iframed inside Organizr (or any sandboxed iframe), Chromium's interaction between iframe sandbox flags and cross-origin isolation requirements blocks `target="_blank"` navigation to those destinations with `ERR_BLOCKED_BY_RESPONSE` — even with the `allow-popups-to-escape-sandbox` token. Added an `onclick` handler that detects iframe context and uses `window.top.location.href` to navigate the top browsing context instead, escaping the iframe entirely. Top-level panel users still get new-tab behaviour as before. Middle-click on the icon also still produces a new tab via the browser's native mechanism. GOG and Ubisoft (which don't set the strict isolation headers) work either way; this fix specifically unblocks the strict-isolation set.
