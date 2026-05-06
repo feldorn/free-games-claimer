@@ -1990,7 +1990,7 @@ const PANEL_HTML = `<!DOCTYPE html>
   .setting-input input[type="time"] { width: 110px; padding: 6px 8px; background: #0e1726; border: 1px solid #233454; border-radius: 4px; color: #e0e0e0; font-size: 13px; }
   .setting-input input[type="time"]:focus { outline: none; border-color: #4ecca3; }
 
-  .settings-footer { background: #16233c; border-top: 1px solid #233454; padding: 12px 32px; display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+  .settings-footer { background: #16233c; border-top: 1px solid #233454; padding: 12px 32px; display: flex; align-items: center; gap: 12px; flex-shrink: 0; position: sticky; bottom: 0; z-index: 10; box-shadow: 0 -8px 16px rgba(0, 0, 0, 0.25); }
   .settings-footer .dirty-count { color: #f0c040; font-size: 13px; margin-right: auto; font-weight: 500; }
 
   .settings-subhead { font-size: 12px; color: #c0c8d8; font-weight: 600; margin: 14px 0 4px; padding-top: 10px; border-top: 1px solid #1a2a48; display: flex; align-items: center; gap: 12px; }
