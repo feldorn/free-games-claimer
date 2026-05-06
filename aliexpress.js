@@ -3,7 +3,7 @@
 // If you run it standalone on the CLI, it always executes; the activation
 // gate lives in interactive-login.js.
 import { chromium } from 'patchright';
-import { datetime, filenamify, prompt, handleSIGINT, jsonDb, awaitUserCaptchaSolve, log } from './src/util.js';
+import { datetime, filenamify, prompt, handleSIGINT, jsonDb, awaitUserCaptchaSolve, getOrCreateFingerprint, log } from './src/util.js';
 import { cfg } from './src/config.js';
 import { siteVersion } from './src/sites.js';
 import { FingerprintInjector } from 'fingerprint-injector';
@@ -21,12 +21,20 @@ let tomorrowCoins = null;
 let collected = false;
 let totalEuro = null;
 
-const { fingerprint, headers } = new FingerprintGenerator().getFingerprint({
-  devices: ['mobile'],
-  operatingSystems: ['android'],
-});
+// Persist the generated fingerprint across runs. AliExpress's bot scoring
+// flags device-instability between launches; reusing the same UA + headers +
+// viewport keeps that signal stable. First run generates and saves; subsequent
+// runs reload from <profileDir>/.fgc-fingerprint.json.
+const profileDir = cfg.dir.browser + '-aliexpress';
+const { fingerprint, headers, _persisted } = getOrCreateFingerprint(profileDir, () =>
+  new FingerprintGenerator().getFingerprint({
+    devices: ['mobile'],
+    operatingSystems: ['android'],
+  })
+);
+log.status('Fingerprint', _persisted ? 'loaded from cache' : 'fresh (saved for next run)');
 
-const context = await chromium.launchPersistentContext(cfg.dir.browser + '-aliexpress', {
+const context = await chromium.launchPersistentContext(profileDir, {
   headless: cfg.headless,
   locale: 'en-US',
   recordVideo: cfg.record ? { dir: 'data/record/', size: { width: cfg.width, height: cfg.height } } : undefined,

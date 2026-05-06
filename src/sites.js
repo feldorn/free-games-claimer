@@ -313,7 +313,7 @@ export const SITES = [
   {
     id: 'aliexpress',
     name: 'AliExpress',
-    version: '2.0',
+    version: '2.1',
     subtitle: null,
     script: 'aliexpress.js',
     claimOrder: 5,

@@ -168,7 +168,7 @@ async function checkSiteStatus(siteId) {
   try {
     context = await chromium.launchPersistentContext(site.browserDir, {
       headless: false,
-      viewport: { width: 1280, height: 720 },
+      viewport: { width: cfg.width, height: cfg.height },
       locale: 'en-US',
       handleSIGINT: false,
       args: ['--hide-crash-restore-bubble', '--no-sandbox', '--disable-gpu'],

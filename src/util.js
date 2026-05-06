@@ -1,6 +1,7 @@
 // https://stackoverflow.com/questions/46745014/alternative-for-dirname-in-node-js-when-using-es6-modules
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 // not the same since these will give the absolute paths for this file instead of for the file using them
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -20,6 +21,36 @@ export const datetimeUTC = (d = new Date()) => d.toISOString().replace('T', ' ')
 // same as datetimeUTC() but for local timezone, e.g., UTC + 2h for the above in DE
 export const datetime = (d = new Date()) => datetimeUTC(new Date(d.getTime() - d.getTimezoneOffset() * 60000));
 export const filenamify = s => s.replaceAll(':', '.').replace(/[^a-z0-9 _\-.]/gi, '_'); // alternative: https://www.npmjs.com/package/filenamify - On Unix-like systems, / is reserved. On Windows, <>:"/\|?* along with trailing periods are reserved.
+
+// Load a previously-saved fingerprint from <profileDir>/.fgc-fingerprint.json
+// or call the supplied generator function once and persist its output.
+// Used to keep the same browser fingerprint across runs so sites don't see
+// device-instability signals between launches (a fresh fingerprint each
+// run is itself a flag in some sites' bot scoring). Returns the same
+// shape as fingerprint-generator's getFingerprint() — { fingerprint,
+// headers } — plus a `_persisted` boolean indicating whether the value
+// came from cache or was freshly generated this invocation. Generation
+// failures are non-fatal: the caller still gets a usable fingerprint,
+// just one that didn't get saved (logged warning in that case).
+export const getOrCreateFingerprint = (profileDir, generate) => {
+  const fpFile = path.join(profileDir, '.fgc-fingerprint.json');
+  if (existsSync(fpFile)) {
+    try {
+      const cached = JSON.parse(readFileSync(fpFile, 'utf8'));
+      if (cached?.fingerprint?.navigator?.userAgent && cached?.headers) {
+        return { fingerprint: cached.fingerprint, headers: cached.headers, _persisted: true };
+      }
+    } catch { /* corrupt or partial — fall through to regenerate */ }
+  }
+  const fresh = generate();
+  try {
+    mkdirSync(profileDir, { recursive: true });
+    writeFileSync(fpFile, JSON.stringify({ fingerprint: fresh.fingerprint, headers: fresh.headers }, null, 2));
+  } catch (e) {
+    console.warn(`[fingerprint] could not persist to ${fpFile}: ${e.message.split('\n')[0]}`);
+  }
+  return { fingerprint: fresh.fingerprint, headers: fresh.headers, _persisted: false };
+};
 
 // Race context.close() with a timeout. Some sites (e.g. Epic Store) keep service workers and
 // long-poll websockets alive, which withholds the renderer's close-ack and hangs context.close()

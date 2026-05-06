@@ -4,6 +4,25 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.3.1
+
+Anti-detection hardening (Layers 1+2 of the [#2](https://github.com/feldorn/free-games-claimer/issues/2) plan).
+
+- **Viewport unification** — the panel's session-status check (`checkSiteStatus`) now uses the configured `cfg.width × cfg.height` instead of a hardcoded 1280×720. Sites whose `contextOptions` set their own viewport (AliExpress's Pixel 7 device profile) still win for that site; everywhere else the launch viewport matches the claim-run viewport so the bot-scoring "device dimensions changed between sessions" signal goes quiet.
+- **AliExpress fingerprint persistence** — `src/util.js#getOrCreateFingerprint` saves the generated UA + headers to `<profileDir>/.fgc-fingerprint.json` on first run and reloads them on every subsequent run. Sites that already use `fingerprint-injector` (currently only AliExpress) now stop emitting a fresh device-id each launch, which is itself a flag in some bot-scoring systems. AliExpress collector bumped to v2.1; other sites unchanged this release.
+
+---
+
+## What's new in 2.3
+
+Cookie upload on the Sessions dashboard.
+
+- **Cookie upload** — paste an EditThisCookie / Cookie-Editor JSON export into a per-site card and the panel writes it to that site's persistent profile, then re-runs `checkSiteStatus` to confirm the session took. Uses the same mutex that gates Login / Check / Run so it can't race a concurrent claim. Validation rejects malformed payloads before they touch the profile dir.
+- **Status-driven login button** — the Sessions card now shows **Login** when the site is not authenticated and **Check** when it is, instead of two buttons that look the same. A small bare ↻ icon in the card header re-runs Login on demand even when the session is healthy (rare, but useful for forced re-auth before suspected bans).
+- **Change-accounts confirm modal** — clicking ↻ on a logged-in card now prompts before nuking the existing profile, so a stray click can't lose a working session.
+
+---
+
 ## What's new in 2.2
 
 First two collectors built on the new framework, plus Settings/Sessions polish.
