@@ -631,19 +631,32 @@ each time. To freeze ownership, pick a mode and stick with it.
 
 ## Reverse-Proxy Setup
 
-The interactive-login panel can be served behind a reverse proxy at either a subdomain
-(e.g. `https://fgc.example.com`) or a subfolder (e.g. `https://example.com/free-games`).
+The interactive-login panel can be served behind a reverse proxy. There are three
+common deployment shapes, each with its own env vars. Pick the one that matches
+how your proxy routes traffic — the others stay unset.
+
+| Shape | Example | Env vars |
+|---|---|---|
+| **Direct access** (no proxy) | `http://localhost:7080`<br>`http://localhost:6080` (noVNC) | none |
+| **Same-host subdomain** | `https://fgc.example.com:7080` (panel)<br>`https://fgc.example.com:6080` (noVNC) | none |
+| **Same-host subfolder** | `https://example.com/free-games` (panel)<br>`https://example.com/free-games/novnc/` (noVNC) | `BASE_PATH`, `PUBLIC_URL` |
+| **Split-subdomain** | `https://fgc.example.com` (panel)<br>`https://browser.example.com` (noVNC) | `NOVNC_URL` |
+
+`BASE_PATH` and `NOVNC_URL` are mutually exclusive — if `NOVNC_URL` is set it
+wins; otherwise `BASE_PATH` (when set) builds the noVNC URL on the same host
+under that prefix; otherwise the panel embeds noVNC at `<panel-host>:6080`.
 
 ### Subdomain (simplest)
 
-No special configuration needed on the app side if both the panel and noVNC
-share the same subdomain (the panel embeds noVNC at `:6080` on the same host
-by default).
+No special configuration needed on the app side. Point your reverse proxy at
+`http://fgc:7080/` and `http://fgc:6080/` for the panel and noVNC respectively.
 
-**Split-subdomain setup** (e.g. Traefik routes `fgc.example.com` to the panel
-and `browser.example.com` to noVNC): set `NOVNC_URL` so the panel's embedded
-"Show browser" iframe and "Pop out ↗" button know where to find the noVNC
-viewer.
+### Split-subdomain
+
+When the panel and noVNC live on different hostnames (e.g. Traefik routes
+`fgc.example.com` to the panel and `browser.example.com` to noVNC), set
+`NOVNC_URL` so the panel's "Show browser" iframe and "Pop out ↗" button know
+where to find the noVNC viewer.
 
 ```yaml
 environment:
@@ -651,8 +664,9 @@ environment:
 ```
 
 The value should point at the directory containing `vnc.html` — the panel
-appends `/vnc.html?autoconnect=true&resize=scale` itself. Falls back to
-`<panel-host>:6080` when unset.
+appends `/vnc.html?autoconnect=true&resize=scale` itself. **Don't set
+`NOVNC_URL` if you're using `BASE_PATH`** — the same-host subfolder case
+already handles noVNC routing and `NOVNC_URL` would override it incorrectly.
 
 ### Subfolder
 
