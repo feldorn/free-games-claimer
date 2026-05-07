@@ -4,6 +4,12 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.3.17
+
+- **AliExpress coin balance parser handles the new response shape** ([#22](https://github.com/feldorn/free-games-claimer/issues/22)). KairuByte's runs reported `Summary: 0 claimed, 0 skipped, 0 coins` regardless of their actual balance. The `pre_auth.coins` listener was only handling the old name/value array response shape (`d.data.data: [{ name: 'userCoinsNum', value: '1234' }, ...]`). AliExpress shifted some regions to a direct-object shape (`d.data.data: { userCoinsNum: 1234, ... }`) which the parser silently dropped to null. Extended to handle both shapes, plus added a debug dump of the actual response when extraction still produces null — so the next mutation surfaces in the run log instead of disappearing. Also fixed an edge case where a real-zero balance would coerce to null via `Number(0) || null`. AliExpress collector bumped to v2.3.
+
+---
+
 ## What's new in 2.3.16
 
 - **Epic claim flow no longer waits 60s per game** ([#21](https://github.com/feldorn/games-claimer/issues/21), [#23](https://github.com/feldorn/free-games-claimer/issues/23) follow-up). 2.3.15's regex selector for the success modal still missed for some users — the modal would render visibly but `text=/Thanks for your order|It.s all yours/i` wouldn't match (likely the heading text is split across multiple span children, or curly-quote rendering differs). The CTA-fallback path correctly recovered claims as `claimed` via the post-click CTA check, but each game still burned the full 60s timeout before falling through. Replaced the single `waitFor` call with a `Promise.race` of three signals: the modal-text regex (kept as a fast-path), the modal's "Continue browsing"/"Download launcher" button selectors (more stable per-popup identifiers), and a `waitForFunction` that polls the page CTA for "In Library" (ground-truth success state). Whichever fires first wins. Steady-state per-claim wait drops from 60s to ~1-2s.

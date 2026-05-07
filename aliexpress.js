@@ -166,12 +166,44 @@ const pre_auth = {
   coins: async _ => {
     console.log('Checking coins...');
     let d;
+    // AliExpress's coin API has two observed response shapes for d.data.data:
+    //
+    //   Shape A (older, name/value array):
+    //     [{ name: 'userCoinsNum', value: '1234' }, { name: '...', value: '...' }, ...]
+    //
+    //   Shape B (newer / region-specific, direct object):
+    //     { userCoinsNum: 1234, ... }
+    //
+    // The original parser only handled A and silently fell to null on B
+    // (issue #22). Try A first (preserves behavior for users who still
+    // see it), fall through to B, fall through to null with a debug
+    // dump of the actual shape so we can adapt if AliExpress shifts
+    // again. Number.isFinite-gated extraction so a real-zero balance
+    // doesn't get coerced to null by `Number(...) || null`.
+    const toCoinNum = v => {
+      if (v == null) return null;
+      const n = Number(v);
+      return Number.isFinite(n) ? n : null;
+    };
     await page.waitForResponse(r => r.request().method() === 'POST' && r.url().startsWith('https://acs.aliexpress.com/h5/mtop.aliexpress.coin.execute/'))
       .then(async r => {
         d = await r.json();
-        d = d.data.data;
-        if (Array.isArray(d)) userCoinsNum = Number(d.find(e => e.name === 'userCoinsNum')?.value) || null;
-        console.log('Total (coins):', userCoinsNum);
+        const inner = d?.data?.data;
+        if (Array.isArray(inner)) {
+          const entry = inner.find(e => e?.name === 'userCoinsNum');
+          userCoinsNum = entry ? toCoinNum(entry.value) : null;
+        } else if (inner && typeof inner === 'object') {
+          userCoinsNum = toCoinNum(inner.userCoinsNum);
+        }
+        if (userCoinsNum == null) {
+          // Surface the actual shape so the next run's log tells us how
+          // to extend the parser. Truncated to 300 chars to avoid
+          // dumping the entire response.
+          const dump = (() => { try { return JSON.stringify(inner)?.slice(0, 300); } catch { return String(inner); } })();
+          console.log('Total (coins): null — response shape:', dump);
+        } else {
+          console.log('Total (coins):', userCoinsNum);
+        }
       })
       .catch(e => console.error('Total (coins): error:', e, 'data:', d));
   },
