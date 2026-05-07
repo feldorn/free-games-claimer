@@ -572,7 +572,7 @@ the file directly.
 ### What stays env-only
 
 Credentials (`*_EMAIL`, `*_PASSWORD`, `*_OTPKEY`, `*_PARENTALPIN`),
-panel infrastructure (`PANEL_PORT`, `NOVNC_PORT`, `BASE_PATH`,
+panel infrastructure (`PANEL_PORT`, `NOVNC_PORT`, `NOVNC_URL`, `BASE_PATH`,
 `PANEL_PASSWORD`, `VNC_PASSWORD`), data paths (`BROWSER_DIR`,
 `SCREENSHOTS_DIR`), and debug flags that only affect fresh subprocesses
 (`DEBUG`, `DEBUG_NETWORK`, `TIME`, `INTERACTIVE`, `NOWAIT`, `SHOW`).
@@ -636,8 +636,23 @@ The interactive-login panel can be served behind a reverse proxy at either a sub
 
 ### Subdomain (simplest)
 
-No special configuration needed on the app side. Point your reverse proxy at
-`http://fgc:7080/` and `http://fgc:6080/` for the panel and noVNC respectively.
+No special configuration needed on the app side if both the panel and noVNC
+share the same subdomain (the panel embeds noVNC at `:6080` on the same host
+by default).
+
+**Split-subdomain setup** (e.g. Traefik routes `fgc.example.com` to the panel
+and `browser.example.com` to noVNC): set `NOVNC_URL` so the panel's embedded
+"Show browser" iframe and "Pop out ↗" button know where to find the noVNC
+viewer.
+
+```yaml
+environment:
+  - NOVNC_URL=https://browser.example.com
+```
+
+The value should point at the directory containing `vnc.html` — the panel
+appends `/vnc.html?autoconnect=true&resize=scale` itself. Falls back to
+`<panel-host>:6080` when unset.
 
 ### Subfolder
 
