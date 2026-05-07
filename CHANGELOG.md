@@ -4,6 +4,12 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.3.18
+
+- **Epic run summary now includes DB-fast-path titles in the already-owned count**. When epic-games.js sees a title's claim DB entry already marked `claimed` (claimed in a prior run), it `continue`s past the full claim flow — but didn't push to `notify_games`, so the run summary's `uniqueByTitle('existed')` count missed those titles. Result: a run where every title was already in library showed "1 already owned" in the summary even when the body listed three titles all logged as already-claimed/already-owned. Fixed by pushing `{ status: 'existed' }` to `notify_games` from the early-bailout path so the summary count matches the body.
+
+---
+
 ## What's new in 2.3.17
 
 - **AliExpress coin balance parser handles the new response shape** ([#22](https://github.com/feldorn/free-games-claimer/issues/22)). KairuByte's runs reported `Summary: 0 claimed, 0 skipped, 0 coins` regardless of their actual balance. The `pre_auth.coins` listener was only handling the old name/value array response shape (`d.data.data: [{ name: 'userCoinsNum', value: '1234' }, ...]`). AliExpress shifted some regions to a direct-object shape (`d.data.data: { userCoinsNum: 1234, ... }`) which the parser silently dropped to null. Extended to handle both shapes, plus added a debug dump of the actual response when extraction still produces null — so the next mutation surfaces in the run log instead of disappearing. Also fixed an edge case where a real-zero balance would coerce to null via `Number(0) || null`. AliExpress collector bumped to v2.3.

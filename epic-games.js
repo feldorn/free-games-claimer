@@ -208,6 +208,15 @@ try {
         const platformNote = platforms > 1 ? ` (${platforms} platforms)` : '';
         log.ok(`${knownTitle} — already claimed${platformNote}`);
         loggedTitles.add(knownTitle);
+        // Push into notify_games so the run summary counts these
+        // already-claimed-in-DB titles as 'existed' (i.e. already
+        // owned from the user's POV — this run didn't claim them).
+        // Without this push, the summary's uniqueByTitle('existed')
+        // count missed everything that bailed out via the DB-based
+        // fast-path, leaving "1 already owned" when the body listed
+        // three titles all-already-in-library (issue: log/summary
+        // mismatch reported 2026-05-07).
+        notify_games.push({ title: knownTitle, url, status: 'existed' });
       }
       if (cfg.time) console.timeEnd('claim game');
       continue;
