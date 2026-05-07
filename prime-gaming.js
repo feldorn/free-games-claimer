@@ -182,6 +182,11 @@ try {
   let claimedCount = 0;
   let needsActionCount = 0;
   let failedCount = 0;
+  // Tracks games skipped pre-claim via PG_TIMELEFT / DRYRUN / INTERACTIVE
+  // bailouts so the run summary's "skipped" column reflects them. Was
+  // previously hardcoded 0 in log.summary, which silently undercounted
+  // any run with those flags active.
+  let skippedCount = 0;
   // bottom to top: oldest to newest games
   internal.reverse();
   external.reverse();
@@ -212,9 +217,9 @@ try {
     const slug = await (await card.locator('a')).getAttribute('href');
     const url = BASE_URL + slug.split('?')[0];
     log.game(title, 'Prime Gaming');
-    if (cfg.pg_timeLeft && await skipBasedOnTime(url)) continue;
-    if (cfg.dryrun) continue;
-    if (cfg.interactive && !await confirm()) continue;
+    if (cfg.pg_timeLeft && await skipBasedOnTime(url)) { skippedCount++; continue; }
+    if (cfg.dryrun) { skippedCount++; continue; }
+    if (cfg.interactive && !await confirm()) { skippedCount++; continue; }
     await card.locator('.tw-button:has-text("Claim")').click();
     db.data[user][title] ||= { title, time: datetime(), url, store: 'internal' };
     log.ok(`${title} — claimed!`);
@@ -238,9 +243,9 @@ try {
     const item_text = await page.innerText('[data-a-target="DescriptionItemDetails"]');
     const store = item_text.toLowerCase().replace(/.* on /, '').slice(0, -1);
     log.game(title, store);
-    if (cfg.pg_timeLeft && await skipBasedOnTime(url)) continue;
-    if (cfg.dryrun) continue;
-    if (cfg.interactive && !await confirm()) continue;
+    if (cfg.pg_timeLeft && await skipBasedOnTime(url)) { skippedCount++; continue; }
+    if (cfg.dryrun) { skippedCount++; continue; }
+    if (cfg.interactive && !await confirm()) { skippedCount++; continue; }
     await Promise.any([page.click('[data-a-target="buy-box"] .tw-button:has-text("Get game")'), page.click('[data-a-target="buy-box"] .tw-button:has-text("Claim")'), page.click('.tw-button:has-text("Complete Claim")'), page.waitForSelector('[data-a-target="LinkAccountModal"]'), page.waitForSelector('.thank-you-title:has-text("Success")')]); // waits for navigation
     await page.waitForTimeout(2000);
     db.data[user][title] ||= { title, time: datetime(), url, store };
@@ -447,8 +452,8 @@ try {
       const url = dlc.url;
       log.game(title, 'DLC');
       if (cfg.debug) await page.pause();
-      if (cfg.dryrun) continue;
-      if (cfg.interactive && !await confirm()) continue;
+      if (cfg.dryrun) { skippedCount++; continue; }
+      if (cfg.interactive && !await confirm()) { skippedCount++; continue; }
       db.data[user][title] ||= { title, time: datetime(), store: 'DLC', status: 'failed: need account linking' };
       const notify_game = { title, url };
       notify_games.push(notify_game); // status is updated below
@@ -498,7 +503,7 @@ try {
   log.summary({
     siteId: 'prime-gaming',
     claimed: claimedCount,
-    skipped: 0,
+    skipped: skippedCount,
     display: 'alreadyOwned',
     alreadyOwned: alreadyClaimed,
     failed: failedCount,
