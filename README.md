@@ -455,6 +455,12 @@ snapshot.
 
 ### Schedule tab
 
+<p align="center">
+<a href="assets/panel-schedule.png" target="_blank"><img alt="Schedule tab — next-run wall times, intervals, last-run status" src="assets/panel-schedule.png" width="800"/></a>
+<br/>
+<em>Schedule tab — next-run wall times, intervals, services list, last-run status. Click for full size.</em>
+</p>
+
 - **Next run:** wall time (`2026-04-20 07:30`) with a live countdown
   (`in 22h 8m`) updated every 30s.
 - **Next run · Claimers / Next run · MS Rewards:** in decoupled mode the two
