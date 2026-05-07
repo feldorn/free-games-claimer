@@ -4,6 +4,13 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.3.15
+
+- **Epic Games claim detection: handle the new "It's all yours" success popup** ([#21](https://github.com/feldorn/free-games-claimer/issues/21), [#23](https://github.com/feldorn/free-games-claimer/issues/23)). Epic refreshed their post-purchase confirmation in 2026 — heading changed from "Thanks for your order!" to "It's all yours" with the older phrase relegated to subtitle text. The script's `text=Thanks for your order!` selector stopped matching → claim flow logged as failed → fallback CTA-check found the game in library and reported it as "already in library." Result: every Epic claim today logged as `existed` instead of `claimed`. Fixed by switching to a regex selector that matches either phrasing (`text=/Thanks for your order|It.s all yours/i`). Also reclassified the post-failure CTA-check fallback path: if the CTA reads "In Library" after this run's Get-button click, log as `claimed` (the in-library state IS the result of our click), not `existed`. Epic collector bumped to v2.1.
+- **`NOVNC_URL` env var to override the noVNC iframe URL** ([#20](https://github.com/feldorn/free-games-claimer/issues/20)). Reverse-proxy users with split subdomains (e.g. `getgames.example.com` for the panel and `getgamesbrowser.example.com` for noVNC) couldn't make the embedded browser view work because the panel hardcoded the iframe URL to `<panel-host>:6080`. Set `NOVNC_URL=https://browser.example.com` (or whatever path serves your noVNC root) and the panel uses that verbatim — both for the embedded iframe and the "Pop out ↗" new-tab button. Falls through to the existing port-suffix construction when unset, so direct-access deployments are unchanged.
+
+---
+
 ## What's new in 2.3.14
 
 Panel polling cleanup ([#17](https://github.com/feldorn/free-games-claimer/issues/17)).

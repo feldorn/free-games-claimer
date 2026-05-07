@@ -140,7 +140,7 @@ export const SITES = [
   {
     id: 'epic-games',
     name: 'Epic Games',
-    version: '2.0',
+    version: '2.1',
     subtitle: null,
     script: 'epic-games.js',
     claimOrder: 3,

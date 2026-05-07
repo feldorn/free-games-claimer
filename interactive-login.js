@@ -12,6 +12,13 @@ import { SITES as SITE_REGISTRY, getLoginSitesById, getClaimScriptOrder, getLink
 
 const PANEL_PORT = Number(process.env.PANEL_PORT) || 7080;
 const NOVNC_PORT = process.env.NOVNC_PORT || 6080;
+// Optional explicit override for the noVNC iframe URL — needed when noVNC
+// lives behind a reverse proxy at a different hostname/path than the panel
+// (e.g. Traefik routing /panel to fgc.example.com and /novnc to
+// browser.example.com — the default `<panel-host>:6080` construction
+// can't reach it). When set, buildNovncUrl() returns this verbatim and
+// skips host/port assembly. Issue #20.
+const NOVNC_URL = (process.env.NOVNC_URL || '').replace(/\/+$/, '');
 const PANEL_PASSWORD = process.env.PANEL_PASSWORD || process.env.VNC_PASSWORD || '';
 const BASE_PATH = cfg.base_path; // e.g. "/free-games" when behind a subfolder proxy, or ""
 const PUBLIC_URL = cfg.public_url || `http://localhost:${PANEL_PORT}${BASE_PATH}`;
@@ -2509,6 +2516,7 @@ const PANEL_HTML = `<!DOCTYPE html>
 </div>
 <script>
 const NOVNC_PORT = ${NOVNC_PORT};
+const NOVNC_URL = '${NOVNC_URL}';
 const BASE_PATH = '${BASE_PATH}';
 let state = { sites: [], activeBrowser: null, allLoggedIn: false, runStatus: 'idle' };
 let busy = false;
@@ -4164,6 +4172,13 @@ function render() {
 // a subfolder. For direct access (no BASE_PATH) the container's noVNC port is
 // reachable at the same host.
 function buildNovncUrl() {
+  // NOVNC_URL env override (issue #20) for users whose reverse proxy
+  // serves noVNC at a different host/path than the panel — e.g.
+  // browser.example.com instead of fgc.example.com:6080. Should point
+  // at the directory containing vnc.html (we append the file + query).
+  if (NOVNC_URL) {
+    return NOVNC_URL.replace(/\\/+$/, '') + '/vnc.html?autoconnect=true&resize=scale';
+  }
   if (BASE_PATH) {
     const wsPath = BASE_PATH.replace(/^\\//, '') + '/novnc/websockify';
     return BASE_PATH + '/novnc/vnc.html?autoconnect=true&resize=scale&path=' + encodeURIComponent(wsPath);
@@ -5039,7 +5054,7 @@ server.listen(PANEL_PORT, async () => {
   console.log(`[${datetime()}] Free Games Claimer ${APP_VERSION ? 'v' + APP_VERSION + ' ' : ''}— panel + scheduler`);
   console.log(`[${datetime()}] Control panel: http://localhost:${PANEL_PORT}${BASE_PATH}`);
   if (cfg.public_url) console.log(`[${datetime()}] Public URL:    ${PUBLIC_URL}`);
-  console.log(`[${datetime()}] noVNC viewer:  http://localhost:${NOVNC_PORT}${BASE_PATH ? ` (proxied at ${BASE_PATH}/novnc/)` : ''}`);
+  console.log(`[${datetime()}] noVNC viewer:  ${NOVNC_URL || `http://localhost:${NOVNC_PORT}${BASE_PATH ? ` (proxied at ${BASE_PATH}/novnc/)` : ''}`}`);
   console.log(`[${datetime()}] Password protection: ${PANEL_PASSWORD ? 'ENABLED' : 'DISABLED (set PANEL_PASSWORD or VNC_PASSWORD to enable)'}`);
   const startTime = cfg.daily_start_time;
   const legacyMode = !startTime && !LOOP_SECONDS && MS_SCHEDULE_HOURS > 0;

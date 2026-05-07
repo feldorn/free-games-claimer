@@ -377,7 +377,12 @@ try {
           log.fail('Failed captcha challenge — try again later');
           await notify(`epic-games: failed captcha challenge for ${title}.\nGame link: ${url}`, { attachLatestScreenshot: true });
         }).catch(_ => { });
-        await page.locator('text=Thanks for your order!').waitFor({ state: 'attached' }); // TODO Bundle: got stuck here, but normal game now as well
+        // Epic refreshed the post-purchase confirmation in 2026: the heading
+// changed from "Thanks for your order!" to "It's all yours", with the
+// older phrase relegated to subtitle text. Match either phrasing so we
+// don't fall through to the "failed to claim" branch on actual successes
+// (#21, #23). Regex tolerates curly/straight apostrophe variants.
+await page.locator('text=/Thanks for your order|It.s all yours/i').first().waitFor({ state: 'attached' }); // TODO Bundle: got stuck here, but normal game now as well
         db.data[user][game_id].status = 'claimed';
         db.data[user][game_id].time = datetime(); // claimed time overwrites failed/dryrun time
         log.ok(`${title} — claimed!`);
@@ -388,15 +393,19 @@ try {
         const p = screenshot('failed', `${game_id}_${filenamify(datetime())}.png`);
         await page.screenshot({ path: p, fullPage: true });
         db.data[user][game_id].status = 'failed';
-        // Re-check the listing's CTA — if Epic now reports it as already
-        // owned, mark accordingly. This recovers the "Get → no iframe →
-        // already-owned modal" case where the listing was stale at click
-        // time but the library reflects reality.
+        // Re-check the listing's CTA — if it now reads "In Library", we
+        // successfully claimed but the success-modal text-match missed
+        // (Epic's confirmation copy drifts; popup variants etc.). Logged
+        // as `claimed` since the in-library state we observe is the
+        // result of *this run's* Get-button click. Was previously logged
+        // as `existed` (issue #23 / #21) which understated the run's
+        // actual claims.
         try {
           const cta = (await page.locator('button[data-testid="purchase-cta-button"]').first().innerText().catch(() => '')).toLowerCase();
           if (cta === 'in library') {
-            log.ok(`${title} — actually already in library (Get button was stale)`);
-            db.data[user][game_id].status = notify_game.status = 'existed';
+            log.ok(`${title} — claim succeeded (confirmed via post-click CTA)`);
+            db.data[user][game_id].status = notify_game.status = 'claimed';
+            db.data[user][game_id].time = datetime();
           }
         } catch { /* CTA probe is best-effort */ }
         if (iframe && (captchaDetected || await iframe.locator('#h_captcha_challenge_checkout_free_prod iframe').count().catch(() => 0) > 0)) {
@@ -459,7 +468,12 @@ try {
         const btnAgree = iframe.locator('button:has-text("I Accept")');
         btnAgree.waitFor().then(() => btnAgree.click()).catch(_ => { });
         await iframe.locator('button:has-text("Place Order"):not(:has(.payment-loading--loading))').click({ delay: 11 });
-        await page.locator('text=Thanks for your order!').waitFor({ state: 'attached' });
+        // Epic refreshed the post-purchase confirmation in 2026: the heading
+// changed from "Thanks for your order!" to "It's all yours", with the
+// older phrase relegated to subtitle text. Match either phrasing so we
+// don't fall through to the "failed to claim" branch on actual successes
+// (#21, #23). Regex tolerates curly/straight apostrophe variants.
+await page.locator('text=/Thanks for your order|It.s all yours/i').first().waitFor({ state: 'attached' });
         const game_id = page.url().split('/').pop();
         db.data[user][game_id].status = 'claimed';
         db.data[user][game_id].time = datetime();
