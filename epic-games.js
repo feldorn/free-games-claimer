@@ -377,12 +377,24 @@ try {
           log.fail('Failed captcha challenge — try again later');
           await notify(`epic-games: failed captcha challenge for ${title}.\nGame link: ${url}`, { attachLatestScreenshot: true });
         }).catch(_ => { });
-        // Epic refreshed the post-purchase confirmation in 2026: the heading
-// changed from "Thanks for your order!" to "It's all yours", with the
-// older phrase relegated to subtitle text. Match either phrasing so we
-// don't fall through to the "failed to claim" branch on actual successes
-// (#21, #23). Regex tolerates curly/straight apostrophe variants.
-await page.locator('text=/Thanks for your order|It.s all yours/i').first().waitFor({ state: 'attached' }); // TODO Bundle: got stuck here, but normal game now as well
+        // Race three success signals — whichever fires first wins. Epic's
+        // post-purchase modal copy drifts (was "Thanks for your order!",
+        // refreshed to "It's all yours" in 2026, may change again), and
+        // when the modal text-match misses, the script wastes the full
+        // cfg.timeout (60s default) waiting on a selector that never
+        // resolves. Two more-reliable signals run in parallel: the CTA
+        // flipping to "In Library" is the ground-truth success state
+        // independent of modal copy, and the modal's "Continue browsing"
+        // button is a stable per-popup identifier even if the heading
+        // text changes. Refs #21, #23.
+        await Promise.race([
+          page.locator('text=/Thanks for your order|It.s all yours/i').first().waitFor({ state: 'attached' }),
+          page.locator('button:has-text("Continue browsing"), button:has-text("Continue Browsing"), button:has-text("Download launcher"), button:has-text("Download Launcher")').first().waitFor({ state: 'visible' }),
+          page.waitForFunction(() => {
+            const btn = document.querySelector('button[data-testid="purchase-cta-button"]');
+            return btn && btn.innerText.trim().toLowerCase() === 'in library';
+          }, { timeout: cfg.timeout }),
+        ]);
         db.data[user][game_id].status = 'claimed';
         db.data[user][game_id].time = datetime(); // claimed time overwrites failed/dryrun time
         log.ok(`${title} — claimed!`);
@@ -468,12 +480,17 @@ await page.locator('text=/Thanks for your order|It.s all yours/i').first().waitF
         const btnAgree = iframe.locator('button:has-text("I Accept")');
         btnAgree.waitFor().then(() => btnAgree.click()).catch(_ => { });
         await iframe.locator('button:has-text("Place Order"):not(:has(.payment-loading--loading))').click({ delay: 11 });
-        // Epic refreshed the post-purchase confirmation in 2026: the heading
-// changed from "Thanks for your order!" to "It's all yours", with the
-// older phrase relegated to subtitle text. Match either phrasing so we
-// don't fall through to the "failed to claim" branch on actual successes
-// (#21, #23). Regex tolerates curly/straight apostrophe variants.
-await page.locator('text=/Thanks for your order|It.s all yours/i').first().waitFor({ state: 'attached' });
+        // Same three-signal race as the main claim path above — see the
+        // fuller comment there. Modal-text + popup-buttons + CTA-flip,
+        // whichever fires first wins.
+        await Promise.race([
+          page.locator('text=/Thanks for your order|It.s all yours/i').first().waitFor({ state: 'attached' }),
+          page.locator('button:has-text("Continue browsing"), button:has-text("Continue Browsing"), button:has-text("Download launcher"), button:has-text("Download Launcher")').first().waitFor({ state: 'visible' }),
+          page.waitForFunction(() => {
+            const btn = document.querySelector('button[data-testid="purchase-cta-button"]');
+            return btn && btn.innerText.trim().toLowerCase() === 'in library';
+          }, { timeout: cfg.timeout }),
+        ]);
         const game_id = page.url().split('/').pop();
         db.data[user][game_id].status = 'claimed';
         db.data[user][game_id].time = datetime();

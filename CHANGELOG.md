@@ -4,6 +4,12 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.3.16
+
+- **Epic claim flow no longer waits 60s per game** ([#21](https://github.com/feldorn/games-claimer/issues/21), [#23](https://github.com/feldorn/free-games-claimer/issues/23) follow-up). 2.3.15's regex selector for the success modal still missed for some users — the modal would render visibly but `text=/Thanks for your order|It.s all yours/i` wouldn't match (likely the heading text is split across multiple span children, or curly-quote rendering differs). The CTA-fallback path correctly recovered claims as `claimed` via the post-click CTA check, but each game still burned the full 60s timeout before falling through. Replaced the single `waitFor` call with a `Promise.race` of three signals: the modal-text regex (kept as a fast-path), the modal's "Continue browsing"/"Download launcher" button selectors (more stable per-popup identifiers), and a `waitForFunction` that polls the page CTA for "In Library" (ground-truth success state). Whichever fires first wins. Steady-state per-claim wait drops from 60s to ~1-2s.
+
+---
+
 ## What's new in 2.3.15
 
 - **Epic Games claim detection: handle the new "It's all yours" success popup** ([#21](https://github.com/feldorn/free-games-claimer/issues/21), [#23](https://github.com/feldorn/free-games-claimer/issues/23)). Epic refreshed their post-purchase confirmation in 2026 — heading changed from "Thanks for your order!" to "It's all yours" with the older phrase relegated to subtitle text. The script's `text=Thanks for your order!` selector stopped matching → claim flow logged as failed → fallback CTA-check found the game in library and reported it as "already in library." Result: every Epic claim today logged as `existed` instead of `claimed`. Fixed by switching to a regex selector that matches either phrasing (`text=/Thanks for your order|It.s all yours/i`). Also reclassified the post-failure CTA-check fallback path: if the CTA reads "In Library" after this run's Get-button click, log as `claimed` (the in-library state IS the result of our click), not `existed`. Epic collector bumped to v2.1.
