@@ -522,7 +522,12 @@ export const SITES = [
     script: 'fanatical.js',
     claimOrder: 8,
     loginUrl: null,
-    homeUrl: 'https://www.fanatical.com/en/free-games-keys',
+    // Fanatical removed the dedicated /en/free-games-keys landing page from
+    // their SPA routing (the URL still loads enough of the shell for the
+    // watcher script's API interception to work, but a browser visit shows
+    // their not-found view). /en/on-sale is the canonical deals surface
+    // per their sitemap; free items show at the top sorted by discount.
+    homeUrl: 'https://www.fanatical.com/en/on-sale',
     browserDir: null,
     contextOptions: null,
     defaultActive: false,
