@@ -3463,8 +3463,13 @@ async function renderStatsTab() {
       activity.innerHTML = '<div class="stats-empty">No claims recorded yet. The activity log will populate after your first successful claim run.</div>';
     } else {
       activity.innerHTML = recent.map(a => {
+        // Same iframe-context handling as the Sessions card "↗" icon —
+        // openSiteUrl() detects panel-inside-Organizr and navigates the
+        // top tab to escape the sandbox restriction that blocks
+        // cross-origin-isolated destinations (Epic, MS Rewards, Steam,
+        // etc.) from loading in popups created by the iframe.
         const titleHtml = a.url
-          ? '<a href="' + encodeURI(a.url) + '" target="_blank" rel="noopener">' + escapeHtml(a.title) + '</a>'
+          ? '<a href="' + encodeURI(a.url) + '" onclick="return openSiteUrl(this)" target="_blank">' + escapeHtml(a.title) + '</a>'
           : escapeHtml(a.title);
         return '<div class="act">' +
           '<span class="at" title="' + escapeHtml(a.at) + '">' + escapeHtml(formatTimestamp(a.at, 'relative')) + '</span>' +
