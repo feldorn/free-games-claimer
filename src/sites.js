@@ -539,6 +539,26 @@ export const SITES = [
     configFields: [],
     checkLogin: null,
   },
+  {
+    id: 'lenovo-gaming',
+    name: 'Lenovo Gaming Key Drops',
+    version: '0.1',
+    subtitle: 'Watch-only: tracks scheduled key-drops at gaming.lenovo.com/game-key-drops. Notifies on discovery + 1h before / 5min before / at drop time. Drops are first-come-first-served once they go live, so the script is paired with a per-drop wake scheduler that fires push notifications on time. Auto-claim is a future phase — keys are first-come-first-served and the redemption flow goes through GamesPlanet.',
+    script: 'lenovo-gaming.js',
+    claimOrder: 10,
+    loginUrl: null,
+    homeUrl: 'https://gaming.lenovo.com/game-key-drops',
+    browserDir: null,
+    contextOptions: null,
+    defaultActive: false,
+    activeEnv: 'LENOVO_ACTIVE',
+    linkedWith: null,
+    claimDbFile: null,
+    scheduleKind: 'watch-only',
+    features: [],
+    configFields: [],
+    checkLogin: null,
+  },
 ];
 
 export const SITES_BY_ID = Object.fromEntries(SITES.map(s => [s.id, s]));

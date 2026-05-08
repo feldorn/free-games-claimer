@@ -4,6 +4,29 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.4
+
+New collector: **Lenovo Gaming Key Drops** (watch-only, Phase 1 of a planned auto-claim build-out).
+
+Lenovo runs scheduled key-drops at `gaming.lenovo.com/game-key-drops` — first-come-first-served once they go live, often exhausted within minutes. The default daily-poll watcher pattern (Humble, Fanatical, Ubisoft) doesn't fit: a drop scheduled for 11am could be over before the next morning's watcher run picks it up. Phase 1 builds the schedule-aware infrastructure to land that first round of usefulness — Phase 2 will layer auto-claim + GamesPlanet voucher redemption on top.
+
+What ships:
+
+- **Watcher script (`lenovo-gaming.js`)** — fetches the listing, parses each drop (status from title prefix, region, restock flag), and for new/changed drops descends into the embedded TickCounter widget on the detail page to extract the absolute scheduled datetime. Treats the widget's wall-clock as Eastern Time, converts to UTC via `Intl.DateTimeFormat` round-trip (handles DST automatically), and stores in `data/lenovo-gaming-watch.json`. Diffs against the previous cycle and fires push notifications on: new drop discovered, status transition (coming-soon → active), and restock detection.
+- **Per-drop scheduler loop (`lenovoSchedulerLoop`)** — reads the watch JSON, computes pending wakes (1h before / 5min before / at drop-time per upcoming drop), sleeps until the nearest, fires the appropriate push notification, and stamps the per-notification timestamp so the same wake doesn't re-fire on next loop. `fs.watch` on the state file fires scheduler wakeups when the watcher updates it (new drops, collected toggles, etc.) so the next-wake recomputes immediately. Past-target wakes (system was suspended, container restarted) get marked sent without notifying — the user already knows the drop happened. Mirrors the existing main + MS Rewards scheduler pattern.
+- **Sessions card UI** — the Lenovo watcher card lists user-actionable drops inline with status pill (Live now / Restocked / Coming soon), title, scheduled time + countdown, "Got it" button, and ↗ open-link. Clicking "Got it" sets `userCollected` on the drop and suppresses subsequent pre-claim wakes for that drop (restock notifications continue, since a restock = new key pool).
+- **API endpoint** — `POST /api/lenovo/drops/:id/collected` toggles the collected flag.
+- **Activation** — opt-in via `LENOVO_ACTIVE=1` env or Settings → Services. First run establishes a baseline (no notification spam); subsequent runs notify on changes.
+- **Engine bump 2.3.x → 2.4.0** marking the new collector + scheduler loop addition.
+
+What's deferred to Phase 2:
+
+- Auto-claim of vouchers from Lenovo (requires login + queue-handling + per-drop UI variation)
+- GamesPlanet voucher redemption (requires a second login + per-voucher form submission)
+- Steam-key forwarding into the existing batch redeemer
+
+---
+
 ## What's new in 2.3.19
 
 - **Prime Gaming summary `skipped` count is no longer hardcoded 0**. The Prime claim loop has three pre-claim bailouts (`PG_TIMELEFT` filter, `DRYRUN` mode, `INTERACTIVE` confirm-cancel) that `continue`d without incrementing any counter; the summary call hardcoded `skipped: 0`. Result: runs with those flags active silently dropped skipped games from the summary. Added a `skippedCount` counter, incremented at each of the three bailout sites (across the main claim loop, the external-store loop, and the DLC loop), and wired it into the `log.summary` call. No-op for default-mode users (none of those bailouts fire by default); accurate for users with the flags set.

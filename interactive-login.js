@@ -1573,6 +1573,152 @@ async function msSchedulerLoop() {
   }
 }
 
+// ----- Lenovo Gaming key drops scheduler -----
+// Wakes at dynamic per-drop times computed from data/lenovo-gaming-watch.json
+// (written by lenovo-gaming.js on each cycle). Three wakes per upcoming drop:
+// 1 hour before, 5 minutes before, and at drop-time. Each wake fires a push
+// notification and stamps the per-drop notifications.* field so the same wake
+// doesn't re-fire on next loop iteration.
+
+const LENOVO_STATE_FILE = path.resolve(__panelDirname, 'data', 'lenovo-gaming-watch.json');
+let nextLenovoWake = null; // { dropId, kind, target } | null
+
+function readLenovoState() {
+  try {
+    if (!existsSync(LENOVO_STATE_FILE)) return { drops: {} };
+    const raw = readFileSync(LENOVO_STATE_FILE, 'utf8');
+    if (!raw.trim()) return { drops: {} };
+    const p = JSON.parse(raw);
+    return p && typeof p === 'object' ? { drops: p.drops || {} } : { drops: {} };
+  } catch { return { drops: {} }; }
+}
+
+function saveLenovoState(state) {
+  try {
+    mkdirSync(path.dirname(LENOVO_STATE_FILE), { recursive: true });
+    writeFileSync(LENOVO_STATE_FILE, JSON.stringify(state, null, 2));
+  } catch (e) {
+    console.error(`[${datetime()}] Lenovo: failed to persist state: ${e.message}`);
+  }
+}
+
+// For each upcoming drop, returns the next un-fired wake (kind: '1h-before',
+// '5min-before', 'wentLive') across all drops, or null if nothing pending.
+// Skips drops the user marked as collected — those suppress pre-claim wakes.
+// Restock notifications come from the watcher script directly, not this loop.
+function computeNextLenovoWake() {
+  const state = readLenovoState();
+  const now = Date.now();
+  let best = null;
+  for (const drop of Object.values(state.drops)) {
+    if (drop.userCollected) continue;
+    if (!drop.scheduledAt) continue;
+    if (drop.status === 'ended' || drop.status === 'expired' || drop.status === 'postponed') continue;
+    const scheduledMs = new Date(drop.scheduledAt).getTime();
+    if (!Number.isFinite(scheduledMs)) continue;
+    const wakes = [
+      { kind: '1h-before',   target: scheduledMs - 60 * 60 * 1000 },
+      { kind: '5min-before', target: scheduledMs - 5 * 60 * 1000 },
+      { kind: 'wentLive',    target: scheduledMs },
+    ];
+    for (const w of wakes) {
+      if (drop.notifications?.[w.kind]) continue; // already fired
+      // If wake is more than 5 minutes in the past, treat as missed and
+      // mark sent next time we wake — don't pile up backlog notifications.
+      const candidate = { kind: w.kind, target: new Date(w.target), dropId: drop.id, drop };
+      if (!best || candidate.target.getTime() < best.target.getTime()) best = candidate;
+    }
+  }
+  return best;
+}
+
+async function fireLenovoWake(wake) {
+  const fresh = readLenovoState();
+  const drop = fresh.drops[wake.dropId];
+  if (!drop) return; // dropped from state somehow
+  if (drop.userCollected) return; // user collected between schedule and fire
+
+  // Past-target safety: if we're firing more than 5 min late (system was
+  // suspended, container restarted), mark as sent without a notification —
+  // the user already knows the drop happened.
+  const lateBy = Date.now() - wake.target.getTime();
+  const SUPPRESS_LATE_THRESHOLD = 5 * 60 * 1000;
+  if (lateBy > SUPPRESS_LATE_THRESHOLD) {
+    console.log(`[${datetime()}] Lenovo: ${wake.kind} for "${drop.title}" is ${Math.round(lateBy / 60000)}m late — marking sent without notify`);
+    drop.notifications = drop.notifications || {};
+    drop.notifications[wake.kind] = datetime();
+    fresh.drops[wake.dropId] = drop;
+    saveLenovoState(fresh);
+    return;
+  }
+
+  // Compose per-kind notification body
+  const localTimeStr = new Date(drop.scheduledAt).toLocaleString('en-US', {
+    timeZone: 'America/New_York', dateStyle: 'medium', timeStyle: 'short',
+  }) + ' ET';
+  let body;
+  if (wake.kind === '1h-before') {
+    body = `Lenovo Gaming: drop in 1 hour — ${drop.title}<br>Going live: ${localTimeStr}<br>${drop.url}`;
+  } else if (wake.kind === '5min-before') {
+    body = `Lenovo Gaming: drop in 5 minutes — ${drop.title}<br>Get in queue<br>${drop.url}`;
+  } else { // wentLive
+    body = `Lenovo Gaming: drop is LIVE NOW — ${drop.title}<br>Claim before keys run out<br>${drop.url}`;
+    drop.status = 'active'; // promote local view; watcher will confirm next cycle
+    drop.lastStatusChange = datetime();
+  }
+  console.log(`[${datetime()}] Lenovo: firing ${wake.kind} for "${drop.title}"`);
+  await notify(body).catch(e => console.error(`[${datetime()}] Lenovo notify failed: ${e.message.split('\n')[0]}`));
+
+  drop.notifications = drop.notifications || {};
+  drop.notifications[wake.kind] = datetime();
+  fresh.drops[wake.dropId] = drop;
+  saveLenovoState(fresh);
+}
+
+async function lenovoSchedulerLoop() {
+  while (true) {
+    const wake = computeNextLenovoWake();
+    if (!wake) {
+      nextLenovoWake = null;
+      // No upcoming drops with pending wakes — park until state file
+      // changes (watcher writes new drops) or we hit the 1h re-poll fallback.
+      await sleepUntilWakeup(60 * 60 * 1000);
+      continue;
+    }
+    nextLenovoWake = { dropId: wake.dropId, kind: wake.kind, target: wake.target };
+    const sleepMs = wake.target.getTime() - Date.now();
+    if (sleepMs > 0) {
+      console.log(`[${datetime()}] Scheduler (Lenovo): next wake at ${datetime(wake.target)} (${wake.kind} for "${wake.drop.title}")`);
+      const how = await sleepUntilWakeup(sleepMs);
+      if (how === 'reload') continue; // state file changed — recompute
+    }
+    await fireLenovoWake(wake);
+  }
+}
+
+// Watches data/lenovo-gaming-watch.json and fires scheduler wakeups when the
+// watcher updates it (new drops, collected toggles, etc.). Mirrors the
+// existing watchConfigForScheduler() pattern.
+function watchLenovoStateForScheduler() {
+  const dir = path.dirname(LENOVO_STATE_FILE);
+  const base = path.basename(LENOVO_STATE_FILE);
+  let debounce = null;
+  try {
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    watch(dir, { persistent: false }, (eventType, filename) => {
+      if (filename !== base) return;
+      clearTimeout(debounce);
+      debounce = setTimeout(() => {
+        debounce = null;
+        console.log(`[${datetime()}] Scheduler (Lenovo): state changed — recomputing next wake.`);
+        fireSchedulerWakeups();
+      }, 250);
+    });
+  } catch (e) {
+    console.error(`[${datetime()}] Scheduler (Lenovo): fs.watch setup failed (${e.message}).`);
+  }
+}
+
 async function getState() {
   const active = activeServices();
   // allLoggedIn counts only services the user opted into — an inactive
@@ -1673,6 +1819,20 @@ async function getState() {
     // from 3 requests to 1 per cycle.
     pendingGogCount: await countPendingGogCodes(),
     pendingSteamCount: await countPendingSteamCodes(),
+    // Lenovo Gaming key drops state — surfaced for the watcher card UI.
+    // The watcher keeps the file fresh; the scheduler fires per-drop wakes.
+    lenovoGaming: (() => {
+      const s = readLenovoState();
+      const drops = Object.values(s.drops || {});
+      return {
+        drops,
+        nextWake: nextLenovoWake ? {
+          dropId: nextLenovoWake.dropId,
+          kind: nextLenovoWake.kind,
+          target: datetime(nextLenovoWake.target),
+        } : null,
+      };
+    })(),
   };
 }
 
@@ -2231,6 +2391,22 @@ const PANEL_HTML = `<!DOCTYPE html>
   .site-card.watcher .name { font-weight: 600; font-size: 14px; }
   .site-card.watcher .status { font-size: 11px; color: #6a7e9e; flex: 0; }
   .site-card.watcher .card-actions { margin-top: auto; }
+  /* Lenovo Gaming watcher card surfaces tracked drops inline. Compact rows
+     with status pill, title, countdown, "Got it" + open-link buttons. */
+  .lenovo-drops { display: flex; flex-direction: column; gap: 4px; margin-top: 4px; }
+  .lenovo-drop { display: flex; align-items: center; gap: 6px; padding: 4px 6px; background: #12213e; border-radius: 4px; font-size: 11px; }
+  .lenovo-drop .lenovo-pill { font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 999px; white-space: nowrap; }
+  .lenovo-drop .lenovo-pill.live  { background: #1e7a4d; color: #b8f0d4; }
+  .lenovo-drop .lenovo-pill.soon  { background: #2a3a6a; color: #a8c0e8; }
+  .lenovo-drop .lenovo-pill.restock { background: #6a3a1e; color: #f0c890; }
+  .lenovo-drop .lenovo-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #d0d8e0; text-decoration: none; cursor: pointer; }
+  .lenovo-drop .lenovo-title:hover { color: #4ecca3; }
+  .lenovo-drop .lenovo-time { color: #8aa0c2; font-size: 10px; white-space: nowrap; }
+  .lenovo-drop .lenovo-collected { font-size: 10px; padding: 2px 8px; background: transparent; border: 1px solid #2a3a5a; color: #a0b4d4; border-radius: 4px; cursor: pointer; }
+  .lenovo-drop .lenovo-collected:hover:not(:disabled) { border-color: #4ecca3; color: #4ecca3; }
+  .lenovo-drop .lenovo-collected:disabled { opacity: 0.4; cursor: not-allowed; }
+  .lenovo-drop .lenovo-go { color: #6a7e9e; text-decoration: none; padding: 0 4px; font-size: 12px; }
+  .lenovo-drop .lenovo-go:hover { color: #4ecca3; }
   .watcher-section { margin-top: 16px; }
   .watcher-section-title { font-size: 11px; color: #6a7e9e; letter-spacing: 0.06em; text-transform: uppercase; font-weight: 600; margin-bottom: 8px; }
   .watcher-cards { display: grid; grid-template-columns: repeat(1, 1fr); gap: 10px; }
@@ -3583,7 +3759,18 @@ function renderScheduleTab() {
   const activeGames = sites.filter(s => s.active && GAME_IDS.has(s.id));
   const hasAE = sites.some(s => s.active && s.id === 'aliexpress');
   const hasMS = sites.some(s => s.active && s.id === 'microsoft');
-  const activeCount = activeGames.length + (hasAE ? 1 : 0) + (hasMS ? 1 : 0);
+  // Watchers are in state.watchers (not state.sites). They run on each
+  // main-chain fire as part of the bash command — listing them in the
+  // Services breakdown so the Schedule tab reflects the actual daily run.
+  // Lenovo Gaming gets its own row because it has additional per-drop
+  // wakes outside the main chain (lenovoSchedulerLoop fires 1h/5min/at-time).
+  const allWatchers = (state.watchers || []).slice();
+  const standardWatchers = allWatchers.filter(w => w.id !== 'lenovo-gaming');
+  const lenovoWatcher = allWatchers.find(w => w.id === 'lenovo-gaming');
+  const byName = (a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' });
+  standardWatchers.sort(byName);
+  const activeCount = activeGames.length + (hasAE ? 1 : 0) + (hasMS ? 1 : 0)
+    + standardWatchers.length + (lenovoWatcher ? 1 : 0);
 
   const svcLines = [];
   if (activeGames.length) {
@@ -3600,6 +3787,17 @@ function renderScheduleTab() {
     } else {
       svcLines.push('<b>Microsoft Rewards</b> — runs searches immediately (no window)');
     }
+  }
+  if (standardWatchers.length) {
+    svcLines.push('<b>' + standardWatchers.map(w => escapeHtml(w.name)).join(', ') + '</b> — watch and notify on new free items <span class="muted">(no auto-claim)</span>');
+  }
+  if (lenovoWatcher) {
+    const lg = state.lenovoGaming || { drops: [], nextWake: null };
+    const upcoming = (lg.drops || []).filter(d => !d.userCollected && d.scheduledAt && (d.status === 'coming-soon' || d.status === 'active'));
+    const upcomingNote = upcoming.length
+      ? ' <span class="muted">(' + upcoming.length + ' tracked)</span>'
+      : '';
+    svcLines.push('<b>' + escapeHtml(lenovoWatcher.name) + '</b> — watch + per-drop wakes <span class="muted">(1h before, 5min before, at drop time)</span>' + upcomingNote);
   }
   if (svcLines.length) {
     parts.push('<div class="sched-row"><div class="sched-label">Services (' + activeCount + ' active)</div>' +
@@ -4029,8 +4227,11 @@ function render() {
   }
 
   // Split sites into active (main grid) and inactive (drawer below).
-  const activeCards = state.sites.filter(s => s.active !== false);
-  const inactiveCards = state.sites.filter(s => s.active === false);
+  // Sort each group alphabetically by name so the visual order is stable
+  // and predictable across all card groupings on the Sessions tab.
+  const byName = (a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' });
+  const activeCards = state.sites.filter(s => s.active !== false).slice().sort(byName);
+  const inactiveCards = state.sites.filter(s => s.active === false).slice().sort(byName);
 
   cards.innerHTML = activeCards.map(s => {
     const dotClass = s.status === 'logged_in' ? 'logged-in' : s.status === 'not_logged_in' ? 'not-logged-in' : s.status === 'error' ? 'error' : 'unknown';
@@ -4090,7 +4291,9 @@ function render() {
   // are surfaced in Settings → Services rather than here, to keep
   // this page focused on what's currently in play.
   const watcherEl = document.getElementById('watcherCards');
-  const watchers = state.watchers || [];
+  // Sort watchers alphabetically by name to match the active/available
+  // cards above (consistent ordering across all Sessions card groupings).
+  const watchers = (state.watchers || []).slice().sort(byName);
   if (watcherEl) {
     if (watchers.length === 0 || sessionsCollapsed) {
       watcherEl.style.display = 'none';
@@ -4102,13 +4305,59 @@ function render() {
         const extLinkIcon = w.siteUrl
           ? '<a class="site-card-extlink" href="' + escapeHtml(w.siteUrl) + '" onclick="return openSiteUrl(this)" target="_blank" title="Open ' + escapeHtml(w.name) + ' (replaces tab if inside Organizr; middle-click for new tab)" aria-label="Open ' + escapeHtml(w.name) + '">↗</a>'
           : '';
+        // Lenovo Gaming surfaces its tracked drops inline — status pill,
+        // title, countdown, "Got it" toggle, ↗ link per drop. Other
+        // watchers stay simple: just "Watch-only" + Run.
+        let bodyHtml = '<div class="status">Watch-only</div>';
+        if (w.id === 'lenovo-gaming') {
+          const lg = state.lenovoGaming || { drops: [] };
+          // Filter to user-actionable drops: not ended, not user-collected.
+          // Sort: active first (no scheduledAt), then coming-soon ascending by schedule.
+          const actionable = (lg.drops || [])
+            .filter(d => d.status !== 'ended' && d.status !== 'expired' && d.status !== 'postponed' && !d.userCollected)
+            .sort((a, b) => {
+              if (a.status === 'active' && b.status !== 'active') return -1;
+              if (b.status === 'active' && a.status !== 'active') return 1;
+              const at = a.scheduledAt ? new Date(a.scheduledAt).getTime() : 0;
+              const bt = b.scheduledAt ? new Date(b.scheduledAt).getTime() : 0;
+              return at - bt;
+            });
+          if (actionable.length) {
+            const dropsHtml = actionable.map(d => {
+              let pillClass = 'soon', pillText = 'Coming soon';
+              if (d.status === 'active') { pillClass = d.isRestocked ? 'restock' : 'live'; pillText = d.isRestocked ? 'Restocked' : 'Live now'; }
+              let timeText = '';
+              if (d.scheduledAt) {
+                const ts = new Date(d.scheduledAt).getTime();
+                if (Number.isFinite(ts)) {
+                  const local = new Date(ts).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+                  timeText = local + formatCountdown(ts);
+                }
+              }
+              const cleanTitle = d.title.replace(/^\((Coming Soon|Postponed|Ended|Expired|Restocked!?)\)\s*/i, '');
+              // Title is a link to the drop page (clicking jumps to the
+              // collection site, same as the ↗ icon). Two clickable surfaces
+              // for the same target — bigger touch area + clearer affordance.
+              return '<div class="lenovo-drop">' +
+                '<span class="lenovo-pill ' + pillClass + '">' + escapeHtml(pillText) + '</span>' +
+                '<a class="lenovo-title" href="' + escapeHtml(d.url) + '" onclick="return openSiteUrl(this)" target="_blank" title="' + escapeHtml(d.title) + '">' + escapeHtml(cleanTitle) + '</a>' +
+                (timeText ? '<span class="lenovo-time">' + escapeHtml(timeText) + '</span>' : '') +
+                '<a class="lenovo-go" href="' + escapeHtml(d.url) + '" onclick="return openSiteUrl(this)" target="_blank" title="Open drop page" aria-label="Open drop page">↗</a>' +
+                '<button class="lenovo-collected" onclick="markLenovoCollected(\\'' + escapeHtml(d.id) + '\\')" title="Mark as collected (suppresses pre-claim notifications)">Got it</button>' +
+              '</div>';
+            }).join('');
+            bodyHtml = '<div class="lenovo-drops">' + dropsHtml + '</div>';
+          } else {
+            bodyHtml = '<div class="status">No active or upcoming drops</div>';
+          }
+        }
         return '<div class="site-card watcher">' +
           '<div class="site-card-header">' +
             '<div class="name">' + escapeHtml(w.name) + '</div>' +
             versionLabel +
             extLinkIcon +
           '</div>' +
-          '<div class="status">Watch-only</div>' +
+          bodyHtml +
           '<div class="card-actions">' +
             '<button class="btn btn-run-single" onclick="runSite(\\'' + w.id + '\\')" ' + (disabled ? 'disabled' : '') + ' title="Run this watcher now">Run</button>' +
           '</div>' +
@@ -4539,6 +4788,22 @@ async function runSite(siteId) {
   await refreshState();
 }
 
+// Lenovo Gaming: toggle a drop's userCollected flag. Suppresses the pre-claim
+// 1h/5min/wentLive wakes for that drop so the user doesn't get notified about
+// something they've already grabbed. Restock notifications continue regardless
+// since restock = new key pool. The state is server-side; this just POSTs.
+async function markLenovoCollected(dropId) {
+  try {
+    const r = await api('POST', '/lenovo/drops/' + encodeURIComponent(dropId) + '/collected');
+    if (r && r.success === false) {
+      showToast(r.error || 'Failed to mark collected', 'error', 4000);
+      return;
+    }
+    showToast('Marked collected — pre-claim notifications suppressed.', 'success', 3000);
+    await refreshState();
+  } catch (e) { showToast('Error: ' + e.message, 'error'); }
+}
+
 async function runAll() {
   busy = true; render();
   try {
@@ -4943,6 +5208,32 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    // Lenovo Gaming: mark a drop as collected. Toggles userCollected,
+    // suppresses pre-claim wakes (1h/5min/wentLive) so the user doesn't get
+    // pinged about a drop they already grabbed. Restock notifications
+    // continue regardless — restock = new key pool, fresh opportunity.
+    {
+      const m = req.url && req.method === 'POST' && req.url.match(/^\/api\/lenovo\/drops\/([^/]+)\/(collected|uncollected)$/);
+      if (m) {
+        const dropId = decodeURIComponent(m[1]);
+        const action = m[2];
+        const fresh = readLenovoState();
+        const drop = fresh.drops?.[dropId];
+        if (!drop) {
+          sendJson(res, { success: false, error: 'Drop not found' }, 404);
+          return;
+        }
+        drop.userCollected = action === 'collected';
+        drop.userCollectedAt = drop.userCollected ? datetime() : null;
+        fresh.drops[dropId] = drop;
+        saveLenovoState(fresh);
+        // saveLenovoState writes the file, which fs.watch picks up and fires
+        // scheduler wakeups so the next-wake recomputes immediately.
+        sendJson(res, { success: true, drop });
+        return;
+      }
+    }
+
     if (req.method === 'GET' && req.url === '/api/pending-gog-count') {
       const count = await countPendingGogCodes();
       sendJson(res, { count });
@@ -5099,5 +5390,9 @@ server.listen(PANEL_PORT, async () => {
   msSchedulerLoop().catch(err => {
     console.error(`[${datetime()}] Scheduler (MS) crashed:`, err);
   });
+  lenovoSchedulerLoop().catch(err => {
+    console.error(`[${datetime()}] Scheduler (Lenovo) crashed:`, err);
+  });
   watchConfigForScheduler();
+  watchLenovoStateForScheduler();
 });
