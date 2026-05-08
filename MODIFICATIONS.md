@@ -1,5 +1,11 @@
 # Modifications from Upstream Dev Branch
 
+> **Frozen at v2.4.** This document is no longer maintained going forward.
+>
+> When the fork started, the goal was to track every change precisely so it could be contributed back to [vogler/free-games-claimer](https://github.com/vogler/free-games-claimer). The fork has since diverged substantially: the engine refactor, the registry-driven collector framework, the in-app settings UI, the per-service stats DBs, the captcha pause/notify mechanism, the multi-scheduler architecture, the cookie-upload flow, and several net-new collectors and watchers (Steam, Microsoft Rewards, AliExpress, Humble, Fanatical, Ubisoft, Lenovo) are no longer cleanly portable to a much smaller upstream codebase. Upstream has also been dormant since late 2025.
+>
+> **Going forward, [CHANGELOG.md](CHANGELOG.md) is the canonical record** of what changes in each release. This file remains as historical context — it captures the diff vs. upstream as of v2.4, which is the last point where a "fork minus upstream" comparison was a coherent ask.
+
 This document tracks all changes made to the `free-games-claimer` fork relative to the **dev branch** of [vogler/free-games-claimer](https://github.com/vogler/free-games-claimer), for potential contribution back upstream.
 
 The upstream dev branch already included the switch from `playwright-firefox` to `playwright-chromium`, the `fingerprint-injector` integration, `src/epic-games-mobile.js`, and updated dependencies (`dotenv`, `lowdb`, `eslint`). Those are **not** listed here — only our additions and changes are documented.
