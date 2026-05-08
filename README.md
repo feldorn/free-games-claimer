@@ -51,6 +51,17 @@ Uses [patchright](https://github.com/nicbarker/patchright) (Chromium with built-
 
 ---
 
+## Contents
+
+- [Quick Start (Docker)](#quick-start-docker) · [Docker Compose](#docker-compose) · [Without Docker](#without-docker)
+- [Configuration](#configuration) · [Notifications](#notifications) · [Scheduling](#scheduling)
+- [Captcha pause](#captcha-pause) · [Automatic Login / 2FA](#automatic-login--two-factor-authentication) · [Cookie upload](#cookie-upload)
+- [Control Panel](#control-panel) · [Settings (in-app)](#settings-in-app-configuration)
+- [Running as non-root](#running-as-a-non-root-user) · [Reverse-Proxy Setup](#reverse-proxy-setup)
+- [Data Storage](#data-storage) · [HTTP API](#http-api) · [Troubleshooting](#troubleshooting)
+
+---
+
 ## Quick Start (Docker)
 
 ```sh
@@ -624,11 +635,14 @@ cookie flow already handles the steady state.
 
 ## Running as a non-root user
 
-The container defaults to running as root, unchanged from the upstream image.
-Set `PUID` (and optionally `PGID`) to opt into a non-root runtime — the entrypoint
-will reconcile a `fgc` user with those IDs, chown `/fgc/data` and the runtime
-user's home dirs, then drop privileges via `gosu` before starting TurboVNC and
-the panel.
+Default is root, unchanged from the upstream image. Opt in to non-root by setting `PUID` (and optionally `PGID`) in compose.
+
+<details>
+<summary><strong>Setup, migration, and caveats</strong></summary>
+
+The entrypoint reconciles a `fgc` user with those IDs, chowns `/fgc/data`
+and the runtime user's home dirs, then drops privileges via `gosu` before
+starting TurboVNC and the panel.
 
 ```yaml
 environment:
@@ -658,6 +672,8 @@ each time. To freeze ownership, pick a mode and stick with it.
   `PLAYWRIGHT_BROWSERS_PATH`) instead of `/root/.cache`. They're world-readable.
   If you've extended the image and assumed the old `/root/.cache/ms-playwright`
   path, update accordingly.
+
+</details>
 
 ---
 
@@ -803,7 +819,10 @@ Force SSL and HTTP/2 are fine to leave on.
 
 ## Data Storage
 
-All data is stored in the `data/` directory (mounted as a Docker volume):
+All data lives in the `data/` directory (mounted as a Docker volume).
+
+<details>
+<summary><strong>File-by-file reference</strong></summary>
 
 | Path | Contents |
 |------|----------|
@@ -820,12 +839,17 @@ All data is stored in the `data/` directory (mounted as a Docker volume):
 | `data/config.json` | App-level config overrides written by the Settings tab. Missing = env/defaults in effect. Deleted = same as missing. |
 | `data/screenshots/` | Screenshots of claim results |
 
+</details>
+
 ---
 
 ## HTTP API
 
 The panel exposes a small JSON API, useful for scripting or dashboard
 integration. All endpoints are rooted at `<BASE_PATH>/api`.
+
+<details>
+<summary><strong>Endpoint reference</strong></summary>
 
 | Method | Path | Purpose |
 |--------|------|---------|
@@ -844,6 +868,8 @@ integration. All endpoints are rooted at `<BASE_PATH>/api`.
 | `GET`  | `/stats/by-service` | Per-service claim counts + last-claim time |
 | `GET`  | `/stats/daily?days=30` | Daily claim counts for the 30-day chart |
 | `GET`  | `/activity?limit=10` | Recent successful claims |
+
+</details>
 
 ---
 
