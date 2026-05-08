@@ -35,6 +35,8 @@ Services are grouped by what they actually do.
 | 🔑 [Fanatical](https://www.fanatical.com/en/free-games-keys) | Pings on new free Steam-key giveaways *(opt-in)* |
 | 🚀 [Lenovo Gaming Key Drops](https://gaming.lenovo.com/game-key-drops) | Tracks scheduled drops + fires push notifications **1h before / 5min before / at drop time** so you can land the queue before keys run out *(opt-in)* |
 
+> **Why notify-only?** These storefronts have *dynamic* claim flows — newsletter prompts, region acks, "are you sure" modals, and other gates that the sites add and remove without notice — so any scripted claim path is brittle and silently breaks. Some also chain through multiple sites with one-shot vouchers (Lenovo → GamesPlanet → Steam), where a flaky auto-claim wastes the only attempt. Watchers detect *what's available* reliably; the actual grab is left to you, where a human can shrug off a UI change the script can't.
+
 Uses [patchright](https://github.com/nicbarker/patchright) (Chromium with built-in anti-detection). Runs in Docker with a virtual display and VNC access — solve captchas, MFA, and one-time logins through the embedded noVNC viewer in the panel.
 
 <p align="center">
