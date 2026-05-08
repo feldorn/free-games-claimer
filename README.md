@@ -8,16 +8,32 @@ A self-hosted scheduler that claims free games and rewards across multiple store
 
 Originally derived from [vogler/free-games-claimer](https://github.com/vogler/free-games-claimer) (dev branch). The control panel, in-app settings UI, claim-history stats, scheduler with hot-reload, AliExpress reintegration, captcha pause + manual-solve handoff, the Steam discovery migration, and the Ubisoft watcher are all additions in this fork — see [MODIFICATIONS.md](MODIFICATIONS.md) for the per-commit story.
 
-Claims (or watches) free games periodically on:
-- <img alt="logo prime-gaming" src="https://github.com/user-attachments/assets/7627a108-20c6-4525-a1d8-5d221ee89d6e" width="32" align="middle" /> [Amazon Prime Gaming](https://gaming.amazon.com)
-- <img alt="logo epic-games" src="https://github.com/user-attachments/assets/82e9e9bf-b6ac-4f20-91db-36d2c8429cb6" width="32" align="middle" /> [Epic Games Store](https://www.epicgames.com/store/free-games)
-- <img alt="logo gog" src="https://github.com/user-attachments/assets/49040b50-ee14-4439-8e3c-e93cafd7c3a5" width="32" align="middle" /> [GOG](https://www.gog.com)
-- <img alt="logo steam" src="https://store.steampowered.com/favicon.ico" width="32" align="middle" /> [Steam](https://store.steampowered.com) — free-to-keep promotions only (not F2P or free weekends)
-- 🎯 [Microsoft Rewards](https://rewards.bing.com) — daily Bing searches and activity cards for points, with before/after balance tracking
-- 🛒 [AliExpress](https://m.aliexpress.com) — daily check-in coins (opt-in; disabled by default)
-- 🎮 [Ubisoft Connect](https://store.ubisoft.com/us/free-games) — watch-only; pings you when a new free-week promo appears (opt-in; disabled by default)
-- 📦 [Humble Bundle](https://www.humblebundle.com/store) — watch-only; pings you when a new free item appears in the Humble store (opt-in; disabled by default)
-- 🔑 [Fanatical](https://www.fanatical.com/en/free-games-keys) — watch-only; pings you when a new free Steam-key giveaway appears (opt-in; disabled by default)
+Services are grouped by what they actually do.
+
+**Claimers** — log in once, then auto-claim any free game that drops:
+
+| Service | Notes |
+|---|---|
+| <img alt="logo prime-gaming" src="https://github.com/user-attachments/assets/7627a108-20c6-4525-a1d8-5d221ee89d6e" width="24" align="middle" /> [Amazon Prime Gaming](https://gaming.amazon.com) | Free games + GOG / MS Store / Xbox keys delivered via Prime |
+| <img alt="logo epic-games" src="https://github.com/user-attachments/assets/82e9e9bf-b6ac-4f20-91db-36d2c8429cb6" width="24" align="middle" /> [Epic Games Store](https://www.epicgames.com/store/free-games) | Weekly free-game claim |
+| <img alt="logo gog" src="https://github.com/user-attachments/assets/49040b50-ee14-4439-8e3c-e93cafd7c3a5" width="24" align="middle" /> [GOG](https://www.gog.com) | Homepage giveaways + catalog watch for tag-flagged free items |
+| <img alt="logo steam" src="https://store.steampowered.com/favicon.ico" width="24" align="middle" /> [Steam](https://store.steampowered.com) | Free-to-keep promotions only (not F2P or free weekends) |
+
+**Point / coin collectors** — daily-cadence reward grinding:
+
+| Service | Notes |
+|---|---|
+| 🎯 [Microsoft Rewards](https://rewards.bing.com) | Daily Bing searches + activity cards for points, with before/after balance tracking |
+| 🛒 [AliExpress](https://m.aliexpress.com) | Daily check-in coins *(opt-in; disabled by default)* |
+
+**Watchers** — notify-only; surface new free items so you can grab them yourself:
+
+| Service | Notes |
+|---|---|
+| 🎮 [Ubisoft Connect](https://store.ubisoft.com/us/free-games) | Pings on new free-week promos *(opt-in)* |
+| 📦 [Humble Bundle](https://www.humblebundle.com/store) | Pings on new free items in the Humble store *(opt-in)* |
+| 🔑 [Fanatical](https://www.fanatical.com/en/free-games-keys) | Pings on new free Steam-key giveaways *(opt-in)* |
+| 🚀 [Lenovo Gaming Key Drops](https://gaming.lenovo.com/game-key-drops) | Tracks scheduled drops + fires push notifications **1h before / 5min before / at drop time** so you can land the queue before keys run out *(opt-in)* |
 
 Uses [patchright](https://github.com/nicbarker/patchright) (Chromium with built-in anti-detection). Runs in Docker with a virtual display and VNC access — solve captchas, MFA, and one-time logins through the embedded noVNC viewer in the panel.
 
@@ -172,6 +188,9 @@ Each store can use the default `EMAIL`/`PASSWORD` or be overridden individually:
 | Microsoft Rewards | `MS_EMAIL` | `MS_PASSWORD` | `MS_OTPKEY` | `MS_SCHEDULE_HOURS` |
 | AliExpress | `AE_EMAIL` | `AE_PASSWORD` | | `AE_ENABLED=1` (opt-in; disabled by default) |
 | Ubisoft Connect | — | — | — | `UBISOFT_ACTIVE=1` (opt-in; disabled by default). Watch-only — no login, no auto-claim. |
+| Humble Bundle | — | — | — | `HUMBLE_ACTIVE=1` (opt-in). Watch-only. |
+| Fanatical | — | — | — | `FANATICAL_ACTIVE=1` (opt-in). Watch-only. |
+| Lenovo Gaming Key Drops | — | — | — | `LENOVO_ACTIVE=1` (opt-in). Watch-only with per-drop wakes (1h / 5min / at drop time push notifications). |
 
 ### Steam-Specific Options
 
