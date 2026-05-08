@@ -6,7 +6,7 @@
 
 A self-hosted scheduler that claims free games and rewards across multiple storefronts on its own. Logs in once via your browser session, then keeps watch — daily checks, captcha-aware pause-and-notify when a human is needed, in-app stats showing what got claimed, what's pending, and how your Microsoft Rewards points are trending.
 
-Originally derived from [vogler/free-games-claimer](https://github.com/vogler/free-games-claimer) (dev branch). The control panel, in-app settings UI, claim-history stats, scheduler with hot-reload, AliExpress reintegration, captcha pause + manual-solve handoff, the Steam discovery migration, and the Ubisoft watcher are all additions in this fork — see [MODIFICATIONS.md](MODIFICATIONS.md) for the per-commit story.
+Originally derived from [vogler/free-games-claimer](https://github.com/vogler/free-games-claimer) (dev branch). The control panel, in-app settings UI, claim-history stats, scheduler with hot-reload, AliExpress reintegration, captcha pause + manual-solve handoff, the Steam discovery migration, the Microsoft Rewards collector, and the Ubisoft / Humble / Fanatical / Lenovo watchers are all additions in this fork. Per-release changes are tracked in [CHANGELOG.md](CHANGELOG.md); [MODIFICATIONS.md](MODIFICATIONS.md) holds a frozen v2.4 snapshot of the diff vs. upstream for historical context.
 
 Services are grouped by what they actually do.
 
@@ -57,7 +57,7 @@ Uses [patchright](https://github.com/nicbarker/patchright) (Chromium with built-
 docker run --rm -it -p 6080:6080 -p 7080:7080 -v fgc:/fgc/data --pull=always ghcr.io/feldorn/free-games-claimer
 ```
 
-This runs all 4 claimers (`prime-gaming`, `epic-games`, `gog`, `steam`), claims any available free games, and exits.
+This starts the container, brings up the control panel on port 7080, and stays running. No claims happen on boot — sign in via the panel first, then either click **Run Now** or set `LOOP` (and optionally `START_TIME`) so the built-in scheduler fires daily on its own.
 
 The image is published for both `linux/amd64` and `linux/arm64`, so the same tag works on x86 servers, Apple Silicon, and Raspberry Pi (64-bit).
 
@@ -110,7 +110,7 @@ volumes:
   fgc:
 ```
 
-> **Important:** Do not add a `command:` override unless you intentionally want to skip some claimers. The default CMD runs all 4 scripts, and the `LOOP` variable handles scheduling via the entrypoint.
+> **Important:** Don't override `command:` or `entrypoint:`. The image's entrypoint launches the control panel, and the panel owns scheduling, the Run-Now button, and the per-service active toggles. Replacing it with a hand-rolled `node prime-gaming; node epic-games; …` pipeline disables all of that.
 
 ---
 
@@ -162,8 +162,8 @@ that's also on the Settings tab can be edited there at runtime instead.
 | `LOOP` | | Main-schedule interval in seconds (e.g. `86400` = 24h, used in the docker-compose template). Without `START_TIME`, sleeps N seconds after each run completes (drifts by run duration). Drives the non-MS chain only — Microsoft Rewards is on its own schedule. The panel always runs in the foreground; this only controls how often the claim chain fires. |
 | `START_TIME` | | Wall-clock anchor `HH:MM` (24h) for the main schedule. When set, the non-MS chain wakes at this time each day; with a sub-daily `LOOP` (e.g. `14400` = 4h) the anchor seeds the sequence and runs land at `08:00, 12:00, 16:00, 20:00, 00:00, 04:00`. Microsoft Rewards is independent; see [Microsoft Rewards Options](#microsoft-rewards-options). |
 | `LOGIN_MODE` | — | **Deprecated no-op** — the control panel is always running on port 7080. Safe to remove from your config. |
-| `CLAIM_CMD` | (all 5 scripts in sequence) | Shell command the scheduler runs at its anchored wake. Includes microsoft.js, which sleeps internally until `MS_SCHEDULE_START`. |
-| `CLAIM_CMD_MANUAL` | (4 scripts, microsoft.js excluded) | Shell command the "Run Now" button runs. Excludes microsoft.js by default so a manual run actually finishes in a few minutes instead of hanging overnight. |
+| `CLAIM_CMD` | (active services in claim order) | Shell command the scheduler runs at its anchored wake. Built dynamically from the active services in the registry's claim order; set this to override with a fixed pipeline. |
+| `CLAIM_CMD_MANUAL` | (active services minus microsoft) | Shell command the "Run Now" button runs. Excludes microsoft.js by default so a manual run finishes in a few minutes instead of hanging overnight. |
 | `BASE_PATH` | | URL prefix when serving the panel under a reverse-proxy subfolder (e.g. `/free-games`). Leave empty for root or subdomain. See [Reverse-Proxy Setup](#reverse-proxy-setup) below. |
 | `PUBLIC_URL` | | Full external URL of the panel (e.g. `https://example.com/free-games`). Used in notifications so tap-targets land on the panel. |
 | `SHOW` | `1` (Docker) | Show browser GUI. Default is headless outside Docker. |
@@ -349,9 +349,12 @@ environment:
   - MS_SCHEDULE_START=8 # Microsoft Rewards window start hour
 ```
 
-- **Main schedule** (`START_TIME` + `LOOP`) fires the non-MS chain — Prime,
-  Epic, GOG, Steam, Ubisoft, AliExpress. With `START_TIME` set, runs land on
-  the wall clock; without, `LOOP` sleeps N seconds after each run completes.
+- **Main schedule** (`START_TIME` + `LOOP`) fires the non-MS chain — every
+  active claimer and watcher in the registry's claim order (GOG, Prime, Epic,
+  Steam, AliExpress, Ubisoft, Humble, Fanatical, Lenovo). With `START_TIME`
+  set, runs land on the wall clock; without, `LOOP` sleeps N seconds after
+  each run completes. Lenovo additionally registers per-drop wakes (1h
+  before / 5min before / at drop time) on top of the daily chain pass.
 - **MS schedule** (`MS_SCHEDULE_HOURS` + `MS_SCHEDULE_START`) fires
   `microsoft.js` alone at a random clock time inside the window. The picked
   time is persisted to `data/ms-schedule-today.json` so config saves don't
@@ -398,8 +401,9 @@ setup is complete, so the main area is free for whichever tool you're in.
 </p>
 
 Responsive grid of cards — one per site (Prime, Epic, GOG, Steam, MS Rewards,
-MS Mobile, AliExpress). Grid layout auto-adapts between 1/2/3/4 columns
-depending on viewport width.
+MS Mobile, AliExpress, plus active watchers: Ubisoft, Humble, Fanatical,
+Lenovo). Grid layout auto-adapts between 1/2/3/4 columns depending on
+viewport width. Cards within each group sort alphabetically.
 
 - **Status dot** (green / red / gray) backed by real URL-based auth checks
   (`/account` redirects, ME Control DOM presence, etc.), not cached UI.
@@ -583,14 +587,15 @@ the file directly.
 - **Notifications** — `NOTIFY`, `NOTIFY_TITLE`, `PUBLIC_URL`. A
   **Send test** button fires apprise with the *current* effective config,
   so you can tweak the URL and test without a restart.
-- **Services** — one accordion row per service (Prime, Epic, GOG, Steam,
-  Microsoft, Microsoft Mobile, AliExpress). Each row shows the service name,
-  a summary like `Redeem on · DLC off · Timeleft none`, and an Active
-  checkbox. Click the row to expand and edit per-service flags (Prime's
-  `PG_REDEEM` / `PG_CLAIMDLC` / `PG_TIMELEFT`, Epic's `EG_MOBILE`, GOG's
-  `GOG_NEWSLETTER`, Steam's `STEAM_MIN_RATING` / `STEAM_MIN_PRICE`).
-  Deactivating hides the service from the Sessions grid and skips it in
-  claim runs; reactivating requires one click.
+- **Services** — one accordion row per registered service: claimers (Prime,
+  Epic, GOG, Steam), point/coin collectors (Microsoft, Microsoft Mobile,
+  AliExpress), and watchers (Ubisoft, Humble, Fanatical, Lenovo). Each row
+  shows the service name, a summary like `Redeem on · DLC off · Timeleft
+  none`, and an Active checkbox. Click the row to expand and edit
+  per-service flags (Prime's `PG_REDEEM` / `PG_CLAIMDLC` / `PG_TIMELEFT`,
+  Epic's `EG_MOBILE`, GOG's `GOG_NEWSLETTER`, Steam's `STEAM_MIN_RATING` /
+  `STEAM_MIN_PRICE`). Deactivating hides the service from the Sessions grid
+  and skips it in claim runs; reactivating requires one click.
 - **Advanced** — `DRYRUN`, `RECORD`, `TIMEOUT`, `LOGIN_TIMEOUT`, `WIDTH`,
   `HEIGHT`.
 (The read-only environment view has moved to its own top-level
@@ -774,6 +779,7 @@ All data is stored in the `data/` directory (mounted as a Docker volume):
 | `data/steam.json` | Claimed Steam titles |
 | `data/microsoft-rewards.json` | MS Rewards run history — `{at, session, before, after, earned}` per run (capped at 500 entries). Feeds the Stats tab's points KPIs. |
 | `data/aliexpress.json` | AliExpress daily coin-collect history — `{at, balance, streak, tomorrow, collected, earned}` per run (capped at 500). Drives the AliExpress row in the Stats tab. Only written when the service is enabled. |
+| `data/ubisoft-watch.json` · `data/humble-bundle-watch.json` · `data/fanatical-watch.json` · `data/lenovo-gaming-watch.json` | Watcher state — last-seen titles per site so re-notify only fires on genuinely new items. Lenovo's file additionally tracks per-drop scheduledAt, `userCollected` flags, and the next-wake offset for the panel scheduler. Only written when the corresponding watcher is enabled. |
 | `data/ms-used-terms.json` | Microsoft Rewards — search terms used in the last 30 days (dedup window) |
 | `data/config.json` | App-level config overrides written by the Settings tab. Missing = env/defaults in effect. Deleted = same as missing. |
 | `data/screenshots/` | Screenshots of claim results |
