@@ -163,20 +163,29 @@ that's also on the Settings tab can be edited there at runtime instead.
 
 ### General
 
+The recommended-for-Docker set — same shape as the [docker-compose
+example](#docker-compose) above:
+
 | Option | Default | Description |
 |--------|---------|-------------|
-| `EMAIL` | | Default email for all logins |
-| `PASSWORD` | | Default password for all logins |
-| `NOTIFY` | | Notification URL(s) for [apprise](https://github.com/caronc/apprise) (Pushover, Telegram, Slack, etc.) |
+| `EMAIL` | | Default email for all logins (per-store override available below) |
+| `PASSWORD` | | Default password for all logins (per-store override available below) |
+| `NOTIFY` | | Notification URL(s) for [apprise](https://github.com/caronc/apprise) (Pushover, Telegram, Slack, etc.) — used for claim summaries, login issues, and captcha pause |
+| `LOOP` | | Main-schedule interval in seconds (e.g. `86400` = 24h). Without `START_TIME`, sleeps N seconds after each run completes (drifts by run duration). Drives the non-MS chain only — Microsoft Rewards is on its own schedule. |
+| `START_TIME` | | Wall-clock anchor `HH:MM` (24h) for the main schedule. When set, the non-MS chain wakes at this time each day; with a sub-daily `LOOP` (e.g. `14400` = 4h) the anchor seeds the sequence and runs land at `08:00, 12:00, 16:00, 20:00, 00:00, 04:00`. Microsoft Rewards is independent — see [Microsoft Rewards Options](#microsoft-rewards-options). |
+
+**Behind a reverse proxy?** See [Reverse-Proxy Setup](#reverse-proxy-setup)
+for `BASE_PATH`, `PUBLIC_URL`, and `NOVNC_URL`.
+
+<details>
+<summary><strong>Advanced env vars (rarely-touched defaults)</strong></summary>
+
+| Option | Default | Description |
+|--------|---------|-------------|
 | `NOTIFY_TITLE` | | Optional title for notifications |
 | `NOTIFY_ATTACH_SCREENSHOTS` | `1` | Attach the most recent screenshot to failure notifications. Set to `0` to keep notifications text-only (privacy / bandwidth). Also editable in **Settings → Notifications**. |
-| `LOOP` | | Main-schedule interval in seconds (e.g. `86400` = 24h, used in the docker-compose template). Without `START_TIME`, sleeps N seconds after each run completes (drifts by run duration). Drives the non-MS chain only — Microsoft Rewards is on its own schedule. The panel always runs in the foreground; this only controls how often the claim chain fires. |
-| `START_TIME` | | Wall-clock anchor `HH:MM` (24h) for the main schedule. When set, the non-MS chain wakes at this time each day; with a sub-daily `LOOP` (e.g. `14400` = 4h) the anchor seeds the sequence and runs land at `08:00, 12:00, 16:00, 20:00, 00:00, 04:00`. Microsoft Rewards is independent; see [Microsoft Rewards Options](#microsoft-rewards-options). |
-| `LOGIN_MODE` | — | **Deprecated no-op** — the control panel is always running on port 7080. Safe to remove from your config. |
 | `CLAIM_CMD` | (active services in claim order) | Shell command the scheduler runs at its anchored wake. Built dynamically from the active services in the registry's claim order; set this to override with a fixed pipeline. |
 | `CLAIM_CMD_MANUAL` | (active services minus microsoft) | Shell command the "Run Now" button runs. Excludes microsoft.js by default so a manual run finishes in a few minutes instead of hanging overnight. |
-| `BASE_PATH` | | URL prefix when serving the panel under a reverse-proxy subfolder (e.g. `/free-games`). Leave empty for root or subdomain. See [Reverse-Proxy Setup](#reverse-proxy-setup) below. |
-| `PUBLIC_URL` | | Full external URL of the panel (e.g. `https://example.com/free-games`). Used in notifications so tap-targets land on the panel. |
 | `SHOW` | `1` (Docker) | Show browser GUI. Default is headless outside Docker. |
 | `WIDTH` | `1920` | Browser/screen width |
 | `HEIGHT` | `1080` | Browser/screen height |
@@ -185,8 +194,11 @@ that's also on the Settings tab can be edited there at runtime instead.
 | `TIMEOUT` | `60` | Timeout in seconds for page actions |
 | `LOGIN_TIMEOUT` | `180` | Timeout in seconds for login |
 | `DEBUG` | `0` | Set to `1` for verbose debug output |
-| `PUID` | | **Opt-in non-root mode.** When set, the entrypoint reconciles a runtime user `fgc` with this UID, chowns `/fgc/data`, and drops privileges via `gosu`. Unset = container runs as root (default, unchanged). See [Running as a non-root user](#running-as-a-non-root-user) below. |
+| `PUID` | | **Opt-in non-root mode.** When set, the entrypoint reconciles a runtime user `fgc` with this UID, chowns `/fgc/data`, and drops privileges via `gosu`. Unset = container runs as root (default, unchanged). See [Running as a non-root user](#running-as-a-non-root-user). |
 | `PGID` | `$PUID` | GID to pair with `PUID`. Defaults to the same value if only `PUID` is set. |
+| `LOGIN_MODE` | — | **Deprecated no-op** — the control panel is always running on port 7080. Safe to remove from your config. |
+
+</details>
 
 ### Per-Store Credentials
 
