@@ -763,6 +763,42 @@ path relative to the origin root, so we proxy it there rather than fighting
 the noVNC URL config. Your `proxy.conf` must pass `Upgrade` / `Connection`
 headers for the WebSocket to work (SWAG's default `proxy.conf` already does).
 
+### Proxy-specific gotchas
+
+<details>
+<summary><strong>Nginx Proxy Manager (NPM)</strong></summary>
+
+NPM is GUI-driven — configuration lives in toggles on the proxy host's
+**Details** tab rather than a config file. Two settings trip almost everyone up:
+
+- **Asset Caching → off.** When on, NPM injects its `assets.conf` block
+  (long `expires` + `Cache-Control: public, max-age=31536000`) into every
+  location on the host. That caches noVNC's JS and CSS chain at the proxy
+  edge and silently breaks the WebSocket bootstrap. Typical DevTools symptom:
+  `vnc.html` 304, `base.css` 401, `websockify` 404. Confirmed cause in
+  [#13](https://github.com/feldorn/free-games-claimer/issues/13).
+- **WebSockets Support → on.** noVNC carries actual VNC traffic over a
+  WebSocket upgrade at `/websockify`. Without this toggle NPM strips the
+  upgrade headers and the viewer mounts but never connects.
+
+Force SSL and HTTP/2 are fine to leave on.
+
+**By shape:**
+
+- **Split-subdomain** — two proxy hosts. Panel host → port 7080. noVNC host
+  → port 6080. No custom locations on either — the whole subdomain forwards
+  straight to one port. See [#26](https://github.com/feldorn/free-games-claimer/issues/26)
+  for a worked example.
+- **Subfolder** — works via NPM's **Custom locations** tab; mirror the
+  SWAG/nginx example above (one location for `<base>/` → 7080, one for
+  `<base>/novnc/` with a rewrite → 6080, one for `/websockify` → 6080).
+  Walkthrough in [#13](https://github.com/feldorn/free-games-claimer/issues/13).
+- **Subdomain (single host)** — one proxy host pointing at port 7080. noVNC
+  embeds at `<host>:6080` directly, so port 6080 must be published and
+  reachable from outside the proxy.
+
+</details>
+
 ---
 
 ## Data Storage
