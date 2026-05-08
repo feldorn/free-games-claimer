@@ -399,6 +399,73 @@ The control panel process owns the scheduler. No immediate run on container
 boot — the panel stays interactive at startup so you can log in, use
 **Run Now**, or **Batch Redeem** right away.
 
+### Run on startup (Sablier / cron)
+
+For setups that wake the container on demand — [Sablier](https://github.com/SablierApp/sablier)
+scale-to-zero, host cron driving `docker start` / `docker stop`, ad-hoc
+`docker run --rm` — set `RUN_ON_STARTUP` (also editable in **Settings →
+Schedule** as a dropdown). Three values:
+
+| Value | Behavior |
+|---|---|
+| `0` | Off (default — panel boots and waits for the scheduler or Run Now). |
+| `1` | After the boot session-check, fire one claim run; panel keeps running afterward. Pairs with Sablier-style traffic-based scaling — Sablier handles the eventual scale-down. |
+| `2` | Same as `1`, then exit cleanly after the run completes. **One-shot** mode for cron-driven start/stop or `docker run --rm`. The panel becomes unreachable until something restarts the container. |
+
+**MS Rewards behavior differs by mode:**
+
+- **Mode `1`** runs claimers + watchers only (Prime, Epic, GOG, Steam,
+  AliExpress, Ubisoft, Humble, Fanatical, Lenovo). Microsoft Rewards is
+  excluded — the panel stays running, so the existing MS scheduler will
+  fire `microsoft.js` at its window or via the main-chain `LOOP`.
+  Including MS at startup *and* on the scheduler would double-run it.
+- **Mode `2`** runs the full chain *including* `microsoft.js`, with
+  `MS_SKIP_WINDOW=1` so MS doesn't sleep until its scheduled window. This
+  is MS's only chance to run before the container exits.
+
+Both modes pass `NOWAIT=1` so stale sessions fail fast rather than
+waiting for interactive login. Each stale session fires its usual
+login-needed apprise notification and the chain continues to the next
+service — the panel never blocks on human action during an automated
+run. (`NOWAIT` itself is env-only and chosen automatically by the runner;
+the Run-Now button in the panel deliberately leaves it unset so
+interactive prompts in the embedded browser keep working.)
+
+When mode `2` is the effective config the panel renders an amber
+**One-shot** banner at the top of every tab so you can't miss that the
+container will exit when the next claim run completes, with the revert
+options inline. The banner switches to "claim run in progress, container
+will exit when it finishes" once the boot run starts.
+
+Setting both `RUN_ON_STARTUP` and `LOOP` gives you a boot run plus the
+scheduled cadence.
+
+**One-shot caveats:**
+
+- ⚠ **Disable Docker's auto-restart policy in compose** when using mode
+  `2`. The shipped `docker-compose.yml` template has
+  `restart: unless-stopped`, which will immediately bring the container
+  back up after `process.exit(0)` — that triggers another startup run,
+  which exits, which restarts → **infinite restart loop**. For mode `2`
+  set `restart: no` (or remove the line entirely) and let your
+  orchestrator (Sablier, cron, manual `docker run --rm`) own the
+  lifecycle. Mode `1` is fine with `restart: unless-stopped` since the
+  panel keeps running.
+- Without `NOTIFY` set, you have no post-exit visibility into what the run
+  did. The Settings dropdown warns you if you switch to mode `2` while
+  apprise is unconfigured.
+- If your orchestrator kills the container mid-run (cron with a fixed
+  window, Sablier inactivity timeout), notifications may not flush.
+  Consider `stop_grace_period: 5m` on the compose service.
+- To revert from mode `2` once the panel is exiting on every boot:
+  - **Edit `data/config.json`** and remove the `scheduler.runOnStartup`
+    key (saved settings win over env, so this is the most reliable path),
+  - or **race the panel** — open it before the claim run completes and
+    change the dropdown back via Settings → Schedule,
+  - or **set `RUN_ON_STARTUP=0` in env *and* remove the `data/config.json`
+    override** if the value got there via the Settings tab. Env alone is
+    not enough when `data/config.json` has a saved value.
+
 **How often to run?**
 - **Epic Games**: New free games weekly (daily before Christmas)
 - **Prime Gaming**: New games monthly (more during Prime days)

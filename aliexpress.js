@@ -3,7 +3,7 @@
 // If you run it standalone on the CLI, it always executes; the activation
 // gate lives in interactive-login.js.
 import { chromium } from 'patchright';
-import { datetime, filenamify, prompt, handleSIGINT, jsonDb, awaitUserCaptchaSolve, getOrCreateFingerprint, log } from './src/util.js';
+import { datetime, filenamify, prompt, handleSIGINT, jsonDb, awaitUserCaptchaSolve, getOrCreateFingerprint, log, notify } from './src/util.js';
 import { cfg } from './src/config.js';
 import { siteVersion } from './src/sites.js';
 import { FingerprintInjector } from 'fingerprint-injector';
@@ -269,6 +269,29 @@ try {
 }
 
 await recordRun();
+
+// End-of-run notification — same shape as the Microsoft Rewards summary
+// (`+earned, balance, optional context`). Skip when the run produced no
+// data (login failure, page never loaded), since a notification with no
+// numbers in it is just noise.
+{
+  const fmt = n => Number(n).toLocaleString('en-US');
+  const prev = (db.data.runs || []).filter(r => typeof r.balance === 'number').slice(-2, -1)[0];
+  const earned = (typeof userCoinsNum === 'number' && prev && typeof prev.balance === 'number')
+    ? Math.max(0, userCoinsNum - prev.balance)
+    : null;
+  const parts = [];
+  if (earned != null && earned > 0) parts.push(`+${fmt(earned)} coins`);
+  else if (collected) parts.push(`collected today's coins`);
+  else if (typeof userCoinsNum === 'number') parts.push(`already collected today`);
+  if (typeof userCoinsNum === 'number') parts.push(`balance ${fmt(userCoinsNum)}`);
+  if (typeof streakDays === 'number') parts.push(`${fmt(streakDays)}-day streak`);
+  if (parts.length) {
+    const tail = (typeof tomorrowCoins === 'number') ? ` (+${fmt(tomorrowCoins)} tomorrow)` : '';
+    await notify(`AliExpress: ${parts.join(', ')}${tail}`)
+      .catch(e => log.warn(`aliexpress notify failed: ${e.message.split('\n')[0]}`));
+  }
+}
 
 if (page.video()) console.log('Recorded video:', await page.video().path());
 await context.close();

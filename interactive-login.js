@@ -1811,6 +1811,7 @@ async function getState() {
     startupAutoCheck,
     lastRun,
     captchaPending,
+    runOnStartup: cfg.run_on_startup || 0,
     // Pending batch-redeem counts rolled into the main state response
     // (issue #17). Previously the panel polled /api/pending-gog-count
     // and /api/pending-steam-count separately on every cycle, tripling
@@ -2090,6 +2091,10 @@ const PANEL_HTML = `<!DOCTYPE html>
   .captcha-banner .cb-icon { font-size: 18px; flex-shrink: 0; }
   .captcha-banner .cb-text { flex: 1; font-weight: 500; line-height: 1.35; }
   .captcha-banner .cb-cta  { font-weight: 600; opacity: 0.9; white-space: nowrap; }
+  .headless-banner { background: #2a2418; border: 1px solid #e8a857; color: #e8a857; padding: 10px 14px; border-radius: 6px; margin: 6px 0; display: flex; align-items: center; gap: 12px; }
+  .headless-banner .hb-icon { font-size: 18px; flex-shrink: 0; }
+  .headless-banner .hb-text { flex: 1; font-weight: 500; line-height: 1.35; }
+  .headless-banner .hb-text small { display: block; font-weight: 400; opacity: 0.85; margin-top: 2px; }
   .header-top { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
   .header h1 { font-size: 18px; color: #e94560; white-space: nowrap; }
   .header-actions { display: flex; gap: 8px; margin-left: auto; flex-wrap: wrap; justify-content: flex-end; }
@@ -2580,6 +2585,7 @@ const PANEL_HTML = `<!DOCTYPE html>
     </div>
   </div>
   <div class="captcha-banner" id="captchaBanner" style="display:none" onclick="focusCaptcha()" title="Open the browser to solve the pending captcha"></div>
+  <div class="headless-banner" id="headlessBanner" style="display:none"></div>
   <div class="steps sessions-only" id="steps"></div>
   <div class="status-strip sessions-only" id="statusStrip" onclick="toggleSessionsCollapsed()" title="Click to collapse session details"></div>
   <div class="site-cards sessions-only" id="siteCards"></div>
@@ -3222,7 +3228,14 @@ function renderSchedulerSection() {
         '<span class="interval-summary" id="schedIntervalSummary">' + escapeHtml(pretty) + '</span>' +
       '</div>' +
       loopRevert +
-    '</div>';
+    '</div>' +
+    fieldRow('scheduler.runOnStartup', 'Run on startup',
+      { hint: 'Fire a claim run once when the panel finishes its boot session-check. "One-shot" terminates the container after the run completes — useful with Sablier scale-to-zero or cron-driven docker start/stop.',
+        options: [
+          { value: 0, label: 'Off' },
+          { value: 1, label: 'Run on startup' },
+          { value: 2, label: 'One-shot (run + exit)' },
+        ] });
 }
 
 function paintSettings() {
@@ -3438,6 +3451,33 @@ function discardSettings() {
 async function saveSettings() {
   const btn = document.getElementById('btnSaveSettings');
   if (!btn) return;
+  // One-shot gate: if this save would set scheduler.runOnStartup to 2,
+  // the panel terminates after the next claim run completes — the user
+  // would lose UI access until something restarts the container. The only
+  // recovery paths are external (env override, edit data/config.json, or
+  // change the dropdown back before the run finishes), so confirm
+  // explicitly and surface the NOTIFY warning if no apprise URL is set.
+  if (Number(settingsDirty['scheduler.runOnStartup']) === 2) {
+    const notifyVal = (settingsDirty['notifications.notify'] !== undefined
+      ? settingsDirty['notifications.notify']
+      : (settingsData && (settingsData.effective.notifications || {}).notify)) || '';
+    const notifyWarn = notifyVal.trim()
+      ? ''
+      : '\\n\\nNOTIFY is empty — no apprise URL is configured, so you will not be notified about claim results before the container exits. Set Notifications → Apprise URL(s) first if you want post-exit visibility.';
+    const msg = 'Confirm: switch to One-shot (run + exit)?\\n\\n' +
+      'After saving, the next container start will fire a claim run and then terminate the panel. The panel will be unreachable until something restarts the container (Sablier traffic, cron docker start, manual docker compose up, etc.).\\n\\n' +
+      'To revert, you must either:\\n' +
+      '  • Restart the container and change the setting via the panel before the claim run finishes (race), or\\n' +
+      '  • Edit data/config.json on disk and remove the scheduler.runOnStartup key, or\\n' +
+      '  • Set RUN_ON_STARTUP=0 in environment AND remove the data/config.json override (env alone is not enough — saved settings win).' +
+      notifyWarn +
+      '\\n\\nProceed?';
+    if (!confirm(msg)) {
+      // Abort save without resetting the dirty flag — user can revert
+      // the dropdown via the Discard button or the Revert link.
+      return;
+    }
+  }
   btn.disabled = true;
   btn.textContent = 'Saving…';
   try {
@@ -4223,6 +4263,28 @@ function render() {
         '<span class="cb-cta">Open browser →</span>';
     } else {
       captchaBanner.style.display = 'none';
+    }
+  }
+
+  // Headless one-shot banner — shows on every tab whenever RUN_ON_STARTUP=2
+  // is the effective config. The container will exit after the boot run
+  // completes, so the panel goes away — make sure the user sees this
+  // before navigating into something that depends on the panel staying up.
+  const headlessBanner = document.getElementById('headlessBanner');
+  if (headlessBanner) {
+    if (state.runOnStartup === 2) {
+      headlessBanner.style.display = 'flex';
+      const running = state.runStatus === 'running';
+      const headline = running
+        ? 'One-shot mode — claim run in progress, container will exit when it finishes'
+        : 'One-shot mode active (RUN_ON_STARTUP=2) — container will exit after the next claim run';
+      headlessBanner.innerHTML =
+        '<span class="hb-icon">⚠</span>' +
+        '<span class="hb-text">' + escapeHtml(headline) +
+          '<small>To revert: edit data/config.json and remove scheduler.runOnStartup, or change Settings → Schedule before the run completes. The panel will be unreachable until something restarts the container.</small>' +
+        '</span>';
+    } else {
+      headlessBanner.style.display = 'none';
     }
   }
 
@@ -5368,10 +5430,32 @@ server.listen(PANEL_PORT, async () => {
   if (cfg.notify && !cfg.public_url) {
     console.log(`[${datetime()}] ⚠  NOTIFY is set but PUBLIC_URL is not — notification tap-targets will point to http://localhost:${PANEL_PORT}${BASE_PATH} which won't work from a mobile device. Set PUBLIC_URL to the externally-reachable panel URL.`);
   }
+  // Headless one-shot / run-on-startup banner — printed before the
+  // auto-check so anyone tailing logs sees the mode immediately, with
+  // inline disable instructions (the UI is unreachable in mode 2 once
+  // the run completes, so the log is the user's escape hatch).
+  if (cfg.run_on_startup === 1 || cfg.run_on_startup === 2) {
+    const exits = cfg.run_on_startup === 2;
+    console.log(`[${datetime()}] ─── ${exits ? 'Headless one-shot mode (RUN_ON_STARTUP=2)' : 'Run-on-startup enabled (RUN_ON_STARTUP=1)'} ───`);
+    console.log(`[${datetime()}]   ${exits ? 'The container will exit after the startup claim run completes.' : 'A claim run will fire once after the startup auto-check.'}`);
+    console.log(`[${datetime()}]   To disable: set RUN_ON_STARTUP=0 in environment AND remove any`);
+    console.log(`[${datetime()}]   scheduler.runOnStartup override from data/config.json (either source`);
+    console.log(`[${datetime()}]   can independently force this mode — data/config.json wins when set).`);
+    if (exits && !cfg.notify) {
+      console.log(`[${datetime()}]   ⚠  NOTIFY is empty — no notifications will be sent before exit. You won't see what happened.`);
+    }
+    console.log(`[${datetime()}] ──────────────────────────────────────────────────`);
+  }
+
   console.log(`[${datetime()}] Open the control panel URL in your browser.`);
   console.log(`[${datetime()}] Auto-checking all sessions...`);
   const active = activeServices();
-  const siteIds = Object.keys(SITES).filter(id => active.has(id));
+  // Walk active sites in alphabetical name order — matches the Sessions
+  // grid card sort, so the boot-time progress indicator and the rendered
+  // tile order line up. Falls back to id when name is missing.
+  const siteIds = Object.keys(SITES)
+    .filter(id => active.has(id))
+    .sort((a, b) => (SITES[a].name || a).localeCompare(SITES[b].name || b, undefined, { sensitivity: 'base' }));
   startupAutoCheck = { current: 0, total: siteIds.length, siteName: '' };
   for (const siteId of siteIds) {
     startupAutoCheck.siteName = SITES[siteId].name;
@@ -5395,4 +5479,46 @@ server.listen(PANEL_PORT, async () => {
   });
   watchConfigForScheduler();
   watchLenovoStateForScheduler();
+
+  // Run-on-startup trigger. Fires after the auto-check.
+  //
+  // Mode 1 (panel keeps running): runs the manual chain (CLAIM_CMD_MANUAL
+  // — claimers + watchers, microsoft.js excluded). The MS scheduler stays
+  // active and will fire microsoft.js at its proper window or via the
+  // main-chain LOOP, so including MS in the startup run would just
+  // cause a same-day double-run.
+  //
+  // Mode 2 (one-shot — container exits after run): runs the full chain
+  // (CLAIM_CMD, source 'scheduler-startup' triggers manual=false) with
+  // MS_SKIP_WINDOW=1 so microsoft.js doesn't sleep until its window —
+  // this is MS's only chance to run before the container terminates.
+  //
+  // Both modes pass NOWAIT=1 so stale sessions fail fast (the boot path
+  // can't handle interactive login prompts).
+  //
+  // When mode is 2, wait for the run to settle, log the exit banner with
+  // disable hints (so anyone tailing logs sees the why), then exit.
+  if (cfg.run_on_startup === 1 || cfg.run_on_startup === 2) {
+    const opts = cfg.run_on_startup === 2
+      ? { source: 'scheduler-startup', extraEnv: { MS_SKIP_WINDOW: '1' } }
+      : { source: 'startup', extraEnv: { NOWAIT: '1' } };
+    const r = runAllScripts(opts);
+    if (!r || !r.success) {
+      console.log(`[${datetime()}] Run-on-startup: skipped — ${r ? r.error : 'no run handle'}`);
+      if (cfg.run_on_startup === 2) {
+        console.log(`[${datetime()}] Headless one-shot: nothing to run, exiting.`);
+        setTimeout(() => process.exit(0), 500);
+      }
+    } else if (cfg.run_on_startup === 2) {
+      try { await runDone; } catch { /* errors already logged by runner */ }
+      console.log(`[${datetime()}] ─── Headless one-shot complete — exiting ───`);
+      console.log(`[${datetime()}]   To disable for the next start: set RUN_ON_STARTUP=0 in env`);
+      console.log(`[${datetime()}]   AND remove any scheduler.runOnStartup override from`);
+      console.log(`[${datetime()}]   data/config.json (data/config.json wins when set).`);
+      console.log(`[${datetime()}] ──────────────────────────────────────────────`);
+      // Small delay lets any in-flight notify() child processes flush
+      // before we tear down the panel.
+      setTimeout(() => process.exit(0), 1500);
+    }
+  }
 });

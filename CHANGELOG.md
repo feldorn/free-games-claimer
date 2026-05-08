@@ -4,6 +4,26 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.4.1
+
+`RUN_ON_STARTUP` lets the panel fire a claim run immediately after the boot session-check and (optionally) exit afterwards. Built for setups that wake the container on demand — [Sablier](https://github.com/SablierApp/sablier) scale-to-zero, host cron driving `docker start`/`docker stop`, ad-hoc `docker run --rm` — where keeping the panel up 24×7 wastes resources. Requested in [#27](https://github.com/feldorn/free-games-claimer/issues/27).
+
+Three values:
+
+- `0` — Off (default). No behavior change for existing deploys.
+- `1` — Run on startup, panel keeps running. Pairs with Sablier-style traffic-based scaling.
+- `2` — One-shot (run + exit). Container terminates cleanly after the run completes; cron / `docker run --rm` path.
+
+Editable via env or **Settings → Schedule** as a dropdown. Picking `One-shot` in the UI shows a confirmation modal explaining the post-exit recovery paths (data/config.json wins over env, so env=0 alone won't revert a UI-saved one-shot) and warns when `NOTIFY` is empty. Boot logs print a headless-mode banner with inline disable instructions so anyone tailing logs sees the why and how-to-stop, and an exit banner repeats the same hints right before `process.exit(0)`. Notifications drain on a 1.5s settle before exit. Mode 1 fires the manual chain (`CLAIM_CMD_MANUAL` — claimers + watchers, microsoft.js excluded) so the still-running MS scheduler can handle MS at its proper window without double-running. Mode 2 fires the full chain (`CLAIM_CMD` including `microsoft.js`) with `MS_SKIP_WINDOW=1` so MS runs before the container exits. Both modes pass `NOWAIT=1` so stale sessions fail fast.
+
+**Richer end-of-run notifications for Microsoft Rewards and AliExpress.** Instead of `microsoft-rewards: completed desktop and mobile reward sessions.`, the MS notification now reads `Microsoft Rewards: +120 desktop, +90 mobile, balance 11,540 pts` — falls back gracefully when one or both sessions failed login, with a final fallback to a "no points data captured" line if neither session produced a balance read. AliExpress (which previously sent no notification at all) now emits `AliExpress: +20 coins, balance 480, 14-day streak (+30 tomorrow)` after each daily check-in run, matching the same shape; suppressed when the run produced no data so a notification with no numbers in it isn't sent.
+
+**One-shot UI banner.** When `RUN_ON_STARTUP=2` is the effective config the panel renders an amber banner on every tab — "One-shot mode active — container will exit after the next claim run" — with a sub-line explaining how to revert. Switches to "claim run in progress, container will exit when it finishes" while a startup run is running, so the user sees the impending exit clearly before navigating away or starting something that depends on the panel staying up.
+
+**README warning on restart-policy + mode 2.** The shipped compose template uses `restart: unless-stopped`, which would form an infinite restart loop with mode 2 (exit → docker restarts → run → exit → repeat). Documented in the new Run-on-startup subsection: set `restart: no` (or remove the line) for mode 2 and let the orchestrator own the lifecycle. Mode 1 is unaffected.
+
+---
+
 ## What's new in 2.4
 
 New collector: **Lenovo Gaming Key Drops** (watch-only, Phase 1 of a planned auto-claim build-out).

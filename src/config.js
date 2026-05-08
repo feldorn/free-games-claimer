@@ -53,6 +53,8 @@ export const cfg = {
   daily_start_time: sched.dailyStartTime ?? '',
   ms_schedule_hours: sched.msScheduleHours ?? 0,
   ms_schedule_start: sched.msScheduleStart ?? 8,
+  // 0 = off, 1 = run on startup, 2 = run on startup then exit (one-shot).
+  run_on_startup: sched.runOnStartup ?? 0,
   get dir() { // avoids ReferenceError: Cannot access 'dataDir' before initialization
     return {
       browser: process.env.BROWSER_DIR || dataDir('browser'), // for multiple accounts or testing

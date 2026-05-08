@@ -88,6 +88,11 @@ export const CONFIG_SCHEMA = [
     validate: v => v === '' || HHMM_RE.test(v) ? null : 'expected HH:MM (24h) or empty' },
   { path: 'scheduler.msScheduleHours', env: 'MS_SCHEDULE_HOURS', type: 'number',  default: 0, coerce: v => Number(v) || 0 },
   { path: 'scheduler.msScheduleStart', env: 'MS_SCHEDULE_START', type: 'number',  default: 8, coerce: v => Number(v) || 0 },
+  // 0 = off, 1 = run claim chain after startup auto-check (panel keeps
+  // running), 2 = run + exit (one-shot for Sablier / cron / `docker run --rm`).
+  { path: 'scheduler.runOnStartup',    env: 'RUN_ON_STARTUP',    type: 'number',  default: 0, coerce: v => {
+    const n = Number(v); return n === 1 || n === 2 ? n : 0;
+  }, validate: v => v === 0 || v === 1 || v === 2 ? null : 'expected 0, 1, or 2' },
   // notifications + panel URL
   { path: 'notifications.notify',            env: 'NOTIFY',                     type: 'string',  default: '' },
   { path: 'notifications.notifyTitle',       env: 'NOTIFY_TITLE',               type: 'string',  default: '' },
@@ -277,7 +282,8 @@ export const ENV_DISPLAY = [
   { env: 'DEBUG_NETWORK', category: 'debug', label: 'DEBUG_NETWORK' },
   { env: 'TIME',          category: 'debug', label: 'TIME' },
   { env: 'INTERACTIVE',   category: 'debug', label: 'INTERACTIVE' },
-  { env: 'NOWAIT',        category: 'debug', label: 'NOWAIT' },
+  { env: 'NOWAIT',        category: 'debug', label: 'NOWAIT',
+    note: 'Env-only by design. Set automatically per-run path: 1 for scheduled runs, startup runs, and per-drop wakes (fail fast on stale sessions, notify, continue chain); unset for the Run-Now button and per-card Run (user is at the panel, interactive prompts work). Surface this in Settings would be a footgun — the wrong value silently breaks the other path.' },
   { env: 'SHOW',          category: 'debug', label: 'SHOW' },
 ];
 

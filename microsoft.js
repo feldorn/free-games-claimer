@@ -748,6 +748,13 @@ async function recordMsRun(session, startedAt, before, after) {
   catch (e) { log.warn(`ms stats write failed: ${e.message}`); }
 }
 
+// Per-session before/after captured at outer scope so the end-of-run
+// notify can stitch a rich summary (`+X desktop, +Y mobile, balance Z`).
+// nulls survive cleanly: a session that failed login leaves both before
+// and after as null and gets dropped from the message.
+let desktopBefore = null, desktopAfter = null;
+let mobileBefore = null, mobileAfter = null;
+
 // Desktop session
 log.section('Desktop');
 {
@@ -784,6 +791,8 @@ log.section('Desktop');
     await context.close();
     activeContext = null;
   }
+  desktopBefore = before;
+  desktopAfter = after;
   await recordMsRun('desktop', startedAt, before, after);
 }
 
@@ -828,10 +837,35 @@ log.section('Mobile');
     await context.close();
     activeContext = null;
   }
+  mobileBefore = before;
+  mobileAfter = after;
   await recordMsRun('mobile', startedAt, before, after);
 }
 
-await notify('microsoft-rewards: completed desktop and mobile reward sessions.');
+// Build a rich end-of-run summary from the captured before/after pairs.
+// Falls back to the legacy generic line when neither session produced
+// any balance reads (login failures, page never loaded, etc.) so we still
+// confirm the run finished — just without earnings data.
+{
+  const fmt = n => Number(n).toLocaleString('en-US');
+  const desktopEarned = (desktopBefore != null && desktopAfter != null) ? Math.max(0, desktopAfter - desktopBefore) : null;
+  const mobileEarned  = (mobileBefore  != null && mobileAfter  != null) ? Math.max(0, mobileAfter  - mobileBefore ) : null;
+  const balance = mobileAfter != null ? mobileAfter
+    : desktopAfter != null ? desktopAfter
+    : null;
+  const parts = [];
+  if (desktopEarned != null) parts.push(`+${fmt(desktopEarned)} desktop`);
+  if (mobileEarned  != null) parts.push(`+${fmt(mobileEarned)} mobile`);
+  let summary;
+  if (parts.length && balance != null) {
+    summary = `Microsoft Rewards: ${parts.join(', ')}, balance ${fmt(balance)} pts`;
+  } else if (parts.length) {
+    summary = `Microsoft Rewards: ${parts.join(', ')}`;
+  } else {
+    summary = 'microsoft-rewards: completed desktop and mobile sessions (no points data captured).';
+  }
+  await notify(summary);
+}
 
 // Redeem reminder: re-fires every run while balance is over threshold so
 // the user catches the morning restock window (limited daily stock for
