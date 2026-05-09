@@ -141,6 +141,16 @@ try {
         log.fail(`Login error — ${await error.innerText()}`);
         log.info('Please login in the browser');
       }).catch(_ => { });
+      // Handle the "Is this the right account?" confirmation that Epic
+      // shows on new-device / new-IP / new-fingerprint logins. Without
+      // this auto-click the flow stalls waiting for URL_CLAIM that never
+      // arrives, because the prompt is blocking the redirect. Ported from
+      // P-Adamiec/free-games-claimer (commit e421633). Fire-and-forget so
+      // a never-shown prompt doesn't hold up the rest of the login race.
+      page.waitForSelector('button#yes, button[aria-label="Yes, continue"]', { timeout: 30000 }).then(async (btn) => {
+        log.info('Got "Is this the right account?" prompt — clicking Yes, continue');
+        await btn.click({ delay: 111 });
+      }).catch(_ => { });
       // handle MFA, but don't await it
       page.waitForURL('**/id/login/mfa**').then(async () => {
         log.info('Enter the security code — new device/browser/location detected');
