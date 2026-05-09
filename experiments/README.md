@@ -25,7 +25,10 @@ docker logs fgc-camoufox-poc | tail -10  # confirm "browser pre-warmed"
 
 The compose overlay publishes:
 - **9377/tcp** — REST API (host) / hostname `camoufox` (FGC container's network)
-- **5901/tcp** — VNC (only useful with `ENABLE_VNC=1`, which the overlay sets)
+- **5901/tcp** — raw VNC (host 5901 → container 5900). Connect with any VNC viewer (TigerVNC, RealVNC).
+- **6081/tcp** — noVNC in-browser client (host 6081 → container 6080). Open `http://localhost:6081/vnc.html` to drive Camoufox in your browser. **Requires `VNC_BIND=0.0.0.0` in the sidecar's env**, which the overlay already sets — the image's noVNC binds to `127.0.0.1` inside the container by default, which makes a published port a no-op without that override.
+
+(Raw VNC at 5900 already binds to all interfaces inside the container; only noVNC needs the bind override. If you tried `localhost:5901` with a browser and got "can't connect," that's why — use a VNC client for 5901, or the noVNC URL above for browser-based.)
 
 Quick sanity check from the host:
 

@@ -28,17 +28,30 @@ services:
       # Camoufox REST API. Hostname `camoufox` from the FGC container's
       # network; localhost:9377 from the host.
       - "9377:9377"
-      # VNC for Tier 0 manual testing — connect with any VNC viewer at
-      # localhost:5901. Mapped to the container's 5900 because we set
-      # ENABLE_VNC=1 below; the noVNC websockify is also available
-      # internally on 6080 but we don't expose it (use the panel's main
-      # noVNC at the regular host:6080 instead, on a different VNC
-      # session).
+      # Raw VNC at port 5900 (mapped to host 5901 to avoid collision
+      # with the FGC service's own VNC). Connect with any VNC viewer
+      # at localhost:5901 — TigerVNC, RealVNC, etc. The image's x11vnc
+      # already binds to all interfaces.
       - "5901:5900"
+      # noVNC web client (in-browser VNC). Mapped to host 6081 to avoid
+      # collision with FGC's own noVNC on 6080. Requires VNC_BIND=0.0.0.0
+      # below — by default the image binds noVNC to 127.0.0.1 inside the
+      # container, which makes the published port a no-op. Open
+      # http://localhost:6081/vnc.html in a browser.
+      - "6081:6080"
     environment:
       # Turn on the in-image VNC plugin so Tier 0 manual testing works.
       # Without this the API still works fine but you can't watch.
       - ENABLE_VNC=1
+      # Make noVNC websockify reachable from outside the container.
+      # Without this, the bind defaults to 127.0.0.1 and the host port
+      # mapping won't help. (Raw VNC at 5900 is already 0.0.0.0 by
+      # default; this only affects the in-browser noVNC.)
+      - VNC_BIND=0.0.0.0
+      # Optional: set a VNC password. Without it x11vnc accepts any
+      # connection. Fine on a single-box PoC; uncomment if your
+      # localhost:5901/6081 might be reachable beyond your machine.
+      # - VNC_PASSWORD=changeme
       # Bearer auth for sensitive endpoints (cookie import, traces).
       # Without this set, those endpoints reject non-loopback requests
       # with 403 — and the runner runs from inside the FGC container, so
