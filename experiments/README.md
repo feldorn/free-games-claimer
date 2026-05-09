@@ -74,20 +74,57 @@ Run each scenario at least 5 times across two different calendar days to charact
 
 #### Running from inside the FGC container vs from the host
 
-The runner defaults to `CAMOFOX_URL=http://camoufox:9377` (the sidecar's hostname on the FGC compose network). Run it from inside the FGC container:
+The runner defaults to `CAMOFOX_URL=http://camoufox:9377` (the sidecar's hostname on the FGC compose network) and reads `CAMOFOX_API_KEY=poc-trace-token` (matching the value the compose overlay sets on the sidecar — required for trace-download endpoints, since FGC → camoufox is a non-loopback request).
+
+Run it from inside the FGC container:
 
 ```sh
 docker compose -f docker-compose.yml -f docker-compose.experiments.yml exec free-games-claimer \
+  env CAMOFOX_API_KEY=poc-trace-token \
   node experiments/camoufox-aliexpress.js
 ```
 
 Or from the host, override the URL:
 
 ```sh
-CAMOFOX_URL=http://localhost:9377 SCENARIO=C-cold-no-cookies node experiments/camoufox-aliexpress.js
+CAMOFOX_URL=http://localhost:9377 \
+CAMOFOX_API_KEY=poc-trace-token \
+SCENARIO=C-cold-no-cookies \
+node experiments/camoufox-aliexpress.js
 ```
 
 (Running from the host requires Node 20+ for native `fetch`. From the FGC container, the runtime ships with what the image carries.)
+
+#### What each run captures
+
+Per-run artifact directory: `data/camoufox-poc/<scenario>/run-<N>-<timestamp>/`
+
+| File | Content |
+|---|---|
+| `manifest.json` | Outcome classification + timing + paths to everything else. Read this first. |
+| `pre-fingerprint.json` | Full JS-evaluated fingerprint at `about:blank` *before* any site sees us — UA, WebGL (vendor / renderer / unmasked / extensions), audio context (sampleRate, latency, channel count), screen, hardwareConcurrency, deviceMemory, timezone, navigator props, plugins, mimeTypes, `userAgentData`, performance metrics. This is the ground truth of what Camoufox claims to be. |
+| `post-state.json` | Same probe re-run *after* navigate + settle. Captures any cookies AliExpress set, localStorage size, iframes that appeared (AWSC iframes show up here), body text snippet, performance.navigation timing (redirect count, TTFB, load times). |
+| `screenshot-1.png` | Fullpage screenshot at +5s after navigate. |
+| `screenshot-2.png` | Fullpage screenshot at +10s after navigate (often identical to #1 for unauthenticated loads, but useful when AWSC takes longer to render). |
+| `snapshot.json` | Accessibility tree of the page — structured text content, useful for grepping for AWSC challenge strings. |
+| `navigate.json` | API response from the navigate call. |
+| `traces.json` | Index of Playwright traces produced. May be empty for short non-interactive runs. |
+| `traces/<file>.zip` | Playwright trace exports if any. Open with `playwright show-trace <file>.zip` for a full DevTools-like replay (network, screenshots, DOM at each step). |
+| `camoufox-logs.txt` | Sidecar container stdout during the run window. Falls back to manual-capture instructions if `docker` CLI isn't reachable. |
+
+#### Running the same scenario across multiple runs
+
+Each invocation handles N runs; user/session IDs include the scenario + run number for trace filtering:
+
+```sh
+# Inside FGC container, with auth key for traces
+SCENARIO=C-cold-no-cookies RUNS=5 \
+CAMOFOX_API_KEY=poc-trace-token \
+docker compose -f docker-compose.yml -f docker-compose.experiments.yml exec free-games-claimer \
+  node experiments/camoufox-aliexpress.js
+```
+
+Variance characterization: 5 runs per scenario across 2 calendar days = 10 data points per cell. Each run takes ~20s (most of which is `SETTLE_MS_2`, configurable via env).
 
 ## The five test scenarios
 

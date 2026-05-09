@@ -39,10 +39,16 @@ services:
       # Turn on the in-image VNC plugin so Tier 0 manual testing works.
       # Without this the API still works fine but you can't watch.
       - ENABLE_VNC=1
-      # Optional: bearer auth for sensitive endpoints. Leave unset for
-      # the PoC — we're testing locally on a single trusted box.
-      # - CAMOFOX_API_KEY=poc-secret
-      # - CAMOFOX_ACCESS_KEY=poc-superkey
+      # Bearer auth for sensitive endpoints (cookie import, traces).
+      # Without this set, those endpoints reject non-loopback requests
+      # with 403 — and the runner runs from inside the FGC container, so
+      # FGC → camoufox is non-loopback. Setting a token (any string)
+      # opens those endpoints to anyone on the same compose network who
+      # can present this header. The runner picks up CAMOFOX_API_KEY
+      # from its own env and sends it as Authorization: Bearer <token>.
+      # This is fine for a self-hosted PoC on a single box; rotate or
+      # remove if you ever expose this beyond loopback.
+      - CAMOFOX_API_KEY=poc-trace-token
     # No volumes — each PoC run starts with a fresh Camoufox profile so
     # we're not measuring "this profile got flagged by AWSC last week".
 

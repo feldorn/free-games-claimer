@@ -38,6 +38,39 @@ Validates that the basics work before account-specific testing begins.
 - **The runner script and compose overlay are now wired correctly for the actual API surface.** The user-side tests don't need to debug image-shape questions; they can focus on the AWSC behavior at credentials submit and post-login.
 - **VNC works** when `ENABLE_VNC=1` is set (which the overlay does). The VNC viewer is the right place to do Tier 0 visual A/B testing.
 
+### Camoufox engine-level fingerprint findings (from smoke test pre-fingerprint capture)
+
+These are evidence that Camoufox is doing what it claims at the engine level, captured before any AliExpress account is involved:
+
+| Signal | Camoufox value (smoke) | What patchright would show in our container |
+|---|---|---|
+| User-Agent | `Mozilla/5.0 (X11; Linux x86_64; rv:135.0) Gecko/20100101 Firefox/135.0` (rotates: also seen `X11; Ubuntu; Linux x86_64`) | Patchright Chromium on Linux, deterministic per profile |
+| WebGL vendor / renderer | `Mozilla` / `Intel(R) HD Graphics 400, or similar` | `Mesa` / `llvmpipe (LLVM …, 256 bits)` — software-rendered, dead giveaway |
+| Unmasked WebGL renderer | `Intel(R) HD Graphics 400, or similar` | Same llvmpipe value — patchright can't lie at this layer |
+| hardwareConcurrency | `8` (spoofed) | Real container CPU count |
+| screen | `2560×1440`, dpr=1 | Container `WIDTH × HEIGHT` env, typically 1920×1080 |
+| timezone | `America/Los_Angeles` (rotates) | Container TZ |
+| navigator.webdriver | `false` | `false` (patchright also fixes this) |
+
+**Implication**: at least the WebGL signal — the most aggressively-checked fingerprint surface in AWSC's category — is genuinely spoofed at the engine layer. The audio context probe in the fingerprint capture will be the next signal to look at once a Tier 1 run lands; that's the one I claimed in the README would be hardest to fix without real hardware.
+
+**This doesn't yet prove Camoufox defeats AWSC** — it proves Camoufox is presenting different signals than patchright would. Whether AWSC scores those different signals as "trusted" or "still synthetic" is what the account-specific testing answers.
+
+### Per-run instrumentation captured (verified working)
+
+Each Tier 1 run produces a directory under `data/camoufox-poc/<scenario>/run-<N>-<timestamp>/` containing:
+
+- `manifest.json` — outcome classification, timing, paths to all artifacts
+- `pre-fingerprint.json` — full JS-evaluated fingerprint at `about:blank` (UA, WebGL, audio context, screen, timezone, navigator props, plugins, mimeTypes, deviceMemory, performance.timing) — what Camoufox **claims to be** before any site sees it
+- `post-state.json` — same probe re-run after navigate + settle, capturing post-load cookies, localStorage, iframes (any AWSC iframes will appear here), bodyText snippet, performance.navigation timing
+- `screenshot-1.png` — fullpage at +5s after navigate (initial render)
+- `screenshot-2.png` — fullpage at +10s after navigate (post-AWSC settle, useful when slider takes longer to render)
+- `snapshot.json` — accessibility tree (text content of the page, structured)
+- `navigate.json` — API response from the navigate call
+- `traces.json` — index of any Playwright traces produced (best-effort; jo-inc may not flush traces for short non-interactive runs)
+- `traces/<filename>.zip` — Playwright trace files if produced (open with `playwright show-trace`)
+- `camoufox-logs.txt` — sidecar container stdout during the run (best-effort; falls back to instructions if `docker` CLI isn't reachable from where the runner ran)
+
 ### Account-specific Tier 0 — pending user
 
 _Fill in after running the steps in `experiments/README.md` Tier 0 against an actual AliExpress account. Branch maintainer doesn't have one._
