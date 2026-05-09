@@ -10,6 +10,8 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 **AliExpress reframed as deprecated channel, not as a bot-detection bug.** Subtitle on the AliExpress service entry now reads "Deprecated by AliExpress — web coin collection is being phased out in favor of the mobile app. Works for some accounts on a degradation curve." Service tables in the README append `**deprecated**` with a link to the Bot detection section. The script and toggle remain in place — some accounts still work — but the framing makes clear this is a sunset path, not a bug we're hunting. Background on upstream reality: [vogler/free-games-claimer#391](https://github.com/vogler/free-games-claimer/issues/391) (closed) confirms AliExpress moved coin collection to mobile-only as of December 2024.
 
+**Camoufox PoC scaffolding (experiment branch only).** New `experiments/` directory with a Tier 1 scripted runner (`camoufox-aliexpress.js`), methodology doc, `docker-compose.experiments.yml` overlay adding a `jo-inc/camofox-browser` sidecar, and a `docs/camoufox-poc-results.md` template for the public record of what we tried. Goal: empirically test whether [Camoufox](https://github.com/daijro/camoufox)'s engine-level fingerprint spoofing (vs patchright's JS-shim approach) measurably improves AWSC outcomes from a containerized self-hosted setup. Five scenarios across two engines × cookie state × fingerprint rotation; decision gates at the bottom of the results doc. Nothing in `experiments/` runs unless explicitly invoked. **This work is on the branch only and will only land on `main` if the PoC produces meaningful improvement** — see `experiments/README.md` for the decision flow.
+
 ---
 
 ## What's new in 2.4.2

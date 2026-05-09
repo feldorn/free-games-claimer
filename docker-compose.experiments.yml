@@ -1,0 +1,48 @@
+# docker-compose.experiments.yml
+#
+# Experiment-only overlay. NOT loaded by default. Brings up a Camoufox
+# sidecar for the PoC documented in experiments/README.md. Lives on the
+# experiment/camoufox-poc branch only.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.experiments.yml up camoufox
+#
+# Or to bring up FGC + Camoufox sidecar together:
+#   docker compose -f docker-compose.yml -f docker-compose.experiments.yml up -d
+#
+# To verify the Camoufox image is reachable from the FGC container's network:
+#   docker compose -f docker-compose.yml -f docker-compose.experiments.yml exec free-games-claimer wget -qO- http://camoufox:9222/json/version
+#
+# Image choice — jo-inc/camofox-browser per the PoC plan. Note: the
+# image's REST API may not be a Playwright-compatible CDP/BiDi endpoint;
+# part of Tier 0 testing is verifying what scheme actually works.
+# If Playwright can't connect, fall back to the manual VNC test in
+# experiments/README.md "Tier 0".
+
+services:
+  camoufox:
+    image: ghcr.io/jo-inc/camofox-browser:latest
+    container_name: fgc-camoufox-poc
+    restart: "no"  # PoC service — never auto-restart
+    ports:
+      # Camoufox REST API (image's documented entry point)
+      - "8080:8080"
+      # VNC for Tier 0 manual testing — connect with any VNC viewer at
+      # localhost:5901 to drive the browser by hand. The fork's main
+      # noVNC is on 5900/6080; using a different host port avoids
+      # collision when both are running.
+      - "5901:5900"
+    environment:
+      # If the image supports configuring the bind ports / VNC password
+      # via env, set them here. Adjust based on what jo-inc/camofox-browser
+      # actually documents (PoC: discover and update on first run).
+      - DISPLAY=:99
+    # No volumes — we don't want PoC state to leak into the main FGC
+    # data dir. Each run starts with a fresh Camoufox profile.
+    networks:
+      - default
+
+  # Connect the FGC container to the same network so the PoC runner
+  # script (experiments/camoufox-aliexpress.js) can reach the sidecar
+  # at hostname `camoufox`. The shipped docker-compose.yml already uses
+  # the default network; no explicit networks block needed there.
