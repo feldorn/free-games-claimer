@@ -24,7 +24,7 @@ Services are grouped by what they actually do.
 | Service | Notes |
 |---|---|
 | 🎯 [Microsoft Rewards](https://rewards.bing.com) | Daily Bing searches + activity cards for points, with before/after balance tracking |
-| 🛒 [AliExpress](https://m.aliexpress.com) | Daily check-in coins *(opt-in; disabled by default)* |
+| 🛒 [AliExpress](https://m.aliexpress.com) | Daily check-in coins *(opt-in; disabled by default; **deprecated** — see [Bot detection](#bot-detection--what-works-what-doesnt))* |
 
 **Watchers** — notify-only; surface new free items so you can grab them yourself:
 
@@ -55,7 +55,7 @@ Uses [patchright](https://github.com/nicbarker/patchright) (Chromium with built-
 
 - [Quick Start (Docker)](#quick-start-docker) · [Docker Compose](#docker-compose) · [Without Docker](#without-docker)
 - [Configuration](#configuration) · [Notifications](#notifications) · [Scheduling](#scheduling)
-- [Captcha pause](#captcha-pause) · [Automatic Login / 2FA](#automatic-login--two-factor-authentication) · [Cookie upload](#cookie-upload)
+- [Captcha pause](#captcha-pause) · [Automatic Login / 2FA](#automatic-login--two-factor-authentication) · [Cookie upload](#cookie-upload) · [Bot detection](#bot-detection--what-works-what-doesnt)
 - [Control Panel](#control-panel) · [Settings (in-app)](#settings-in-app-configuration)
 - [Running as non-root](#running-as-a-non-root-user) · [Reverse-Proxy Setup](#reverse-proxy-setup)
 - [Data Storage](#data-storage) · [HTTP API](#http-api) · [Troubleshooting](#troubleshooting)
@@ -212,7 +212,7 @@ Each store can use the default `EMAIL`/`PASSWORD` or be overridden individually:
 | GOG | `GOG_EMAIL` | `GOG_PASSWORD` | | `GOG_NEWSLETTER=1` |
 | Steam | `STEAM_EMAIL` | `STEAM_PASSWORD` | | `STEAM_MIN_RATING`, `STEAM_MIN_PRICE` |
 | Microsoft Rewards | `MS_EMAIL` | `MS_PASSWORD` | `MS_OTPKEY` | `MS_SCHEDULE_HOURS` |
-| AliExpress | `AE_EMAIL` | `AE_PASSWORD` | | `AE_ENABLED=1` (opt-in; disabled by default) |
+| AliExpress | `AE_EMAIL` | `AE_PASSWORD` | | `AE_ENABLED=1` (opt-in; disabled by default; **deprecated** — web channel being phased out by AliExpress, see [Bot detection](#bot-detection--what-works-what-doesnt)) |
 | Ubisoft Connect | — | — | — | `UBISOFT_ACTIVE=1` (opt-in; disabled by default). Watch-only — no login, no auto-claim. |
 | Humble Bundle | — | — | — | `HUMBLE_ACTIVE=1` (opt-in). Watch-only. |
 | Fanatical | — | — | — | `FANATICAL_ACTIVE=1` (opt-in). Watch-only. |
@@ -371,6 +371,55 @@ The panel applies the cookies to the site's persistent profile via Playwright's 
 - **Cookie button** — fallback when in-container login fails for fingerprint or device-trust reasons. Currently the only practical path for AliExpress on accounts that escalate past the slider.
 
 Cookie upload uses the same browser-busy mutex as Login / Check / Run, so it can't race a concurrent claim. Malformed JSON is rejected before it touches the profile dir.
+
+---
+
+## Bot detection — what works, what doesn't
+
+Some stores actively try to detect that they're being scraped. We ship fixes when we can; some failure modes are architecturally outside what a containerized self-hosted tool can solve. Setting expectations honestly here so reports don't repeat indefinitely.
+
+### Three categories
+
+**A. UI workflow drift** — sites rename selectors, add modals, change the order of redirects. Hits all stores eventually. Our fork-style response is to ship a fix when we see the breakage. Recent examples: Epic's "Is this the right account?" prompt (added 2.4.2), GOG's `menuUsername` → `menuAccountButton` rename, AliExpress's coin balance API switching response shapes. **Cost: routine maintenance. We keep up with this.**
+
+**B. Browser fingerprint detection** — sites with real anti-automation budgets (AliExpress AWSC, parts of Epic, Cloudflare-fronted endpoints) score the browser on signals that come from physical hardware and OS state. A containerized Chromium loses most of these signals regardless of what shim we add:
+
+| Signal | Real desktop Chrome | Our containerized Chromium |
+|---|---|---|
+| WebGL renderer/vendor | Real GPU strings | Software-rendered (Mesa llvmpipe) |
+| Audio context fingerprint | Hardware-specific drift | No audio device → uniform across all containerized installs |
+| Font enumeration | ~200 system fonts | ~30 minimal Docker fonts |
+| TLS handshake (JA3) | Chrome's actual TLS stack | Patchright Chromium's, slightly off |
+| Browsing history / 3rd-party cookies / Topics | 100s of sites visited weekly | Only ever visits the target store |
+
+We've shipped what the JS layer can shim — viewport unification, persistent fingerprint (2.3.1), captcha awareness/notification (2.0.2), patchright over vanilla playwright. The remaining ceiling is the *hardware* signal layer, which requires either real desktop Chrome attached via CDP (out of scope for users who self-host on a NUC) or a paid browser-as-a-service (out of scope for a free self-hosted tool). **We will not chase this layer further on patchright.**
+
+**C. Account-level risk scoring** — once an account has triggered detection N times, the *account* accumulates a risk score regardless of what client connects. AWSC has been observed to flag accounts for weeks after repeated automation attempts. Decays naturally; nothing we ship fixes it. **Recovery = wait it out.**
+
+### Per-store reality
+
+| Store | Status | What you should expect |
+|---|---|---|
+| **Prime Gaming** | Reliable | Login persists. Occasional UI drift, ~1 fix/quarter. |
+| **Epic Games** | Reliable | hCaptcha occasionally requires noVNC solve. New-device "Is this the right account?" prompt handled in 2.4.2. |
+| **GOG** | Reliable | Soft captcha occasionally. |
+| **Steam** | Reliable | Free-to-keep flow has no fingerprint scoring. |
+| **Microsoft Rewards** | Reliable | Humanlike search timing required (built-in); runs take 30–45 min by design. |
+| **AliExpress** | **Deprecated channel — declining reliability** | Web coin collection is being phased out by AliExpress in favor of the mobile app (upstream confirms since Dec 2024). Works for some accounts, gates others with the AWSC slider, escalates long-running accounts to the "Network and device" prompt. **Manual cookie refresh every few weeks** is the realistic posture. We do not recommend depending on it. |
+| **Watchers** (Lenovo, Humble, Fanatical, Ubisoft) | Reliable | No login, no scoring, no detection issues. |
+
+### What we won't build, and why
+
+- **Sidecar headless Chromium / Chromium-as-a-service via CDP**: marginal improvement (different Chromium build) at the cost of a long-term sidecar dependency. Doesn't conjure real hardware out of a container.
+- **Cloud browser-as-a-service** (Browserless, Browserbase, Bright Data): real money (~$10–50/month) for one store worth ~$0.05/day in coins. Unit economics don't work for free-game claiming.
+- **Android emulator path for AliExpress**: feasible (`amrka/android-emulator` + Appium), but a separate codebase, separate flows, separate fingerprint surface, and the AliExpress app has its own anti-tampering. 2–3 weekends of work for trivial ongoing value. Not happening.
+- **Whole-project migration to a Firefox-based engine** (e.g. [Camoufox](https://github.com/daijro/camoufox), which spoofs at the C++ engine layer rather than via JS shim): genuinely changes the calculus on Category B for fingerprint-pressured stores. Tracked as a [PoC experiment](https://github.com/feldorn/free-games-claimer/tree/experiment/camoufox-poc) on a separate branch — does not land here unless results justify it.
+
+### What you can do as a user
+
+- **For AliExpress**: treat it as best-effort. Expect periodic manual cookie refresh via the **Cookie button** on the Sessions card. If it stops working entirely on your account, accept it — that's the channel deprecation tail catching up.
+- **For other stores**: file an issue if a flow breaks. Category A drift is what we exist to chase.
+- **For everything**: keep `NOTIFY` set so failures surface immediately — silent failures are how you discover a store has rolled out new detection three weeks late.
 
 ---
 
