@@ -466,6 +466,23 @@ scheduled cadence.
     override** if the value got there via the Settings tab. Env alone is
     not enough when `data/config.json` has a saved value.
 
+**Cron example (mode 2 + env override).** Pattern courtesy of @reverendj1
+in [#27](https://github.com/feldorn/free-games-claimer/issues/27): keep
+the long-running compose service on `RUN_ON_STARTUP=1` (or unset) for
+the panel-up case, then drop into a fresh one-shot via
+`docker compose run` whenever a cronjob fires:
+
+```bash
+# Daily at 01:25 — fire a one-shot claim run, then exit + remove the
+# transient container. Keeps the panel-up service untouched.
+25 1 * * * cd /path/to/freegamesclaimer && docker compose run --remove-orphans --rm -e RUN_ON_STARTUP=2 free-games-claimer
+```
+
+`docker compose run` ignores the service's `restart` policy by default,
+so this avoids the loop trap even if your main service is on
+`restart: unless-stopped`. The `-e` flag injects the env var only into
+the cron-spawned container, leaving the panel-up service unchanged.
+
 **How often to run?**
 - **Epic Games**: New free games weekly (daily before Christmas)
 - **Prime Gaming**: New games monthly (more during Prime days)

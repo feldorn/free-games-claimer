@@ -2653,7 +2653,7 @@ const PANEL_HTML = `<!DOCTYPE html>
     <div class="env-view-head">
       <div>
         <h3 class="env-view-title">Environment</h3>
-        <div class="env-view-sub">Read-only view of every environment variable the app reads. Use <b>Settings → Services</b> to change runtime behaviour. <b>Reveal credentials</b> shows each secret as <code>••••••XXXX</code> — last 4 chars only — so don't tap it on a shared screen.</div>
+        <div class="env-view-sub">Read-only view of env-only variables (panel infrastructure, credentials, debug flags) the app reads. Variables that are also editable at runtime — <code>LOOP</code>, <code>START_TIME</code>, <code>NOTIFY</code>, <code>RUN_ON_STARTUP</code>, the per-service flags, etc. — live on the <b>Settings</b> tab with their env-var name shown beside the field. <b>Reveal credentials</b> shows each secret as <code>••••••XXXX</code> — last 4 chars only — so don't tap it on a shared screen.</div>
       </div>
       <button class="btn btn-check-all" id="btnRevealCreds" onclick="toggleRevealEnv()">Reveal credentials</button>
     </div>
