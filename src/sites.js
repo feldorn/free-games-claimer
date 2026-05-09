@@ -325,7 +325,7 @@ export const SITES = [
     id: 'aliexpress',
     name: 'AliExpress',
     version: '2.3',
-    subtitle: null,
+    subtitle: 'Deprecated by AliExpress — web coin collection is being phased out in favor of the mobile app. Works for some accounts on a degradation curve. See README → Bot detection.',
     script: 'aliexpress.js',
     claimOrder: 5,
     // AliExpress's coin collector only works on the mobile site; desktop just
