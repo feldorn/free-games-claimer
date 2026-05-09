@@ -10,14 +10,14 @@
 # Or to bring up FGC + Camoufox sidecar together:
 #   docker compose -f docker-compose.yml -f docker-compose.experiments.yml up -d
 #
-# To verify the Camoufox image is reachable from the FGC container's network:
-#   docker compose -f docker-compose.yml -f docker-compose.experiments.yml exec free-games-claimer wget -qO- http://camoufox:9222/json/version
-#
-# Image choice — jo-inc/camofox-browser per the PoC plan. Note: the
-# image's REST API may not be a Playwright-compatible CDP/BiDi endpoint;
-# part of Tier 0 testing is verifying what scheme actually works.
-# If Playwright can't connect, fall back to the manual VNC test in
-# experiments/README.md "Tier 0".
+# Verified Tier 0 baseline (2026-05-09 from the experiment branch):
+# - Image pulls cleanly (~600MB).
+# - Image is jo-inc/camofox-browser v1.9.0 — a REST API server (NOT a
+#   Playwright-compatible CDP/BiDi endpoint). Spec at
+#   http://localhost:9377/api when running.
+# - Cold navigation to https://m.aliexpress.com/p/coin-index/index.html
+#   redirects to the login page with no AWSC challenge on first hit.
+# - VNC ships disabled by default; flip ENABLE_VNC=1 to turn on.
 
 services:
   camoufox:
@@ -25,24 +25,32 @@ services:
     container_name: fgc-camoufox-poc
     restart: "no"  # PoC service — never auto-restart
     ports:
-      # Camoufox REST API (image's documented entry point)
-      - "8080:8080"
+      # Camoufox REST API. Hostname `camoufox` from the FGC container's
+      # network; localhost:9377 from the host.
+      - "9377:9377"
       # VNC for Tier 0 manual testing — connect with any VNC viewer at
-      # localhost:5901 to drive the browser by hand. The fork's main
-      # noVNC is on 5900/6080; using a different host port avoids
-      # collision when both are running.
+      # localhost:5901. Mapped to the container's 5900 because we set
+      # ENABLE_VNC=1 below; the noVNC websockify is also available
+      # internally on 6080 but we don't expose it (use the panel's main
+      # noVNC at the regular host:6080 instead, on a different VNC
+      # session).
       - "5901:5900"
     environment:
-      # If the image supports configuring the bind ports / VNC password
-      # via env, set them here. Adjust based on what jo-inc/camofox-browser
-      # actually documents (PoC: discover and update on first run).
-      - DISPLAY=:99
-    # No volumes — we don't want PoC state to leak into the main FGC
-    # data dir. Each run starts with a fresh Camoufox profile.
-    networks:
-      - default
+      # Turn on the in-image VNC plugin so Tier 0 manual testing works.
+      # Without this the API still works fine but you can't watch.
+      - ENABLE_VNC=1
+      # Optional: bearer auth for sensitive endpoints. Leave unset for
+      # the PoC — we're testing locally on a single trusted box.
+      # - CAMOFOX_API_KEY=poc-secret
+      # - CAMOFOX_ACCESS_KEY=poc-superkey
+    # No volumes — each PoC run starts with a fresh Camoufox profile so
+    # we're not measuring "this profile got flagged by AWSC last week".
 
-  # Connect the FGC container to the same network so the PoC runner
-  # script (experiments/camoufox-aliexpress.js) can reach the sidecar
-  # at hostname `camoufox`. The shipped docker-compose.yml already uses
-  # the default network; no explicit networks block needed there.
+# Note on networking: the shipped docker-compose.yml defines no explicit
+# networks block, so both services default to `free-games-claimer_default`
+# (or the equivalent in your personal compose). That's what allows the
+# Tier 1 runner inside the FGC container to reach the sidecar at
+# `http://camoufox:9377`. If you've customized the FGC service into a
+# different network in your personal compose, add `networks: [...]` to
+# this `camoufox:` block to match — otherwise the runner won't resolve
+# the hostname.

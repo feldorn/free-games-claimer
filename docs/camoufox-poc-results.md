@@ -18,25 +18,44 @@ This file is the public record of what we tried and what happened. Filled in dur
 - **Camoufox image / version**: _(fill in once verified — `jo-inc/camofox-browser:<tag>` or local Camoufox binary)_
 - **Test dates**: _(fill in: e.g. 2026-05-10 → 2026-05-11)_
 
-## Tier 0 — manual sidecar test
+## Tier 0 — infrastructure verification
 
-_Fill in after running the steps in `experiments/README.md` Tier 0._
+### Done by branch maintainer (2026-05-09)
 
-- Camoufox image pulls cleanly: ☐
-- VNC connection works (port 5901): ☐
-- Browser visibly Firefox-based (vs Chromium): ☐
-- AliExpress mobile coin URL loads: ☐
-- AWSC challenge presented: ☐ (slider / harder challenge / no-gate / login-fail / other)
-- Visual A/B vs patchright run on the same account: ☐ (better / same / worse)
+Validates that the basics work before account-specific testing begins.
 
-**Verdict from Tier 0**: _(fill in. If Camoufox visibly walks through where patchright slider-gates, proceed to Tier 1. If Camoufox sees the same slider, the experiment is essentially over — record the finding and skip Tier 1.)_
+- ✅ **Image pulls cleanly** (`ghcr.io/jo-inc/camofox-browser:latest`, ~600 MB total)
+- ✅ **Image starts cleanly** under default config — Camoufox launches under Xvfb in ~1.6s, server pre-warms successfully
+- ⚠️ **Image surprised expected wiring**: it's a **REST API server on port 9377** (Node.js, OpenAPI 3.0 spec at `/api`), **not** a Playwright-compatible CDP/BiDi endpoint. Compose overlay and runner script were updated to match. VNC ships disabled by default; needs `ENABLE_VNC=1` to expose port 5900.
+- ✅ **Tab create works**: `POST /tabs` with `{userId, sessionKey}` returns a tabId.
+- ✅ **Navigate works**: `POST /tabs/:id/navigate` with `{userId, url, waitUntil, timeoutMs}` returns the resolved final URL.
+- ✅ **Screenshot works**: `GET /tabs/:id/screenshot?userId=…&fullPage=true` returns a fullsize PNG.
+- ✅ **Cold AliExpress navigation succeeded** — `https://m.aliexpress.com/p/coin-index/index.html` redirects to `https://www.aliexpress.com/p/ug-login-page/login.html` (the login page) with **no AWSC slider, no harder-challenge, no bot-detection alarm bells** on a fresh unauthenticated load. Camoufox renders the login page cleanly with the standard email/phone input, Passkey/Google/Facebook buttons, and the "Download the AliExpress app" CTA in the corner.
+
+**Implications for the user-side test**:
+
+- The cold-load behavior (no challenge, redirect to login) **is the same** as what we'd observe with patchright on a non-flagged session. The interesting AWSC behavior happens on the credentials-submit step, not on initial nav. So Tier 1 scenario A vs C should both reach login-redirect cleanly; the divergence will show up when a real account attempts to sign in.
+- **The runner script and compose overlay are now wired correctly for the actual API surface.** The user-side tests don't need to debug image-shape questions; they can focus on the AWSC behavior at credentials submit and post-login.
+- **VNC works** when `ENABLE_VNC=1` is set (which the overlay does). The VNC viewer is the right place to do Tier 0 visual A/B testing.
+
+### Account-specific Tier 0 — pending user
+
+_Fill in after running the steps in `experiments/README.md` Tier 0 against an actual AliExpress account. Branch maintainer doesn't have one._
+
+- Login attempt on Camoufox (via VNC at `localhost:5901`): ☐
+- AWSC outcome at credentials submit: ☐ (slider / harder challenge / no-gate / login-fail)
+- Same login attempt on patchright (existing fork) — visual A/B: ☐ (better / same / worse)
+- Cookie import via `POST /sessions/{userId}/cookies`: ☐ (works / fails)
+- Cookie-import + nav back to coin page: ☐ (works / slider / harder)
+
+**Verdict from account-specific Tier 0**: _(fill in. If Camoufox visibly walks through where patchright slider-gates, proceed to Tier 1. If Camoufox sees the same slider, the experiment is essentially over — record the finding and skip Tier 1.)_
 
 ## Tier 1 — scripted comparison
 
 Each row is one run. Run each scenario at least 5 times across 2+ calendar days to characterize variance.
 
-| Timestamp | Scenario | Run | Outcome | Elapsed | Screenshot |
-|---|---|---|---|---|---|
+| Timestamp | Scenario | Run | Outcome | Elapsed | Final URL | Screenshot |
+|---|---|---|---|---|---|---|
 
 _(Rows are appended automatically by `experiments/camoufox-aliexpress.js` when run with `RUNS=N SCENARIO=...`. Manual rows for the patchright baseline are added by hand using the same column shape.)_
 

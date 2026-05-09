@@ -8,42 +8,86 @@ The premise — and the rejected alternatives that aren't being PoC'd — is doc
 
 The honest framing in the README admits that JS-level fingerprint shims hit a hardware-signal ceiling. Camoufox's pitch is that engine-level spoofing operates *below* the JS layer, so the signals AWSC reads (WebGL strings, audio context, navigator props) are spoofed as ground truth rather than injected at runtime. Whether that holds against AWSC's current detector set is an empirical question — we run the PoC, capture results, then decide whether to integrate. If the PoC produces meaningful improvement, the branch merges to `main` with a Camoufox engine option for AliExpress (and possibly Epic). If the PoC produces no improvement, the docs commits cherry-pick to `main` and the rest of the branch is abandoned (with the results doc preserved as the public record).
 
-## Tiers of testing
+## Important: jo-inc/camofox-browser is REST-API-driven, not Playwright
 
-The PoC supports two tiers depending on how rigorous you want to be:
+The image we're using (`ghcr.io/jo-inc/camofox-browser`) wraps Camoufox in a REST API server (Node.js, port 9377) rather than exposing a Playwright-compatible CDP/BiDi endpoint. The PoC runner drives the browser via HTTP. This is a PoC choice — if engine integration eventually ships, it would more likely link Camoufox in directly via Playwright's `firefox.launch(executablePath: …)`. The REST-API path here is the cheapest way to get evidence one way or the other.
 
-### Tier 0 — Manual sidecar test (~30 min, no code)
+OpenAPI spec: visit `http://localhost:9377/api` once the sidecar is running.
 
-Pull a Camoufox-equipped image, expose VNC, and walk through the AliExpress login flow by hand. Visual A/B against the existing patchright behavior. Cheap, fast, unambiguous if the result is dramatic in either direction.
+## Prerequisites
+
+Bring up the sidecar from this branch:
 
 ```sh
-# Bring up Camoufox sidecar (browser-only; ignores main FGC service)
-docker compose -f docker-compose.yml -f docker-compose.experiments.yml up camoufox
-
-# Connect via VNC at the port published in docker-compose.experiments.yml
-# (typically a separate port from the main FGC noVNC so they don't collide)
-
-# In the Camoufox VNC view, navigate to:
-#   https://m.aliexpress.com/p/coin-index/index.html
-# and attempt login. Record the outcome shape (no-gate / soft-slider /
-# harder challenge / outright refusal) in docs/camoufox-poc-results.md.
+docker compose -f docker-compose.yml -f docker-compose.experiments.yml up -d camoufox
+docker logs fgc-camoufox-poc | tail -10  # confirm "browser pre-warmed"
 ```
+
+The compose overlay publishes:
+- **9377/tcp** — REST API (host) / hostname `camoufox` (FGC container's network)
+- **5901/tcp** — VNC (only useful with `ENABLE_VNC=1`, which the overlay sets)
+
+Quick sanity check from the host:
+
+```sh
+curl -s http://localhost:9377/health
+# { "ok": true, "engine": "camoufox", "browserConnected": true, ... }
+```
+
+## Tiers of testing
+
+### Tier 0 — manual VNC observation (~30 min, no code)
+
+Connect a VNC viewer to `localhost:5901` and drive Camoufox by hand. Useful for eyeballing AWSC behavior side-by-side with the existing patchright noVNC at `localhost:6080`.
+
+```sh
+# Open a tab via the API, then watch what happens in VNC
+TAB=$(curl -s -X POST http://localhost:9377/tabs \
+  -H 'Content-Type: application/json' \
+  -d '{"userId":"poc","sessionKey":"poc-test"}' | jq -r .tabId)
+
+curl -s -X POST "http://localhost:9377/tabs/$TAB/navigate" \
+  -H 'Content-Type: application/json' \
+  -d '{"userId":"poc","url":"https://m.aliexpress.com/p/coin-index/index.html","waitUntil":"domcontentloaded"}'
+```
+
+In the VNC viewer you should see Camoufox (Firefox-shaped UI) navigate to AliExpress. Try logging in. Record the outcome shape (no-gate / soft-slider / harder challenge / outright refusal) in `docs/camoufox-poc-results.md`.
 
 If Camoufox visibly walks through where patchright slider-gates, Tier 1 is the next step. If Camoufox sees the same slider, the experiment is essentially over — the ceiling is real and Tier 1 won't change the answer.
 
-### Tier 1 — Scripted comparison (1–2 hours)
+### Tier 1 — scripted comparison (1–2 hours)
 
-Programmatic side-by-side: same flow on patchright (existing `aliexpress.js`) and on Camoufox (`experiments/camoufox-aliexpress.js`), repeated N times across a couple of days, outcomes captured to `docs/camoufox-poc-results.md`.
+Programmatic side-by-side: same flow on patchright (existing `aliexpress.js`) and on Camoufox (`experiments/camoufox-aliexpress.js`), repeated N times, outcomes captured to `docs/camoufox-poc-results.md`.
 
 ```sh
-# Patchright baseline
-node aliexpress.js  # (or trigger via panel Run-Now on the AliExpress card)
+# Patchright baseline (existing flow — record outcomes by hand)
+node aliexpress.js
+# or trigger via panel Run-Now on the AliExpress card
 
-# Camoufox run
-node experiments/camoufox-aliexpress.js
+# Camoufox runs (rows append automatically to results doc)
+SCENARIO=C-cold-no-cookies RUNS=5 node experiments/camoufox-aliexpress.js
+SCENARIO=D-cookies        RUNS=5 node experiments/camoufox-aliexpress.js
+SCENARIO=E-rotated-fp     RUNS=5 node experiments/camoufox-aliexpress.js
 ```
 
 Run each scenario at least 5 times across two different calendar days to characterise variance.
+
+#### Running from inside the FGC container vs from the host
+
+The runner defaults to `CAMOFOX_URL=http://camoufox:9377` (the sidecar's hostname on the FGC compose network). Run it from inside the FGC container:
+
+```sh
+docker compose -f docker-compose.yml -f docker-compose.experiments.yml exec free-games-claimer \
+  node experiments/camoufox-aliexpress.js
+```
+
+Or from the host, override the URL:
+
+```sh
+CAMOFOX_URL=http://localhost:9377 SCENARIO=C-cold-no-cookies node experiments/camoufox-aliexpress.js
+```
+
+(Running from the host requires Node 20+ for native `fetch`. From the FGC container, the runtime ships with what the image carries.)
 
 ## The five test scenarios
 
@@ -57,7 +101,17 @@ These are the rows in the results doc:
 | D | Camoufox | Cookies imported | Counter to (B). Does cookie re-eval go differently when the engine fingerprint is engine-spoofed rather than JS-spoofed? |
 | E | Camoufox | Cookies imported, fingerprint rotated | Cookies seeded from a session originally tied to a different fingerprint. Tests how strict the cookie-fingerprint binding is on AWSC's side. |
 
-For each scenario, capture: outcome (no-gate / soft-slider / harder-challenge / login-fail), screenshot of any captcha shown, full DevTools network response codes if the panel returns a JSON error, run timing.
+For each scenario, capture: outcome (no-gate / soft-slider / harder-challenge / login-refused / login-redirect), screenshot of any captcha shown (auto-saved by runner), the snapshot text classifier's verdict, run timing.
+
+## Cookie import via the API (for scenarios D and E)
+
+```sh
+curl -s -X POST "http://localhost:9377/sessions/poc/cookies" \
+  -H 'Content-Type: application/json' \
+  -d @cookies.json
+```
+
+The `cookies.json` payload should match Camoufox's expected schema (look at `/api` OpenAPI spec for exact shape). For most cookie-editor exports a small reshape is needed.
 
 ## Decision gates
 
@@ -82,3 +136,7 @@ After the runs are complete:
 - chromedp sidecars or Cloud BaaS.
 
 These are documented in the README's "what we won't build and why" subsection. Don't re-litigate them inside this PoC.
+
+## Tier 0 baseline already established
+
+Before AliExpress account-specific testing begins, the basic infrastructure has been verified end-to-end on the experiment branch (see [`docs/camoufox-poc-results.md`](../docs/camoufox-poc-results.md) — Tier 0 section): image pulls clean, server starts, REST API responds, tab/navigate/screenshot cycle works, cold AliExpress nav redirects to login page with no AWSC challenge on first hit. Account-specific testing (the actual question this PoC answers) is on the user side.
