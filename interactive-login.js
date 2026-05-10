@@ -315,9 +315,17 @@ let runStatus = 'idle';
 // Per-run history persistence — issue #29. Each completed run gets one
 // entry in data/runs.json (lowdb). The Logs tab can browse past runs
 // via a dropdown that calls /api/runs (list) and /api/runs/:at (full
-// log). Capped at RUN_HISTORY_MAX entries (default 200).
+// log). Cap is read dynamically at persist time via describeConfig()
+// so Settings → Advanced edits take effect on the next run without
+// requiring a panel restart.
 let runHistoryDb = null;
-const RUN_HISTORY_MAX = Number(process.env.RUN_HISTORY_MAX) || 200;
+function getRunHistoryMax() {
+  try {
+    const eff = describeConfig().effective;
+    const v = eff && eff.advanced && eff.advanced.runHistoryMax;
+    return Math.max(1, Number(v) || 200);
+  } catch { return 200; }
+}
 let runSource = null; // 'panel' | 'scheduler'
 let lastRun = null; // { at, source, exitCode, status, startedAt, durationSec }
 let runStartedAt = null;
@@ -1139,8 +1147,9 @@ function runAllScripts({ source = 'panel', sites = null, extraEnv = null } = {})
           error: errorMsg || null,
           log: runLog.slice(),
         });
-        if (runHistoryDb.data.runs.length > RUN_HISTORY_MAX) {
-          runHistoryDb.data.runs = runHistoryDb.data.runs.slice(-RUN_HISTORY_MAX);
+        const cap = getRunHistoryMax();
+        if (runHistoryDb.data.runs.length > cap) {
+          runHistoryDb.data.runs = runHistoryDb.data.runs.slice(-cap);
         }
         await runHistoryDb.write();
       } catch (e) {
@@ -3358,6 +3367,9 @@ function paintSettings() {
       settingGroup('Viewport',
         fieldRow('advanced.width',  'Browser viewport width') +
         fieldRow('advanced.height', 'Browser viewport height')
+      ) +
+      settingGroup('Logs',
+        fieldRow('advanced.runHistoryMax', 'Past runs to retain', { unit: 'runs', hint: 'How many completed runs to keep in data/runs.json for the Logs tab Past-runs picker. Older entries are trimmed when this limit is exceeded. Higher = longer history but bigger file (~50 KB per run on average).' })
       );
   }
 

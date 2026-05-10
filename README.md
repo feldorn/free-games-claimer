@@ -196,7 +196,7 @@ for `BASE_PATH`, `PUBLIC_URL`, and `NOVNC_URL`.
 | `DEBUG` | `0` | Set to `1` for verbose debug output |
 | `PUID` | | **Opt-in non-root mode.** When set, the entrypoint reconciles a runtime user `fgc` with this UID, chowns `/fgc/data`, and drops privileges via `gosu`. Unset = container runs as root (default, unchanged). See [Running as a non-root user](#running-as-a-non-root-user). |
 | `PGID` | `$PUID` | GID to pair with `PUID`. Defaults to the same value if only `PUID` is set. |
-| `RUN_HISTORY_MAX` | `200` | Cap on entries kept in `data/runs.json` (the Logs-tab "Past runs" history). Older entries are trimmed when this limit is exceeded. Each entry is one full run including its log buffer; ~10 MB max at the default. |
+| `RUN_HISTORY_MAX` | `200` | Cap on entries kept in `data/runs.json` (the Logs-tab "Past runs" history). Older entries are trimmed when this limit is exceeded. Each entry is one full run including its log buffer; ~10 MB max at the default. Also editable in **Settings → Advanced → Logs**. |
 | `LOGIN_MODE` | — | **Deprecated no-op** — the control panel is always running on port 7080. Safe to remove from your config. |
 
 </details>

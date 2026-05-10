@@ -36,6 +36,7 @@ export const cfg = {
   },
   width: adv.width || 1920, // width of the opened browser
   height: adv.height || 1080, // height of the opened browser
+  run_history_max: adv.runHistoryMax || 200, // cap on data/runs.json entries (Logs tab Past-runs)
   timeout: (adv.timeoutSec || 60) * 1000, // default timeout for playwright is 30s
   login_timeout: (adv.loginTimeoutSec || 180) * 1000, // higher timeout for login, will wait twice: prompt + wait for manual login
   login_mode: process.env.LOGIN_MODE == '1', // launch interactive VNC login panel instead of automated claiming
