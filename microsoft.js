@@ -864,7 +864,7 @@ log.section('Mobile');
   } else {
     summary = 'microsoft-rewards: completed desktop and mobile sessions (no points data captured).';
   }
-  await notify(summary);
+  await notify(summary, { kind: 'summary' });
 }
 
 // Redeem reminder: re-fires every run while balance is over threshold so

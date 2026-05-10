@@ -574,7 +574,11 @@ try {
   if (cfg.time) console.timeEnd('claim all games');
   await db.write();
   if (notify_games.filter(g => g.status == 'claimed' || g.status == 'failed' || g.status == 'action').length) {
-    await notify(`epic-games (${user}):<br>${html_game_list(notify_games)}`);
+    // Tag as 'summary' only when nothing in the list needs user action —
+    // failures and capture-required entries promote it back to 'action'
+    // so xh43k's "actions only" mode still surfaces them. (#31)
+    const hasActionable = notify_games.some(g => g.status === 'failed' || g.status === 'action');
+    await notify(`epic-games (${user}):<br>${html_game_list(notify_games)}`, { kind: hasActionable ? 'action' : 'summary' });
   }
 }
 if (cfg.debug) writeFileSync(path.resolve(cfg.dir.browser, 'cookies.json'), JSON.stringify(await context.cookies()));

@@ -450,7 +450,11 @@ try {
 } finally {
   await db.write();
   if (notify_games.filter(g => g.status === 'claimed' || g.status === 'failed').length) {
-    await notify(`steam (${user}):<br>${html_game_list(notify_games)}`);
+    // Tag as 'summary' only when nothing in the list needs user action —
+    // failures promote it back to 'action' so xh43k's "actions only"
+    // mode still surfaces them. (#31)
+    const hasActionable = notify_games.some(g => g.status === 'failed' || g.status === 'action');
+    await notify(`steam (${user}):<br>${html_game_list(notify_games)}`, { kind: hasActionable ? 'action' : 'summary' });
   }
 }
 if (page.video()) log.info(`Recorded video — ${await page.video().path()}`);

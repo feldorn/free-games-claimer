@@ -97,6 +97,15 @@ export const CONFIG_SCHEMA = [
   { path: 'notifications.notify',            env: 'NOTIFY',                     type: 'string',  default: '' },
   { path: 'notifications.notifyTitle',       env: 'NOTIFY_TITLE',               type: 'string',  default: '' },
   { path: 'notifications.attachScreenshots', env: 'NOTIFY_ATTACH_SCREENSHOTS',  type: 'boolean', default: true, coerce: toBoolDefaultTrue },
+  // Notification verbosity (#31): 'all' (default — current behavior),
+  // 'actions' (suppress per-run summaries; keep login issues, captchas,
+  // errors, watcher new-item alerts, redeem reminders), 'off' (silent).
+  { path: 'notifications.notifyLevel',       env: 'NOTIFY_LEVEL',               type: 'string',  default: 'all',
+    coerce: v => {
+      const s = String(v || '').toLowerCase().trim();
+      return (s === 'actions' || s === 'off' || s === 'all') ? s : 'all';
+    },
+    validate: v => (v === 'all' || v === 'actions' || v === 'off') ? null : 'expected all, actions, or off' },
   { path: 'panel.publicUrl',                 env: 'PUBLIC_URL',                 type: 'string',  default: '' },
   // advanced / debug
   { path: 'advanced.dryrun',          env: 'DRYRUN',        type: 'boolean', default: false, coerce: toBool },

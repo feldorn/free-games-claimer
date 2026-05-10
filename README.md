@@ -267,6 +267,20 @@ NOTIFY='pover://user@token' 'tgram://bottoken/ChatID'
 
 See [apprise documentation](https://github.com/caronc/apprise#supported-notifications) for all supported services.
 
+### Verbosity (`NOTIFY_LEVEL`)
+
+Three levels, settable via env or **Settings → Notifications → Verbosity**:
+
+| Level | Per-run summaries (claim list, points, coins) | Action-required (login issues, captchas, errors, watcher new-items, redeem reminders) |
+|---|---|---|
+| `all` (default) | ✓ fires | ✓ fires |
+| `actions` | ✗ silenced (when nothing in the summary needs attention) | ✓ fires |
+| `off` | ✗ silenced | ✗ silenced |
+
+Per-run game-list notifications on Prime / Epic / GOG / Steam are automatically promoted from "summary" to "action" when any game in the list has `failed` or `action` status — so failures still notify under `actions`. The summary suppression only fires for the boring "0 claimed, 24 already owned" case.
+
+Watcher notifications (Humble, Fanatical, Ubisoft, Lenovo, GOG-catalog) and the [captcha-pause](#captcha-pause) helper always fire under `actions` because their notifications are by definition asking the user to do something. `off` silences everything globally — captchas and login errors included — so use it deliberately.
+
 ---
 
 ## Captcha pause

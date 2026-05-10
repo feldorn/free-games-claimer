@@ -130,6 +130,16 @@ export const notify = (html, opts = {}) => {
     if (cfg.debug) console.debug('notify: NOTIFY is not set!');
     return Promise.resolve();
   }
+  // Notification verbosity gate (#31). opts.kind tags the call site as
+  // either a per-run summary ('summary') or an action-required event
+  // ('action', the default for untagged calls). Level 'off' silences all
+  // notifications; 'actions' silences only the summaries; 'all' (default)
+  // fires everything as before. Defaulting untagged calls to 'action'
+  // keeps legacy behavior under any non-off level.
+  const kind = opts.kind === 'summary' ? 'summary' : 'action';
+  const level = cfg.notify_level || 'all';
+  if (level === 'off') return Promise.resolve();
+  if (level === 'actions' && kind === 'summary') return Promise.resolve();
   // Resolve attachment path (if any) before invoking apprise. Explicit
   // opts.screenshot always wins; attachLatestScreenshot is the autopilot
   // path and is gated by cfg.notify_attach_screenshots so users can opt

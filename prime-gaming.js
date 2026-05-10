@@ -517,7 +517,11 @@ try {
 } finally {
   await db.write();
   if (notify_games.length) {
-    await notify(`prime-gaming (${user}):<br>${html_game_list(notify_games)}`);
+    // Tag as 'summary' only when nothing in the list needs user action —
+    // failures and account-linking entries promote it back to 'action'
+    // so xh43k's "actions only" mode still surfaces them. (#31)
+    const hasActionable = notify_games.some(g => g.status === 'failed' || g.status === 'action');
+    await notify(`prime-gaming (${user}):<br>${html_game_list(notify_games)}`, { kind: hasActionable ? 'action' : 'summary' });
   }
   // Pending redeems sent as their own notifications, chunked to stay under Pushover's
   // ~1024-char body limit. Plain-text format with bare redeem URLs — Pushover strips

@@ -4,6 +4,12 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.5.1
+
+**Notification verbosity control ([#31](https://github.com/feldorn/free-games-claimer/issues/31)).** New `notifications.notifyLevel` setting (env `NOTIFY_LEVEL`, also editable in **Settings → Notifications → Verbosity**) with three values: `all` (default — current behavior), `actions` (silences per-run summary notifications when nothing in the run needed user attention; keeps everything else), `off` (silences all notifications globally — including captchas and login errors). Default `all` preserves existing-deploy behavior; users opt into quieter modes via the new dropdown. Six summary call sites tagged: per-run game-list summaries on Prime / Epic / GOG / Steam (auto-promoted to `action` if any game in the list has `failed` or `action` status — so failures still surface even under `actions` mode), MS Rewards points-earned summary, AliExpress coins-earned summary. Watchers (Humble, Fanatical, Ubisoft, Lenovo, GOG-catalog) and the captcha-pause helper continue to fire under `actions` mode since their notifications are by definition action-required ("new free game found" = "go claim it").
+
+---
+
 ## What's new in 2.5.0
 
 **Run-log persistence on the Logs tab ([#29](https://github.com/feldorn/free-games-claimer/issues/29)).** Each completed claim run now writes a full record to `data/runs.json` — start time, source (scheduler-main / scheduler-ms / panel / etc.), exit code, duration, the aggregate `[run]` summary counters per service, and the full ordered log buffer. The Logs tab gets a **Past runs** dropdown above the log view: `Live (current run)` keeps the existing tail-poll behaviour; selecting a past run swaps to read-only mode showing that run's lines with the same timestamp / type-color rendering. Dropdown auto-refreshes when a run completes so you don't need to reload to see the just-finished entry. Capped at `RUN_HISTORY_MAX` entries (default 200, editable via env or in **Settings → Advanced → Logs** — the cap is read dynamically at each persist so a save takes effect on the next run without a panel restart). New API endpoints: `GET /api/runs` for the summary list (no log payload — fast), `GET /api/runs/:at` for a single run's full record. Existing users have no history before this version; first scheduled or Run-Now after upgrade is the first entry. Storage: ~10 MB max at the default 200-entry cap, so no concern.

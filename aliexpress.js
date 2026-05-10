@@ -288,7 +288,7 @@ await recordRun();
   if (typeof streakDays === 'number') parts.push(`${fmt(streakDays)}-day streak`);
   if (parts.length) {
     const tail = (typeof tomorrowCoins === 'number') ? ` (+${fmt(tomorrowCoins)} tomorrow)` : '';
-    await notify(`AliExpress: ${parts.join(', ')}${tail}`)
+    await notify(`AliExpress: ${parts.join(', ')}${tail}`, { kind: 'summary' })
       .catch(e => log.warn(`aliexpress notify failed: ${e.message.split('\n')[0]}`));
   }
 }

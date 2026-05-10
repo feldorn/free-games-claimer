@@ -3321,6 +3321,15 @@ function paintSettings() {
         fieldRow('notifications.attachScreenshots', 'Attach screenshot to failures',
           { hint: 'When a claim fails, attach the most recent .png from data/screenshots/ to the notification. Off if you prefer to keep notifications text-only (privacy or bandwidth).' })
       ) +
+      settingGroup('Verbosity',
+        fieldRow('notifications.notifyLevel', 'Notification level',
+          { options: [
+              { value: 'all',     label: 'All — every claim, captcha, error, and watcher event' },
+              { value: 'actions', label: 'Actions Required — login issues, captchas, errors, watcher new-items, redeem reminders (silences per-run summaries when nothing needed your attention)' },
+              { value: 'off',     label: 'Off — silence all notifications' },
+            ],
+            hint: 'Default is All. Choose Actions Required to skip the per-run "X claimed, Y already owned" summary on uneventful runs while keeping anything that asks you to do something. Off silences everything globally — captchas + login errors included.' })
+      ) +
       settingGroup('Panel link',
         fieldRow('panel.publicUrl', 'Public URL',
           { hint: 'External URL used in notifications so tap-targets land on the panel.' })
