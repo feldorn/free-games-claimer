@@ -3967,10 +3967,19 @@ let logsTabOffset = 0;
 let logsTabPollTimer = null;
 function startLogsTabPoll() {
   if (logsTabPollTimer) return;
+  refreshRunHistoryList(); // populate the past-runs dropdown on tab open
+  if (logsHistorySelectedAt) {
+    // User had a past run selected before tabbing away. Re-render the
+    // past log entry rather than resetting to "Loading…" — without this,
+    // the body would stay empty because pollLogsTab early-returns in
+    // history mode and never repopulates. Honors the selection in the
+    // dropdown rather than silently dropping back to Live.
+    selectRunHistoryOption(logsHistorySelectedAt);
+    return;
+  }
   logsTabOffset = 0;
   const body = document.getElementById('logsBody');
   if (body) body.innerHTML = '<div class="logs-empty">Loading…</div>';
-  refreshRunHistoryList(); // populate the past-runs dropdown on tab open
   pollLogsTab();
 }
 function stopLogsTabPoll() {

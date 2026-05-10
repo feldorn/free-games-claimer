@@ -4,6 +4,12 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.5.2
+
+**Logs tab — fix empty body when returning to a past-log view.** If you selected a past run from the dropdown, then switched to another tab, then came back, the body went blank — `startLogsTabPoll` reset the body to a "Loading…" placeholder and then `pollLogsTab` early-returned in history mode without ever repopulating it. Now we re-fetch and re-render the past log entry whenever the dropdown selection is non-empty on tab re-entry, so the view honors the dropdown state. The dropdown selection is intentionally preserved across tab switches — to see live output from a run that started while you were away, click the dropdown and pick `Live (current run)`.
+
+---
+
 ## What's new in 2.5.1
 
 **Notification verbosity control ([#31](https://github.com/feldorn/free-games-claimer/issues/31)).** New `notifications.notifyLevel` setting (env `NOTIFY_LEVEL`, also editable in **Settings → Notifications → Verbosity**) with three values: `all` (default — current behavior), `actions` (silences per-run summary notifications when nothing in the run needed user attention; keeps everything else), `off` (silences all notifications globally — including captchas and login errors). Default `all` preserves existing-deploy behavior; users opt into quieter modes via the new dropdown. Six summary call sites tagged: per-run game-list summaries on Prime / Epic / GOG / Steam (auto-promoted to `action` if any game in the list has `failed` or `action` status — so failures still surface even under `actions` mode), MS Rewards points-earned summary, AliExpress coins-earned summary. Watchers (Humble, Fanatical, Ubisoft, Lenovo, GOG-catalog) and the captcha-pause helper continue to fire under `actions` mode since their notifications are by definition action-required ("new free game found" = "go claim it").
