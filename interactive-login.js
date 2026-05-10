@@ -311,6 +311,13 @@ let runProcess = null;
 let runDone = null; // Promise that resolves when runProcess finishes (for scheduler to await)
 let runLog = [];
 let runStatus = 'idle';
+
+// Per-run history persistence — issue #29. Each completed run gets one
+// entry in data/runs.json (lowdb). The Logs tab can browse past runs
+// via a dropdown that calls /api/runs (list) and /api/runs/:at (full
+// log). Capped at RUN_HISTORY_MAX entries (default 200).
+let runHistoryDb = null;
+const RUN_HISTORY_MAX = Number(process.env.RUN_HISTORY_MAX) || 200;
 let runSource = null; // 'panel' | 'scheduler'
 let lastRun = null; // { at, source, exitCode, status, startedAt, durationSec }
 let runStartedAt = null;
@@ -1114,6 +1121,33 @@ function runAllScripts({ source = 'panel', sites = null, extraEnv = null } = {})
       });
     });
 
+    // Persist a finished run to data/runs.json so the Logs tab can
+    // surface history. Called from both close and error handlers below.
+    // Captures runLog at this exact moment (before runAllScripts resets
+    // it on the next run) plus a snapshot of runAgg's aggregate counters
+    // and metadata. Best-effort — DB write failures don't break the run.
+    const persistRunHistory = async (exitCode, errorMsg) => {
+      if (!runHistoryDb) return;
+      try {
+        runHistoryDb.data.runs.push({
+          at: runStartedAt ? datetime(new Date(runStartedAt)) : datetime(),
+          source: runSource,
+          exitCode,
+          status: runStatus,
+          durationSec: runStartedAt ? Math.round((Date.now() - runStartedAt) / 1000) : null,
+          summary: { ...runAgg },
+          error: errorMsg || null,
+          log: runLog.slice(),
+        });
+        if (runHistoryDb.data.runs.length > RUN_HISTORY_MAX) {
+          runHistoryDb.data.runs = runHistoryDb.data.runs.slice(-RUN_HISTORY_MAX);
+        }
+        await runHistoryDb.write();
+      } catch (e) {
+        console.error(`[${datetime()}] failed to persist run history: ${e.message}`);
+      }
+    };
+
     child.on('close', code => {
       runStatus = code === 0 ? 'success' : 'finished';
       // Run-level footer summarises the aggregated [run] markers. claimed
@@ -1154,6 +1188,9 @@ function runAllScripts({ source = 'panel', sites = null, extraEnv = null } = {})
       if (code === 0 && /\bnode microsoft\.js\b/.test(cmd)) {
         try { markMsRunFiredToday(); } catch {}
       }
+      // Persist before clearing the closure-captured runSource/runStartedAt
+      // so the history entry has the right metadata.
+      void persistRunHistory(code, null);
       runProcess = null;
       runSource = null;
       runStartedAt = null;
@@ -1173,6 +1210,7 @@ function runAllScripts({ source = 'panel', sites = null, extraEnv = null } = {})
         durationSec: runStartedAt ? Math.round((Date.now() - runStartedAt) / 1000) : null,
         error: err.message,
       };
+      void persistRunHistory(-1, err.message);
       runProcess = null;
       runSource = null;
       runStartedAt = null;
@@ -2357,6 +2395,18 @@ const PANEL_HTML = `<!DOCTYPE html>
 
   .logs-header { padding: 10px 20px; border-bottom: 1px solid #0f3460; font-size: 13px; color: #8aa0c2; flex-shrink: 0; display: flex; align-items: center; gap: 12px; }
   .logs-header .logs-count { margin-left: auto; font-size: 12px; }
+  /* Custom run-history dropdown — replaces native <select> because Firefox/Safari
+     don't reliably honor white-space: nowrap on native <option> elements, so
+     long entries wrap inside the popup. Custom popup lets us pin to nowrap. */
+  .rhp { position: relative; }
+  .rhp-trigger { background: #1a1a2e; color: #c0c8d8; border: 1px solid #1a2a48; border-radius: 4px; padding: 4px 28px 4px 10px; font-size: 12px; cursor: pointer; min-width: 260px; max-width: 480px; text-align: left; position: relative; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: inherit; }
+  .rhp-trigger:hover { border-color: #2a3a58; }
+  .rhp-trigger::after { content: '▾'; position: absolute; right: 10px; top: 50%; transform: translateY(-50%); color: #8aa0c2; pointer-events: none; }
+  .rhp-popup { position: absolute; top: calc(100% + 4px); left: 0; background: #1a1a2e; border: 1px solid #1a2a48; border-radius: 4px; max-height: 360px; overflow-y: auto; z-index: 1000; min-width: 100%; box-shadow: 0 4px 12px rgba(0,0,0,0.5); }
+  .rhp-option { padding: 6px 10px; font-size: 12px; color: #c0c8d8; cursor: pointer; white-space: nowrap; border-bottom: 1px solid #0f1a30; }
+  .rhp-option:last-child { border-bottom: none; }
+  .rhp-option:hover, .rhp-option.active { background: #243355; color: #fff; }
+  .rhp-option.live { font-weight: 600; }
   .logs-body { flex: 1; background: #0d0d1a; font-family: 'Menlo', 'Consolas', monospace; font-size: 13px; padding: 12px 16px; overflow-y: auto; white-space: pre-wrap; word-break: break-word; }
   .logs-body .line { padding: 1px 0; }
   .logs-body .line.stderr { color: #e94560; }
@@ -2626,6 +2676,10 @@ const PANEL_HTML = `<!DOCTYPE html>
   <div class="tab-panel" data-panel="logs">
     <div class="logs-header">
       <span>Run output from claim scripts</span>
+      <div class="rhp" id="runHistoryPicker">
+        <button class="rhp-trigger" id="rhpTrigger" type="button" onclick="toggleRunHistoryPicker(event)" title="Switch between live output and past runs">Live (current run)</button>
+        <div class="rhp-popup" id="rhpPopup" style="display:none"></div>
+      </div>
       <span class="logs-count" id="logsCount"></span>
     </div>
     <div class="logs-body" id="logsBody">
@@ -3895,14 +3949,27 @@ function startLogsTabPoll() {
   logsTabOffset = 0;
   const body = document.getElementById('logsBody');
   if (body) body.innerHTML = '<div class="logs-empty">Loading…</div>';
+  refreshRunHistoryList(); // populate the past-runs dropdown on tab open
   pollLogsTab();
 }
 function stopLogsTabPoll() {
   if (logsTabPollTimer) { clearTimeout(logsTabPollTimer); logsTabPollTimer = null; }
 }
+// History-mode state for the Logs tab. When non-empty, the dropdown is
+// pinned to a past-run entry and the live poll is suspended. Empty
+// string = "Live (current run)" → live polling resumes.
+let logsHistorySelectedAt = '';
+let logsLastRunStatus = null; // detect run-end transitions to refresh the dropdown
 async function pollLogsTab() {
   if (document.body.dataset.tab !== 'logs') { stopLogsTabPoll(); return; }
+  // Lazily populate the run-history dropdown the first time the tab opens
+  // and after a run finishes (so a just-completed run shows up without
+  // a manual refresh).
   let interval = 3000;
+  if (logsHistorySelectedAt) {
+    // History mode — single fetch, no polling.
+    return;
+  }
   try {
     const r = await api('GET', '/run-log?since=' + logsTabOffset);
     const body = document.getElementById('logsBody');
@@ -3928,9 +3995,144 @@ async function pollLogsTab() {
     }
     if (typeof r.total === 'number') logsTabOffset = r.total;
     if (count) count.textContent = logsTabOffset + ' line' + (logsTabOffset === 1 ? '' : 's');
+    // Detect a run-completion transition (was running, now isn't) to
+    // refresh the history dropdown so the new entry appears.
+    if (logsLastRunStatus === 'running' && r && r.status !== 'running') {
+      refreshRunHistoryList();
+    }
+    logsLastRunStatus = r && r.status;
     if (r && r.status === 'running') interval = 1000;
   } catch {}
   logsTabPollTimer = setTimeout(pollLogsTab, interval);
+}
+
+// Format duration in a readable, compact form ("23s", "4m 12s", "1h 5m").
+function fmtRunDuration(sec) {
+  sec = Number(sec) || 0;
+  if (sec < 60) return sec + 's';
+  if (sec < 3600) return Math.floor(sec / 60) + 'm ' + (sec % 60) + 's';
+  return Math.floor(sec / 3600) + 'h ' + Math.floor((sec % 3600) / 60) + 'm';
+}
+
+// Refresh the history popup contents from /api/runs. Idempotent —
+// preserves the selected entry across refreshes via logsHistorySelectedAt.
+let runHistoryCache = []; // last-fetched runs list, used for label lookups
+async function refreshRunHistoryList() {
+  const popup = document.getElementById('rhpPopup');
+  if (!popup) return;
+  try {
+    const r = await api('GET', '/runs');
+    runHistoryCache = r.runs || [];
+    let html = '<div class="rhp-option live' + (logsHistorySelectedAt === '' ? ' active' : '') +
+      '" data-at="" onclick="selectRunHistoryOption(\\'\\')">Live (current run)</div>';
+    runHistoryCache.forEach(run => {
+      const label = formatRunHistoryLabel(run);
+      const at = run.at || '';
+      const isActive = at === logsHistorySelectedAt;
+      html += '<div class="rhp-option' + (isActive ? ' active' : '') +
+        '" data-at="' + escapeHtml(at) + '" onclick="selectRunHistoryOption(\\'' + escapeHtml(at).replace(/'/g, "\\'") + '\\')">' +
+        escapeHtml(label) + '</div>';
+    });
+    popup.innerHTML = html;
+    // Update the trigger label too in case the currently-selected run was
+    // refreshed-in (e.g. user is sitting on Live mode and a new run finishes).
+    syncRunHistoryTrigger();
+  } catch { /* best-effort */ }
+}
+
+function formatRunHistoryLabel(run) {
+  // Short timestamp: "2026-05-09 07:30" — drop seconds + milliseconds.
+  const ts = (run.at || '').slice(0, 16);
+  const sum = run.summary || {};
+  const icon = run.status === 'success' ? '✓' : '✗';
+  const dur = fmtRunDuration(run.durationSec);
+  // One headline counter per row instead of all of them — pick the most
+  // informative based on what was non-zero. Order: claimed, pts (MS),
+  // coins (AE), owned (no-op runs).
+  let counter = '';
+  if (sum.claimed) counter = ' — ' + sum.claimed + ' claimed';
+  else if (sum.pointsEarned) counter = ' — ' + sum.pointsEarned + ' pts';
+  else if (sum.coins) counter = ' — ' + sum.coins + ' coins';
+  else if (sum.alreadyOwned) counter = ' — ' + sum.alreadyOwned + ' owned';
+  return icon + ' ' + ts + ' (' + dur + ')' + counter;
+}
+
+function syncRunHistoryTrigger() {
+  const trig = document.getElementById('rhpTrigger');
+  if (!trig) return;
+  if (!logsHistorySelectedAt) {
+    trig.textContent = 'Live (current run)';
+    return;
+  }
+  const run = runHistoryCache.find(r => r.at === logsHistorySelectedAt);
+  trig.textContent = run ? formatRunHistoryLabel(run) : logsHistorySelectedAt;
+}
+
+function toggleRunHistoryPicker(ev) {
+  if (ev) ev.stopPropagation();
+  const popup = document.getElementById('rhpPopup');
+  if (!popup) return;
+  if (popup.style.display === 'none' || !popup.style.display) {
+    // Opening — refresh the list so we see any runs that finished while
+    // the popup was closed.
+    refreshRunHistoryList().then(() => { popup.style.display = 'block'; });
+  } else {
+    popup.style.display = 'none';
+  }
+}
+
+function closeRunHistoryPicker() {
+  const popup = document.getElementById('rhpPopup');
+  if (popup) popup.style.display = 'none';
+}
+
+// One-time global click-outside handler installed at script init.
+if (typeof window !== 'undefined' && !window.__rhpClickOutsideInstalled) {
+  window.__rhpClickOutsideInstalled = true;
+  document.addEventListener('click', (e) => {
+    const picker = document.getElementById('runHistoryPicker');
+    if (picker && !picker.contains(e.target)) closeRunHistoryPicker();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeRunHistoryPicker();
+  });
+}
+
+// Option-click handler. Empty at → resume live polling. Non-empty →
+// fetch that historical entry's full log and render it read-only.
+async function selectRunHistoryOption(at) {
+  logsHistorySelectedAt = at;
+  closeRunHistoryPicker();
+  syncRunHistoryTrigger();
+  const body = document.getElementById('logsBody');
+  const count = document.getElementById('logsCount');
+  if (!at) {
+    // Back to Live — reset offset and resume polling from the current point.
+    logsTabOffset = 0;
+    if (body) body.innerHTML = '<div class="logs-empty">Resuming live view…</div>';
+    stopLogsTabPoll();
+    pollLogsTab();
+    return;
+  }
+  // Historical fetch — single shot, no polling.
+  stopLogsTabPoll();
+  try {
+    const r = await api('GET', '/runs/' + encodeURIComponent(at));
+    if (body) body.innerHTML = '';
+    const lines = (r && r.log) || [];
+    lines.forEach(l => {
+      const div = document.createElement('div');
+      div.className = 'line ' + (l.type || '');
+      const t = (l.time && String(l.time).slice(11, 19)) || '';
+      const timeSpan = t ? '<span class="time">' + t + '</span> ' : '';
+      div.innerHTML = timeSpan + escapeHtml(l.text || '');
+      body.appendChild(div);
+    });
+    if (count) count.textContent = lines.length + ' line' + (lines.length === 1 ? '' : 's') + ' (history)';
+    body.scrollTop = 0;
+  } catch (err) {
+    if (body) body.innerHTML = '<div class="logs-empty">Failed to load history entry: ' + escapeHtml(err && err.message || 'unknown') + '</div>';
+  }
 }
 
 async function refreshPendingGogCount() {
@@ -5190,6 +5392,26 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    // Run-history endpoints (issue #29). /api/runs returns a list of
+    // summaries (no log payload — fast for the dropdown). /api/runs/:at
+    // returns the full record including the log array; the :at param is
+    // the URL-encoded `at` timestamp from the summary list.
+    if (req.method === 'GET' && req.url === '/api/runs') {
+      const runs = (runHistoryDb && runHistoryDb.data && runHistoryDb.data.runs || [])
+        .slice().reverse() // newest first
+        .map(({ log, ...summary }) => summary);
+      sendJson(res, { runs });
+      return;
+    }
+    if (req.method === 'GET' && req.url.startsWith('/api/runs/')) {
+      const at = decodeURIComponent(req.url.slice('/api/runs/'.length).split('?')[0]);
+      const all = (runHistoryDb && runHistoryDb.data && runHistoryDb.data.runs) || [];
+      const found = all.find(r => r.at === at);
+      if (!found) { sendJson(res, { error: 'not found' }, 404); return; }
+      sendJson(res, found);
+      return;
+    }
+
     if (req.method === 'POST' && req.url === '/api/notifications/test') {
       // Use describeConfig rather than cfg.* so the test picks up whatever is
       // currently in data/config.json — cfg was baked at process boot and
@@ -5404,6 +5626,11 @@ process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 
 server.listen(PANEL_PORT, async () => {
+  // Run-history DB load — issue #29. Failure here doesn't block boot;
+  // the persistRunHistory helper checks for null and silently skips.
+  try { runHistoryDb = await jsonDb('runs.json', { runs: [] }); }
+  catch (e) { console.error(`[${datetime()}] failed to load runs.json: ${e.message}`); }
+
   console.log(`[${datetime()}] Free Games Claimer ${APP_VERSION ? 'v' + APP_VERSION + ' ' : ''}— panel + scheduler`);
   console.log(`[${datetime()}] Control panel: http://localhost:${PANEL_PORT}${BASE_PATH}`);
   if (cfg.public_url) console.log(`[${datetime()}] Public URL:    ${PUBLIC_URL}`);

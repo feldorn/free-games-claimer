@@ -196,6 +196,7 @@ for `BASE_PATH`, `PUBLIC_URL`, and `NOVNC_URL`.
 | `DEBUG` | `0` | Set to `1` for verbose debug output |
 | `PUID` | | **Opt-in non-root mode.** When set, the entrypoint reconciles a runtime user `fgc` with this UID, chowns `/fgc/data`, and drops privileges via `gosu`. Unset = container runs as root (default, unchanged). See [Running as a non-root user](#running-as-a-non-root-user). |
 | `PGID` | `$PUID` | GID to pair with `PUID`. Defaults to the same value if only `PUID` is set. |
+| `RUN_HISTORY_MAX` | `200` | Cap on entries kept in `data/runs.json` (the Logs-tab "Past runs" history). Older entries are trimmed when this limit is exceeded. Each entry is one full run including its log buffer; ~10 MB max at the default. |
 | `LOGIN_MODE` | — | **Deprecated no-op** — the control panel is always running on port 7080. Safe to remove from your config. |
 
 </details>
@@ -607,14 +608,24 @@ snapshot.
   plus an "MS window" row.
 - **Last run:** short wall time + source + status (success/error/finished) +
   duration.
-- Pause/resume and per-run history are planned follow-ups.
+- Pause/resume is a planned follow-up.
 
 ### Logs tab
 
-Monospaced scrollable viewer for the most recent run output. Polls
-`/api/run-log` at 1s while a run is active and 3s otherwise, stops polling
-when you switch tabs. Independent of the Sessions tab — you can leave the
-noVNC visible on Sessions while a run's log streams here.
+Monospaced scrollable viewer for run output. Polls `/api/run-log` at 1s
+while a run is active and 3s otherwise, stops polling when you switch
+tabs. Independent of the Sessions tab — you can leave the noVNC visible
+on Sessions while a run's log streams here.
+
+A **Past runs** dropdown above the log view switches between live tail
+and historical runs. Each completed run is persisted to `data/runs.json`
+with its full log buffer + summary counters; the dropdown lists the
+last N runs (default 200, configurable via `RUN_HISTORY_MAX`) newest
+first with a one-line summary `2026-05-09 07:30 · 8 svc, 2 claimed,
+24 owned · 23s · success`. Selecting a past run swaps to read-only
+mode; selecting `Live (current run)` resumes tail polling. Auto-refreshes
+when a run completes so the just-finished entry appears without a
+manual reload.
 
 ### Settings tab
 
@@ -933,6 +944,7 @@ All data lives in the `data/` directory (mounted as a Docker volume).
 | `data/ubisoft-watch.json` · `data/humble-bundle-watch.json` · `data/fanatical-watch.json` · `data/lenovo-gaming-watch.json` | Watcher state — last-seen titles per site so re-notify only fires on genuinely new items. Lenovo's file additionally tracks per-drop scheduledAt, `userCollected` flags, and the next-wake offset for the panel scheduler. Only written when the corresponding watcher is enabled. |
 | `data/ms-used-terms.json` | Microsoft Rewards — search terms used in the last 30 days (dedup window) |
 | `data/config.json` | App-level config overrides written by the Settings tab. Missing = env/defaults in effect. Deleted = same as missing. |
+| `data/runs.json` | Run-history log — per-run record (start time, source, exit code, duration, summary counters, full log buffer) for the last `RUN_HISTORY_MAX` runs (default 200). Powers the Logs tab's **Past runs** dropdown. Auto-trims; deleting clears history. |
 | `data/screenshots/` | Screenshots of claim results |
 
 </details>
@@ -964,6 +976,8 @@ integration. All endpoints are rooted at `<BASE_PATH>/api`.
 | `GET`  | `/stats/by-service` | Per-service claim counts + last-claim time |
 | `GET`  | `/stats/daily?days=30` | Daily claim counts for the 30-day chart |
 | `GET`  | `/activity?limit=10` | Recent successful claims |
+| `GET`  | `/runs` | List of past run summaries (no log payload — fast, used by the Logs-tab dropdown) |
+| `GET`  | `/runs/:at` | Full record for one run, including its log buffer. `:at` is the URL-encoded `at` timestamp from the summary list |
 
 </details>
 

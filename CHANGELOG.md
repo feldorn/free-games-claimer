@@ -4,6 +4,12 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.5.0
+
+**Run-log persistence on the Logs tab ([#29](https://github.com/feldorn/free-games-claimer/issues/29)).** Each completed claim run now writes a full record to `data/runs.json` — start time, source (scheduler-main / scheduler-ms / panel / etc.), exit code, duration, the aggregate `[run]` summary counters per service, and the full ordered log buffer. The Logs tab gets a **Past runs** dropdown above the log view: `Live (current run)` keeps the existing tail-poll behaviour; selecting a past run swaps to read-only mode showing that run's lines with the same timestamp / type-color rendering. Dropdown auto-refreshes when a run completes so you don't need to reload to see the just-finished entry. Capped at `RUN_HISTORY_MAX` entries (default 200, configurable via env). New API endpoints: `GET /api/runs` for the summary list (no log payload — fast), `GET /api/runs/:at` for a single run's full record. Existing users have no history before this version; first scheduled or Run-Now after upgrade is the first entry. Storage: ~10 MB max at the default 200-entry cap, so no concern.
+
+---
+
 ## What's new in 2.4.2
 
 **Epic Games — fix login stall on new-device / new-IP sessions ([#28](https://github.com/feldorn/free-games-claimer/issues/28)).** Epic shows a "Is this the right account?" confirmation prompt between credentials-submitted and the redirect to the claim URL when the login is coming from a new device, IP, or browser fingerprint — a cold start in a fresh container hits this every time. Without an auto-click on the prompt, our flow waited for `URL_CLAIM` that never arrived (the prompt was blocking the redirect) and timed out, presenting as "captcha completed but login fails." Ported the prompt handler from [P-Adamiec/free-games-claimer](https://github.com/P-Adamiec/free-games-claimer) (commit e421633): fire-and-forget `waitForSelector('button#yes, button[aria-label="Yes, continue"]')` with a 30s timeout and a silent `catch`, so already-logged-in or non-prompted sessions see zero behavior change. Surfaced by @DoSpamu's report on issue #28 plus a side-by-side review of the two forks' epic-games.js / aliexpress.js / gog.js (the GOG and AliExpress comparisons surfaced no gaps — feldorn is strictly ahead on those).
