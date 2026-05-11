@@ -41,20 +41,23 @@ curl -s http://localhost:9377/health
 
 ### Tier 0 — manual VNC observation (~30 min, no code)
 
-Connect a VNC viewer to `localhost:5901` and drive Camoufox by hand. Useful for eyeballing AWSC behavior side-by-side with the existing patchright noVNC at `localhost:6080`.
+Connect a VNC viewer to `localhost:5901` (native VNC client) or `http://localhost:6081/vnc.html` (in-browser noVNC) to drive Camoufox by hand. Useful for eyeballing AWSC behavior side-by-side with the existing patchright noVNC at `localhost:6080`.
+
+> ⚠ **VNC will be blank until you create a tab via the API.** The `jo-inc/camofox-browser` image pre-warms Camoufox at startup but doesn't open a visible browser window. Until the first `POST /tabs` call, the Xvfb display is just a black screen (verified by `xwininfo -root -children` showing only a 10×10 placeholder window). Connect VNC, *then* run the two curl commands below — the visible Navigator window appears as soon as the tab is created, and the page renders inside it after navigate.
 
 ```sh
-# Open a tab via the API, then watch what happens in VNC
+# 1. Create a tab — visible browser window appears in VNC now
 TAB=$(curl -s -X POST http://localhost:9377/tabs \
   -H 'Content-Type: application/json' \
   -d '{"userId":"poc","sessionKey":"poc-test"}' | jq -r .tabId)
 
+# 2. Navigate the tab — the AliExpress page renders inside the visible browser
 curl -s -X POST "http://localhost:9377/tabs/$TAB/navigate" \
   -H 'Content-Type: application/json' \
   -d '{"userId":"poc","url":"https://m.aliexpress.com/p/coin-index/index.html","waitUntil":"domcontentloaded"}'
 ```
 
-In the VNC viewer you should see Camoufox (Firefox-shaped UI) navigate to AliExpress. Try logging in. Record the outcome shape (no-gate / soft-slider / harder challenge / outright refusal) in `docs/camoufox-poc-results.md`.
+In the VNC viewer you'll see Camoufox (Firefox-shaped UI) navigate to AliExpress in a 1366×688 window in the top-left of the 1920×1080 Xvfb area (the surrounding black margin is just empty desktop — not a rendering problem). Click "Sign in" and proceed with your AliExpress login as normal; VNC mirrors everything Camoufox is doing. Record the outcome shape (no-gate / soft-slider / harder challenge / outright refusal) in [`docs/camoufox-poc-results.md`](../docs/camoufox-poc-results.md).
 
 If Camoufox visibly walks through where patchright slider-gates, Tier 1 is the next step. If Camoufox sees the same slider, the experiment is essentially over — the ceiling is real and Tier 1 won't change the answer.
 
