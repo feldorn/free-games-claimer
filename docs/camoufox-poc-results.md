@@ -1,11 +1,19 @@
 # Camoufox PoC — results
 
-**Status**: 🧪 in progress
+**Status**: 🟡 inconclusive-leaning-negative (N=1) — no production integration; branch remains open for further testers
+**Verdict date**: 2026-05-11
 **Branch**: `experiment/camoufox-poc`
 **Question**: Does engine-level fingerprint spoofing (Camoufox) measurably improve AWSC outcomes for AliExpress over patchright in a containerized self-hosted setup?
 **Methodology**: see [experiments/README.md](../experiments/README.md)
 
-This file is the public record of what we tried and what happened. Filled in during testing. Survives in repo regardless of outcome (per the experiment plan) so future readers don't have to re-run the same experiment to know the answer.
+This file is the public record of what we tried and what happened. Survives in repo regardless of outcome so future readers don't have to re-run the same experiment to know the answer.
+
+## TL;DR
+
+- **One Tier 0 test** on a real AliExpress account (@dabziuebu4egh2 in [#28](https://github.com/feldorn/free-games-claimer/issues/28)) hit the **same AWSC slider** that patchright presents. Engine-level WebGL / audio / nav-prop spoofing did not change the AWSC outcome for that account.
+- **In parallel**, the original reporter (@DoSpamu in [#28](https://github.com/feldorn/free-games-claimer/issues/28)) reported that both Epic and AliExpress *self-resolved* after a few days of waiting — textbook **Category C** account-level risk-score decay from the [Bot detection README section](../README.md#bot-detection--what-works-what-doesnt).
+- The two data points together are consistent with the "ceiling is account/hardware-bound, not JS-injection-bound" hypothesis the README opens with. The Camoufox engine swap doesn't help in the cases tested.
+- **No production integration.** Branch remains open in case a different store hits aggressive fingerprint pressure later or more volunteer testers want to A/B against their own accounts. The honest README framing was cherry-picked to `main` independently in 2.5.5.
 
 ---
 
@@ -134,12 +142,16 @@ After all five scenarios have ≥5 runs each, evaluate against the gates from th
 - **🟡 C/D outperform but only on cookied runs (D > B; C ≈ A)**: middle outcome. Document and revisit only if a second store hits the same bottleneck. Don't ship the engine port yet.
 - **🔴 C and D match A and B**: ceiling is hardware/account-bound, not JS-injection-bound. Cherry-pick the docs commits to main; abandon the engine integration.
 
-**Verdict**: _(fill in)_
+**Verdict** (2026-05-11): 🟡 **N=1 result lands in the middle gate** (Camoufox saw same slider as patchright; not enough data to definitively close 🔴 but enough to defer production integration). DoSpamu's auto-resolution data confirms Category C account-decay is real and is the dominant variable, not engine fingerprint. The engine ceiling for our containerized environment doesn't appear to be the JS-shim layer — Camoufox does present different signals (verified WebGL spoof, etc.) but AWSC doesn't score the difference high enough on the tested account.
 
-**Date verdict reached**: _(fill in)_
-
-**Action taken**: _(fill in: e.g. "merged branch with Camoufox engine option behind ALIEXPRESS_ENGINE=camoufox flag" / "cherry-picked 16b5818 (docs) to main, closed experiment branch as not-merging" / etc.)_
+**Action taken**:
+- Cherry-picked the docs commit (now `500ba16` on main) into the 2.5.5 release — honest bot-detection framing + AliExpress deprecation language lands as user-facing documentation regardless of engine outcome.
+- **No production integration of Camoufox.** Engine swap not justified by current data.
+- **Branch remains open**: scaffolding (`experiments/`, `docker-compose.experiments.yml`, this results doc) preserved for any subsequent volunteer who wants to A/B against their own account, or for future relevance if a different store starts gating aggressively on engine signals. Anyone re-testing should append a row to the aggregate-outcomes table above + a note in the section below.
 
 ## Notes / observations / surprises
 
-_Free-form. Document anything that wasn't on the original methodology — e.g. "Camoufox image takes 90s to start cold," "AWSC slider behaves visibly different in Firefox vs Chromium even when both fail," "discovered jo-inc/camofox-browser exposes a REST API not a CDP endpoint, switched to local-binary mode," etc._
+- **Camoufox-with-jo-inc-image VNC is empty until the first POST /tabs** (#28). Camoufox pre-warms a 10×10 placeholder window only; the visible 1366×688 Navigator doesn't open until the first tab is created. Tier 0 doc updated to call this out explicitly.
+- **AWSC scores account-level risk independently of engine fingerprint**: same account that hit the slider on Camoufox (N=1) had patchright traffic prior to the test, so the account was already weighted as suspicious. Cleanly separating "engine effect" from "account effect" would require testing against a fresh account with no prior automation history, which neither volunteer was willing to set up (understandably).
+- **DoSpamu's auto-resolution timing** (~2 days for both Epic and AliExpress to start working) is a useful data point for setting user expectations on `wait it out` as the practical workaround. Folded into the README detection-ceiling section.
+- **jo-inc/camofox-browser REST API surface is good** — tab/navigate/screenshot/snapshot/cookie-import/traces all clean. If we ever did integrate this image (Phase 2), the API is the easier shape than wrangling a standalone Camoufox binary + Playwright launch.
