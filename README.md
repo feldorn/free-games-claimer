@@ -185,7 +185,7 @@ for `BASE_PATH`, `PUBLIC_URL`, and `NOVNC_URL`.
 | `NOTIFY_TITLE` | | Optional title for notifications |
 | `NOTIFY_ATTACH_SCREENSHOTS` | `1` | Attach the most recent screenshot to failure notifications. Set to `0` to keep notifications text-only (privacy / bandwidth). Also editable in **Settings → Notifications**. |
 | `CLAIM_CMD` | (active services in claim order) | Shell command the scheduler runs at its anchored wake. Built dynamically from the active services in the registry's claim order; set this to override with a fixed pipeline. |
-| `CLAIM_CMD_MANUAL` | (active services minus microsoft) | Shell command the "Run Now" button runs. Excludes microsoft.js by default so a manual run finishes in a few minutes instead of hanging overnight. |
+| `CLAIM_CMD_MANUAL` | (active services minus microsoft) | Shell command for a manual chain run *with no sites picker* (e.g. driven from an external invocation). Since 2.5.3 the panel's **Run Now** button opens a per-run picker modal where the user checks specific services for that run; the picker defaults match this exclusion (everything except microsoft.js, since a paced MS run adds ~30-45 min). Override this env only if you have a CLI / cron caller that needs a fixed pipeline. |
 | `SHOW` | `1` (Docker) | Show browser GUI. Default is headless outside Docker. |
 | `WIDTH` | `1920` | Browser/screen width |
 | `HEIGHT` | `1080` | Browser/screen height |
@@ -979,7 +979,7 @@ integration. All endpoints are rooted at `<BASE_PATH>/api`.
 | `POST` | `/launch` | Open a visible browser for a site: `{ "site": "gog" }` |
 | `POST` | `/verify` | After a manual login — verify + persist the session |
 | `POST` | `/check` | Run a headless session probe: `{ "site": "microsoft" }` |
-| `POST` | `/runall` | Fire a claim run (background) — uses `CLAIM_CMD_MANUAL` |
+| `POST` | `/run-all` | Fire a claim run (background). Optional `{ sites: [...] }` body limits the run to those service ids; without a body, uses `CLAIM_CMD_MANUAL` semantics (everything except microsoft.js). The panel's Run-Now picker uses the body form. |
 | `POST` | `/stop-run` | SIGTERM the current run |
 | `GET`  | `/run-log?since=N` | Stream run output from offset `N`, returns `{lines, total, status}` |
 | `GET`  | `/config` | Effective config + schema: `{app, effective, fields[]}` |

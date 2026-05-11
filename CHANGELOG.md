@@ -4,6 +4,16 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.5.3
+
+**Run-Now picker modal ([#32](https://github.com/feldorn/free-games-claimer/issues/32)).** The main page's **Run Now** button now opens a picker modal listing all active services with checkboxes, grouped by category (Claimers / Point-coin collectors / Watchers). Defaults match the historical `CLAIM_CMD_MANUAL` behavior — everything checked except Microsoft Rewards (which adds ~30-45 min to the run because of the humanlike search pacing). User can opt MS in for this specific run, opt anything else out, or use the Select-all / Select-none shortcuts. Click outside or hit Esc to cancel.
+
+Server-side: `POST /api/run-all` now accepts an optional `{ sites: [...] }` body. Backward compatible — no body still fires the historical "everything except MS" chain. With a `sites` body, the chain runs exactly the selected services and `runAllScripts` auto-applies `MS_SKIP_WINDOW=1` if Microsoft Rewards is among them, so a manual MS run doesn't sleep until tomorrow's window.
+
+Surfaced the long-running-MS design as a UI control rather than a silent exclusion — the per-card Run buttons still work for one-off single-service runs, but Run-Now no longer requires per-card-clicking to fire a mixed subset including MS.
+
+---
+
 ## What's new in 2.5.2
 
 **Logs tab — fix empty body when returning to a past-log view.** If you selected a past run from the dropdown, then switched to another tab, then came back, the body went blank — `startLogsTabPoll` reset the body to a "Loading…" placeholder and then `pollLogsTab` early-returned in history mode without ever repopulating it. Now we re-fetch and re-render the past log entry whenever the dropdown selection is non-empty on tab re-entry, so the view honors the dropdown state. The dropdown selection is intentionally preserved across tab switches — to see live output from a run that started while you were away, click the dropdown and pick `Live (current run)`.

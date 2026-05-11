@@ -1799,6 +1799,10 @@ async function getState() {
       name: site.name,
       version: site.version || null,
       active: active.has(id),
+      // scheduleKind exposed so the Run-Now picker (and any other
+      // category-aware UI) can group services without re-deriving from
+      // hardcoded ID lists. Mirrors the registry value as-is.
+      scheduleKind: site.scheduleKind || null,
       lastSuccessfulRun: lastRunSuccess[id] || null,
       // External-link target for the Sessions card "↗" icon. homeUrl
       // (where the user actually wants to land — store landing page,
@@ -2560,6 +2564,26 @@ const PANEL_HTML = `<!DOCTYPE html>
   .unsaved-modal-body { font-size: 14px; color: #c0c8d8; line-height: 1.5; margin-bottom: 18px; }
   .unsaved-modal-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
   .unsaved-modal-actions .btn { font-size: 13px; padding: 8px 14px; }
+  /* Run-Now picker — appears when user clicks Run Now. Lists all active
+     services grouped by category with checkbox per service. Defaults
+     match CLAIM_CMD_MANUAL (everything checked except microsoft +
+     microsoft-mobile, which add ~30-45 min to a run). */
+  .run-picker-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.65); z-index: 200; display: flex; align-items: center; justify-content: center; }
+  .run-picker-card { background: #16213e; border: 1px solid #2a3a5a; border-radius: 8px; padding: 22px 24px; max-width: 520px; width: 92%; max-height: 80vh; overflow-y: auto; box-shadow: 0 8px 32px rgba(0,0,0,0.5); display: flex; flex-direction: column; }
+  .run-picker-title { font-size: 16px; font-weight: 600; color: #ffffff; margin-bottom: 8px; }
+  .run-picker-sub { font-size: 12.5px; color: #8aa0c2; margin-bottom: 14px; line-height: 1.5; }
+  .run-picker-body { flex: 1; min-height: 0; overflow-y: auto; margin-bottom: 14px; }
+  .rp-group { margin-bottom: 12px; }
+  .rp-group-title { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.06em; color: #8aa0c2; font-weight: 600; margin-bottom: 6px; padding-bottom: 4px; border-bottom: 1px solid #1f3050; }
+  .rp-row { display: flex; align-items: center; gap: 8px; padding: 6px 4px; font-size: 13px; color: #e0e6f0; cursor: pointer; border-radius: 4px; }
+  .rp-row:hover { background: #1f2c4a; }
+  .rp-row input[type="checkbox"] { margin: 0; }
+  .rp-row .rp-hint { font-size: 11.5px; color: #8aa0c2; margin-left: auto; }
+  .rp-shortcuts { display: flex; gap: 6px; padding-top: 4px; border-top: 1px solid #1f3050; padding-top: 10px; }
+  .rp-shortcuts button { background: #1a2840; color: #c0c8d8; border: 1px solid #2a3a58; border-radius: 4px; padding: 4px 10px; font-size: 12px; cursor: pointer; font-family: inherit; }
+  .rp-shortcuts button:hover { background: #243355; }
+  .run-picker-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+  .run-picker-actions .btn { font-size: 13px; padding: 8px 14px; }
   /* Cookie-import modal — paste-or-upload entry, file input above the
      textarea, with a status line that flips between info / error /
      success below. Reuses the unsaved-modal overlay styling for
@@ -2721,6 +2745,17 @@ const PANEL_HTML = `<!DOCTYPE html>
       <button class="btn btn-check-all" id="btnRevealCreds" onclick="toggleRevealEnv()">Reveal credentials</button>
     </div>
     <div class="env-view-body" id="envView">Loading…</div>
+  </div>
+</div>
+<div class="run-picker-modal" id="runPickerModal" role="dialog" aria-modal="true" aria-labelledby="runPickerTitle" style="display:none" onclick="rpBackdropClick(event)">
+  <div class="run-picker-card" onclick="event.stopPropagation()">
+    <div class="run-picker-title" id="runPickerTitle">Run Now — pick services</div>
+    <div class="run-picker-sub">Defaults match the current Run-Now behavior (everything except Microsoft Rewards, which adds ~30-45 min). Check anything you want included in this run, uncheck anything to skip.</div>
+    <div class="run-picker-body" id="runPickerBody"></div>
+    <div class="run-picker-actions">
+      <button class="btn btn-cancel" onclick="cancelRunPicker()">Cancel</button>
+      <button class="btn btn-run" id="btnRunPickerConfirm" onclick="confirmRunPicker()">Run selected</button>
+    </div>
   </div>
 </div>
 <div class="unsaved-modal" id="unsavedModal" role="dialog" aria-modal="true" aria-labelledby="unsavedModalTitle" style="display:none">
@@ -4124,7 +4159,7 @@ if (typeof window !== 'undefined' && !window.__rhpClickOutsideInstalled) {
     if (picker && !picker.contains(e.target)) closeRunHistoryPicker();
   });
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') closeRunHistoryPicker();
+    if (e.key === 'Escape') { closeRunHistoryPicker(); cancelRunPicker(); }
   });
 }
 
@@ -5098,10 +5133,106 @@ async function markLenovoCollected(dropId) {
   } catch (e) { showToast('Error: ' + e.message, 'error'); }
 }
 
-async function runAll() {
+// "Run Now" no longer fires immediately — it opens a picker so the user
+// can include/exclude services per run (especially MS Rewards, which the
+// historical CLAIM_CMD_MANUAL excluded by default because of its 30-45
+// minute search-paced runtime). #32.
+function runAll() { openRunPicker(); }
+
+function openRunPicker() {
+  const modal = document.getElementById('runPickerModal');
+  const body = document.getElementById('runPickerBody');
+  if (!modal || !body || !state || !Array.isArray(state.sites)) return;
+
+  // state.sites only includes login-having services (checkLogin set).
+  // Watchers come from state.watchers (already filtered to active).
+  // Combine both into a single list for the picker; tag any state.watchers
+  // entry as watch-only so the categorizer below routes it correctly.
+  const sitesActive = state.sites.filter(s => s.active !== false);
+  const watchers = (Array.isArray(state.watchers) ? state.watchers : [])
+    .map(w => ({ ...w, scheduleKind: 'watch-only', active: true }));
+  const active = sitesActive.concat(watchers);
+
+  // Categorize using the same rule getServiceRows uses server-side:
+  //   watch-only      → 'watch'
+  //   microsoft* / ae → 'points'
+  //   else            → 'game'
+  // scheduleKind comes from state.sites (added 2.5.3-ish).
+  const groups = { game: [], points: [], watch: [] };
+  active.forEach(s => {
+    const cat = s.scheduleKind === 'watch-only' ? 'watch'
+      : (s.id === 'aliexpress' || (s.id || '').indexOf('microsoft') === 0) ? 'points'
+      : 'game';
+    groups[cat].push(s);
+  });
+  const byName = (a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' });
+  Object.values(groups).forEach(g => g.sort(byName));
+
+  // Defaults: everything checked EXCEPT microsoft + microsoft-mobile.
+  // That mirrors CLAIM_CMD_MANUAL's behavior so users who hit Run Now
+  // without touching the picker get the same outcome as before. Users
+  // who want MS in their manual run check the box.
+  const isMs = id => id === 'microsoft' || id === 'microsoft-mobile';
+  const hintFor = id => isMs(id) ? '~30-45 min' : '';
+
+  const renderGroup = (title, items) => {
+    if (!items.length) return '';
+    let html = '<div class="rp-group"><div class="rp-group-title">' + escapeHtml(title) + '</div>';
+    items.forEach(s => {
+      const checked = !isMs(s.id);
+      const hint = hintFor(s.id);
+      html += '<label class="rp-row">' +
+        '<input type="checkbox" data-site-id="' + escapeHtml(s.id) + '"' + (checked ? ' checked' : '') + '>' +
+        '<span class="rp-name">' + escapeHtml(s.name || s.id) + '</span>' +
+        (hint ? '<span class="rp-hint">' + escapeHtml(hint) + '</span>' : '') +
+        '</label>';
+    });
+    html += '</div>';
+    return html;
+  };
+
+  let html = '';
+  html += renderGroup('Claimers', groups.game.filter(s => s.id !== 'aliexpress'));
+  // AliExpress is daily-chain but conceptually a points collector; show it with MS.
+  const pointsGroup = groups.points.concat(groups.game.filter(s => s.id === 'aliexpress'));
+  pointsGroup.sort(byName);
+  html += renderGroup('Point / coin collectors', pointsGroup);
+  html += renderGroup('Watchers', groups.watch);
+  if (!html) html = '<div class="logs-empty" style="padding:12px">No active services. Enable some in Settings → Services first.</div>';
+  html += '<div class="rp-shortcuts">' +
+    '<button type="button" onclick="rpSelectAll(true)">Select all</button>' +
+    '<button type="button" onclick="rpSelectAll(false)">Select none</button>' +
+    '</div>';
+
+  body.innerHTML = html;
+  modal.style.display = 'flex';
+}
+
+function cancelRunPicker() {
+  const modal = document.getElementById('runPickerModal');
+  if (modal) modal.style.display = 'none';
+}
+
+function rpBackdropClick(e) {
+  if (e && e.target && e.target.id === 'runPickerModal') cancelRunPicker();
+}
+
+function rpSelectAll(checked) {
+  const boxes = document.querySelectorAll('#runPickerBody input[type="checkbox"]');
+  boxes.forEach(b => { b.checked = checked; });
+}
+
+async function confirmRunPicker() {
+  const boxes = document.querySelectorAll('#runPickerBody input[type="checkbox"]:checked');
+  const sites = Array.from(boxes).map(b => b.dataset.siteId).filter(Boolean);
+  if (!sites.length) {
+    showToast('Pick at least one service to run.', 'error');
+    return;
+  }
+  cancelRunPicker();
   busy = true; render();
   try {
-    const r = await api('POST', '/run-all');
+    const r = await api('POST', '/run-all', { sites });
     if (r.success) {
       logOffset = 0;
       showRunLog();
@@ -5392,7 +5523,15 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'POST' && req.url === '/api/run-all') {
-      const result = runAllScripts({ source: 'panel' });
+      // Optional { sites: [...] } body lets the Run-Now picker fire a
+      // tailored subset. Backward-compatible: no body = current behavior
+      // (CLAIM_CMD_MANUAL semantics, MS excluded by default).
+      let body = null;
+      try { body = await parseBody(req); } catch { /* tolerate missing body */ }
+      const sites = body && Array.isArray(body.sites)
+        ? body.sites.filter(s => typeof s === 'string' && s)
+        : null;
+      const result = runAllScripts({ source: 'panel', sites: sites && sites.length ? sites : null });
       sendJson(res, result);
       return;
     }
