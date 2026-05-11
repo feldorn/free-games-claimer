@@ -681,6 +681,17 @@ async function executeBingSearch(page, searchTerm, preEnterMs) {
   }
 }
 
+// A "browser closed" / "context closed" Playwright error means the
+// underlying Chromium process is gone (user closed the window in VNC,
+// container OOM-killed it, etc.). No amount of retry will recover —
+// throw to the caller so the session block can log a clean failure
+// and the run summary still emits, instead of spamming 30+ identical
+// retry lines for every remaining search. #32.
+function isFatalBrowserError(e) {
+  const msg = String((e && e.message) || e || '');
+  return /target page, context or browser has been closed|browser has been closed|target closed/i.test(msg);
+}
+
 async function executeBingSearches(page, searchTerms) {
   const maxDelay = cfg.ms_search_delay_max;
   const initMs = randomMs(maxDelay);
@@ -699,6 +710,10 @@ async function executeBingSearches(page, searchTerms) {
         break;
       } catch (e) {
         const msg = e.message.split('\n')[0];
+        if (isFatalBrowserError(e)) {
+          log.fail(`Browser closed mid-run — aborting remaining searches. ${msg}`);
+          throw e;
+        }
         if (attempt < 3) {
           log.warn(`Search #${i + 1} attempt ${attempt} failed; retrying. ${msg}`);
         } else {

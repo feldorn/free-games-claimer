@@ -4,6 +4,12 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.5.4
+
+**MS Rewards — bail out instead of retry-spamming when Chromium dies mid-run ([#32](https://github.com/feldorn/free-games-claimer/issues/32)).** When the underlying browser process was lost mid-run (user closed the Chromium window via VNC, OOM-killer, container restart, etc.), `microsoft.js`'s per-search retry loop kept logging `Target page, context or browser has been closed` for every search × every retry — 90+ identical error lines back-to-back instead of giving up. Now the retry loop classifies `target/browser/context closed` as a *fatal* error and `throw`s to the caller, so the desktop/mobile session block logs a clean single-line failure and the run-complete summary still emits. The user-facing behavior change is just "obvious clean failure in the log" rather than "wall of identical retry warnings."
+
+---
+
 ## What's new in 2.5.3
 
 **Run-Now picker modal ([#32](https://github.com/feldorn/free-games-claimer/issues/32)).** The main page's **Run Now** button now opens a picker modal listing all active services with checkboxes, grouped by category (Claimers / Point-coin collectors / Watchers). Defaults match the historical `CLAIM_CMD_MANUAL` behavior — everything checked except Microsoft Rewards (which adds ~30-45 min to the run because of the humanlike search pacing). User can opt MS in for this specific run, opt anything else out, or use the Select-all / Select-none shortcuts. Click outside or hit Esc to cancel.
