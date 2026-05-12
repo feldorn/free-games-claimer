@@ -969,12 +969,13 @@ NPM is GUI-driven — configuration lives in toggles on the proxy host's
 
 Force SSL and HTTP/2 are fine to leave on.
 
+**Pre-flight (any shape):** Confirm every hostname you use in `PUBLIC_URL` / `NOVNC_URL` / proxy-host config **actually resolves** to your proxy. For split-subdomain setups in particular it's easy to add the proxy host in NPM, point your env vars at it, and forget to create the DNS A/CNAME record — symptoms then look like a generic "noVNC won't load" but the real issue is that the request never reaches NPM. Quick check: `dig +short no-vnc.your-domain` (or whatever the noVNC hostname is) should return your proxy's IP. If it returns nothing, fix DNS before chasing toggles.
+
 **By shape:**
 
 - **Split-subdomain** — two proxy hosts. Panel host → port 7080. noVNC host
   → port 6080. No custom locations on either — the whole subdomain forwards
-  straight to one port. See [#26](https://github.com/feldorn/free-games-claimer/issues/26)
-  for a worked example.
+  straight to one port. Both subdomains need their own DNS records.
 - **Subfolder** — works via NPM's **Custom locations** tab; mirror the
   SWAG/nginx example above (one location for `<base>/` → 7080, one for
   `<base>/novnc/` with a rewrite → 6080, one for `/websockify` → 6080).
