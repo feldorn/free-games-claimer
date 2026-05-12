@@ -1009,6 +1009,7 @@ All data lives in the `data/` directory (mounted as a Docker volume).
 | `data/ms-used-terms.json` | Microsoft Rewards — search terms used in the last 30 days (dedup window) |
 | `data/config.json` | App-level config overrides written by the Settings tab. Missing = env/defaults in effect. Deleted = same as missing. |
 | `data/runs.json` | Run-history log — per-run record (start time, source, exit code, duration, summary counters, full log buffer) for the last `RUN_HISTORY_MAX` runs (default 200). Powers the Logs tab's **Past runs** dropdown. Auto-trims; deleting clears history. |
+| `data/scheduler-state.json` | Persistent wake anchor for the main scheduler — currently just `{ lastMainCompletedAt }`. Used by the LOOP-without-`START_TIME` path so panel restarts don't reset the 24h clock. Updated on every scheduler-main close; created lazily on first run. Safe to delete (next run falls back to "24h from boot" until the file is rewritten). |
 | `data/screenshots/` | Screenshots of claim results |
 
 </details>

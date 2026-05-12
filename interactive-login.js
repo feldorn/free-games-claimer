@@ -319,6 +319,16 @@ let runStatus = 'idle';
 // so Settings → Advanced edits take effect on the next run without
 // requiring a panel restart.
 let runHistoryDb = null;
+
+// Persisted scheduler state — issue #32. Without this, the LOOP-without-
+// anchor mode (bare LOOP, no START_TIME) resets its wake clock to
+// "24h from now" on every panel restart. That silently skips daily
+// runs when a user restarts the container at all (image pulls, host
+// reboots, panel updates). We persist the last successful main-chain
+// completion timestamp and use it as the wake anchor on boot so the
+// scheduler honors "24h from last completion" across restarts —
+// firing immediately when past-due, sleeping the remainder when not.
+let schedulerStateDb = null;
 function getRunHistoryMax() {
   try {
     const eff = describeConfig().effective;
@@ -1129,6 +1139,23 @@ function runAllScripts({ source = 'panel', sites = null, extraEnv = null } = {})
       });
     });
 
+    // Persist the scheduler-main wake anchor (issue #32). Updated from
+    // the close handler whenever a scheduler-main run finishes; used by
+    // computeMainWakeMs on boot so a panel restart doesn't reset the
+    // bare-LOOP wake clock. Persist regardless of exit code — partial
+    // failure still counts as "we fired today, don't fire again on
+    // restart." Best-effort; write failures fall back to the original
+    // sleep-from-now behavior.
+    const persistMainCompletion = async () => {
+      if (!schedulerStateDb) return;
+      try {
+        schedulerStateDb.data.lastMainCompletedAt = new Date().toISOString();
+        await schedulerStateDb.write();
+      } catch (e) {
+        console.error(`[${datetime()}] failed to persist scheduler state: ${e.message}`);
+      }
+    };
+
     // Persist a finished run to data/runs.json so the Logs tab can
     // surface history. Called from both close and error handlers below.
     // Captures runLog at this exact moment (before runAllScripts resets
@@ -1197,6 +1224,14 @@ function runAllScripts({ source = 'panel', sites = null, extraEnv = null } = {})
       // 09:00 click + scheduled 10:48 fire would double-run MS.
       if (code === 0 && /\bnode microsoft\.js\b/.test(cmd)) {
         try { markMsRunFiredToday(); } catch {}
+      }
+      // Persist the scheduler-main completion timestamp so a panel
+      // restart doesn't reset the bare-LOOP wake clock (issue #32).
+      // We persist regardless of exit code — the intent is "scheduler
+      // woke up and fired today", a partial-failure shouldn't cause us
+      // to fire again immediately on next restart.
+      if (runSource && runSource.startsWith('scheduler-main')) {
+        void persistMainCompletion();
       }
       // Persist before clearing the closure-captured runSource/runStartedAt
       // so the history entry has the right metadata.
@@ -1382,9 +1417,28 @@ function computeMainWakeMs() {
     return Math.max(wake.getTime() - Date.now(), 60 * 1000);
   }
 
-  // Bare LOOP (no anchor) — sleep N seconds from "now" (caller schedules
-  // the post-run sleep too, so this also serves as the from-completion wait).
-  if (c.loop > 0) return c.loop * 1000;
+  // Bare LOOP (no anchor) — anchor on the last persisted main-chain
+  // completion so a panel restart doesn't push the next-wake forward
+  // by however long the container was down (issue #32). Without
+  // persistence, "every 24h" silently became "every 24h from boot"
+  // and skipped days whenever the panel restarted.
+  if (c.loop > 0) {
+    const intervalMs = c.loop * 1000;
+    const lastAt = schedulerStateDb && schedulerStateDb.data && schedulerStateDb.data.lastMainCompletedAt;
+    if (lastAt) {
+      const last = new Date(lastAt).getTime();
+      if (Number.isFinite(last)) {
+        // Past-due → fire immediately (caller's sleepUntilWakeup floors
+        // negative values). The +60s floor below avoids tight loops on
+        // a clock-skew or last-completion-in-the-future edge case.
+        return Math.max(60 * 1000, last + intervalMs - Date.now());
+      }
+    }
+    // No persisted state — first boot after upgrade, or first run ever.
+    // Sleep the full interval from now; once that fires and completes,
+    // the state file is populated and future restarts honor the anchor.
+    return intervalMs;
+  }
 
   return 0; // disabled
 }
@@ -5883,6 +5937,15 @@ server.listen(PANEL_PORT, async () => {
   // the persistRunHistory helper checks for null and silently skips.
   try { runHistoryDb = await jsonDb('runs.json', { runs: [] }); }
   catch (e) { console.error(`[${datetime()}] failed to load runs.json: ${e.message}`); }
+
+  // Scheduler state load — issue #32. Holds the last main-chain
+  // completion timestamp so computeMainWakeMs can use it as an anchor
+  // for bare-LOOP mode (no START_TIME). Without this persistence, every
+  // panel restart resets the wake clock to "24h from now" and skips
+  // days. Empty {} on first boot after upgrade is fine — the existing
+  // sleep-from-now fallback in computeMainWakeMs handles that case.
+  try { schedulerStateDb = await jsonDb('scheduler-state.json', {}); }
+  catch (e) { console.error(`[${datetime()}] failed to load scheduler-state.json: ${e.message}`); }
 
   console.log(`[${datetime()}] Free Games Claimer ${APP_VERSION ? 'v' + APP_VERSION + ' ' : ''}— panel + scheduler`);
   console.log(`[${datetime()}] Control panel: http://localhost:${PANEL_PORT}${BASE_PATH}`);
