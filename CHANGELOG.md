@@ -4,6 +4,12 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.5.6
+
+**Schedule tab — accurate display + countdown when browser TZ ≠ server TZ.** Spotted while viewing a CDT-server panel from an ET browser: the displayed "Next run: 07:30" was being misread as 07:30 ET when the scheduler will actually fire at 07:30 CDT (08:30 ET), and the live countdown was off by an hour because JavaScript parses naked `"YYYY-MM-DD HH:mm:ss"` strings as browser-local. Two fixes: (a) state response now includes UTC-ISO timestamps (`nextScheduledRunIso`, `nextMainRunIso`, `nextMsRunIso`, `lastRun.atIso`) plus a `serverTimezone` field, so the panel can do accurate cross-TZ math; (b) the Schedule tab renders wall times in the *server's* TZ (matching the `START_TIME` the user actually configured and what `docker logs` shows) with a `(8:30 AM EDT your local)` annotation appended only when server TZ differs from browser TZ. Countdown now uses the UTC anchor so it's always correct regardless of which TZ the panel is viewed from. Same-TZ deployments see no visible change.
+
+---
+
 ## What's new in 2.5.5
 
 **Honest baseline on bot detection — what we will and won't chase.** Added a top-level [Bot detection — what works, what doesn't](README.md#bot-detection--what-works-what-doesnt) section to the README documenting three categories of detection failure: (A) UI workflow drift we routinely fix, (B) browser fingerprint scoring against signals that come from real hardware (WebGL renderer, audio context, font enumeration, TLS handshake) — architecturally outside what a containerized self-hosted tool can shim past, (C) account-level risk scoring that decays naturally over weeks. Per-store reality table sets concrete expectations: Prime / Epic / GOG / Steam / MS Rewards stay reliable; AliExpress is deprecated by the upstream platform itself and accepted as best-effort. Explicit "what we won't build and why" subsection covers chromedp sidecars, cloud BaaS, Android emulators, and whole-project Firefox migration. The last was PoC'd on a [separate experiment branch](https://github.com/feldorn/free-games-claimer/tree/experiment/camoufox-poc) (see #28); one Tier 0 test on a real AliExpress account hit the same AWSC slider as patchright, suggesting the ceiling is account/hardware-bound rather than JS-injection-bound. The branch remains open for further volunteer testing but no production integration is planned.

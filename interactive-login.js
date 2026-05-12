@@ -1185,6 +1185,7 @@ function runAllScripts({ source = 'panel', sites = null, extraEnv = null } = {})
       // duplicating it in two consecutive lines was redundant.
       lastRun = {
         at: datetime(),
+        atIso: new Date().toISOString(),
         source: runSource,
         exitCode: code,
         status: runStatus,
@@ -1213,6 +1214,7 @@ function runAllScripts({ source = 'panel', sites = null, extraEnv = null } = {})
       runLog.push({ type: 'system', text: `Error: ${err.message}`, time: datetime() });
       lastRun = {
         at: datetime(),
+        atIso: new Date().toISOString(),
         source: runSource,
         exitCode: -1,
         status: 'error',
@@ -1825,9 +1827,23 @@ async function getState() {
     runStatus,
     runSource,
     runLogLength: runLog.length,
+    // Server-local timestamps (legacy fields — naked strings, no TZ marker).
+    // Kept for any external /api/state consumers; the panel now prefers
+    // the *Iso fields below for accurate display + countdown across TZs.
     nextScheduledRun: effectiveNext ? datetime(effectiveNext) : null,
     nextMainRun: effectiveMain ? datetime(effectiveMain) : null,
     nextMsRun: effectiveMs ? datetime(effectiveMs) : null,
+    // ISO timestamps (UTC with Z) — unambiguous across browser/server TZs.
+    // Panel uses these for both display formatting and countdown math so a
+    // browser in a different TZ from the server sees the right wall time.
+    nextScheduledRunIso: effectiveNext ? effectiveNext.toISOString() : null,
+    nextMainRunIso: effectiveMain ? effectiveMain.toISOString() : null,
+    nextMsRunIso: effectiveMs ? effectiveMs.toISOString() : null,
+    serverTimezone: (() => {
+      try { return Intl.DateTimeFormat().resolvedOptions().timeZone; }
+      catch { return null; }
+    })(),
+    serverTimeIso: new Date().toISOString(),
     msTodayStatus: msState ? msState.status : null,
     legacyCombinedMode: legacyMode,
     mainEnabled,
@@ -2399,6 +2415,7 @@ const PANEL_HTML = `<!DOCTYPE html>
   .sched-value.big { font-size: 26px; font-weight: 600; color: #fff; display: block; margin-bottom: 2px; }
   .sched-value.muted { color: #8aa0c2; font-style: italic; }
   .sched-count { font-size: 13px; color: #4ecca3; }
+  .sched-tz { font-size: 13px; margin-left: 6px; }
   .sched-note { margin-top: 28px; padding-top: 16px; border-top: 1px solid #233454; color: #8aa0c2; font-size: 13px; line-height: 1.6; }
   .sched-services { list-style: none; margin: 0; padding: 0; font-size: 13px; color: #c8d0dc; line-height: 1.75; }
   .sched-services li { position: relative; padding-left: 16px; }
@@ -3828,7 +3845,8 @@ function renderScheduleTab() {
     if (state.nextScheduledRun) {
       parts.push(
         '<div class="sched-row"><div class="sched-label">Next run</div>' +
-        '<div><span class="sched-value big" title="' + state.nextScheduledRun + '">' + formatTimestamp(state.nextScheduledRun, 'short') + '</span>' +
+        '<div><span class="sched-value big" title="' + state.nextScheduledRun + '">' + formatScheduleWallTime(state.nextScheduledRunIso, state.nextScheduledRun) + '</span>' +
+        tzAnnotation(state.nextScheduledRunIso) +
         '<span class="sched-count" id="schedCountdown"></span></div></div>'
       );
     } else {
@@ -3845,7 +3863,8 @@ function renderScheduleTab() {
       if (state.nextMainRun) {
         parts.push(
           '<div class="sched-row"><div class="sched-label">Next run · Claimers</div>' +
-          '<div><span class="sched-value big" title="' + state.nextMainRun + '">' + formatTimestamp(state.nextMainRun, 'short') + '</span>' +
+          '<div><span class="sched-value big" title="' + state.nextMainRun + '">' + formatScheduleWallTime(state.nextMainRunIso, state.nextMainRun) + '</span>' +
+          tzAnnotation(state.nextMainRunIso) +
           '<span class="sched-count" id="mainCountdown"></span></div></div>'
         );
       } else {
@@ -3884,7 +3903,8 @@ function renderScheduleTab() {
       if (state.nextMsRun) {
         parts.push(
           '<div class="sched-row"><div class="sched-label">Next run · MS Rewards</div>' +
-          '<div><span class="sched-value big" title="' + state.nextMsRun + '">' + formatTimestamp(state.nextMsRun, 'short') + '</span>' +
+          '<div><span class="sched-value big" title="' + state.nextMsRun + '">' + formatScheduleWallTime(state.nextMsRunIso, state.nextMsRun) + '</span>' +
+          tzAnnotation(state.nextMsRunIso) +
           '<span class="sched-count" id="msCountdown"></span>' + statusBadge + '</div></div>'
         );
       } else {
@@ -3961,7 +3981,8 @@ function renderScheduleTab() {
     const statusCol = state.lastRun.status === 'success' ? '#4ecca3' : state.lastRun.status === 'error' ? '#e94560' : '#f0c040';
     parts.push(
       '<div class="sched-row"><div class="sched-label">Last run</div>' +
-      '<div class="sched-value"><span title="' + state.lastRun.at + '">' + formatTimestamp(state.lastRun.at, 'short') + '</span>' +
+      '<div class="sched-value"><span title="' + state.lastRun.at + '">' + formatScheduleWallTime(state.lastRun.atIso, state.lastRun.at) + '</span>' +
+        tzAnnotation(state.lastRun.atIso) +
         ' (' + state.lastRun.source + ') — ' +
         '<span style="color:' + statusCol + '">' + state.lastRun.status + '</span>' +
         (dur ? ' · ' + dur : '') +
@@ -3986,15 +4007,72 @@ function formatCountdown(target) {
   return ' · in ' + Math.max(mins, 1) + 'm';
 }
 function updateScheduleCountdown() {
-  const apply = (id, ts) => {
+  // Use the *Iso fields when available — these are UTC-anchored so the
+  // countdown is correct regardless of whether browser TZ matches server TZ.
+  // Naked-string fallback (the .replace path) misparses as browser-local
+  // and is off by the TZ offset, which is exactly the bug a user in a
+  // different TZ from their server would hit.
+  const apply = (id, isoTs, fallback) => {
     const el = document.getElementById(id);
-    if (!el || !ts) return;
-    const t = new Date(ts.replace(' ', 'T')).getTime();
+    if (!el) return;
+    const src = isoTs || fallback;
+    if (!src) return;
+    const t = isoTs ? new Date(isoTs).getTime() : new Date(String(fallback).replace(' ', 'T')).getTime();
     if (Number.isFinite(t)) el.textContent = formatCountdown(t);
   };
-  apply('schedCountdown', state.nextScheduledRun);
-  apply('mainCountdown', state.nextMainRun);
-  apply('msCountdown', state.nextMsRun);
+  apply('schedCountdown', state.nextScheduledRunIso, state.nextScheduledRun);
+  apply('mainCountdown',  state.nextMainRunIso,      state.nextMainRun);
+  apply('msCountdown',    state.nextMsRunIso,        state.nextMsRun);
+}
+
+// Format an ISO timestamp into a server-local-tz wall clock for display.
+// We render in the SERVER's TZ (matches what the user set in START_TIME,
+// matches docker logs, matches the system clock the scheduler reads) and
+// annotate with the browser's TZ separately when they differ — that way
+// the user sees both "what the scheduler thinks the time is" and "when
+// that lands in my local clock." Falls back to slicing the naked string
+// when isoTs isn't available (older state responses, panel-side fields
+// not yet wired through).
+function formatScheduleWallTime(isoTs, fallbackStr) {
+  const src = isoTs || fallbackStr;
+  if (!src) return '';
+  if (!isoTs) {
+    // Legacy fallback — naked "YYYY-MM-DD HH:mm:ss" string from server-local.
+    // No TZ conversion possible, just trim.
+    return String(fallbackStr).replace('T', ' ').slice(0, 16);
+  }
+  const d = new Date(isoTs);
+  if (!Number.isFinite(d.getTime())) return String(src);
+  const tz = (state && state.serverTimezone) || undefined;
+  try {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone: tz,
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', hour12: false,
+    }).format(d).replace(',', '');
+  } catch {
+    // Bad TZ name fallback — render in browser-local
+    return d.toISOString().replace('T', ' ').slice(0, 16);
+  }
+}
+
+// Returns the inline TZ annotation HTML (or empty string) shown next to
+// schedule wall times. Only present when browser TZ differs from server
+// TZ — same TZ = no annotation needed. Annotation shows browser-local
+// time for the same instant so user can convert without mental math.
+function tzAnnotation(isoTs) {
+  if (!isoTs || !state || !state.serverTimezone) return '';
+  let browserTz = null;
+  try { browserTz = Intl.DateTimeFormat().resolvedOptions().timeZone; } catch {}
+  if (!browserTz || browserTz === state.serverTimezone) return '';
+  const d = new Date(isoTs);
+  if (!Number.isFinite(d.getTime())) return '';
+  try {
+    const local = new Intl.DateTimeFormat('en-US', {
+      hour: 'numeric', minute: '2-digit', hour12: true, timeZoneName: 'short',
+    }).format(d);
+    return ' <span class="muted sched-tz">(' + escapeHtml(local) + ' your local)</span>';
+  } catch { return ''; }
 }
 setInterval(updateScheduleCountdown, 30000);
 
@@ -4432,10 +4510,16 @@ function render() {
   const activeSites = state.sites.filter(s => s.active !== false);
   const totalCount = activeSites.length;
   const secondaryParts = [];
-  if (!isRunning && state.nextScheduledRun) secondaryParts.push('Next run ' + formatTimestamp(state.nextScheduledRun, 'relative'));
+  // Prefer the ISO timestamps so cross-TZ relative-time math is accurate.
+  // Naked server-local strings (the *Iso-less fallbacks) get parsed as
+  // browser-local by JS Date, which is off by the TZ offset for users
+  // whose browser TZ differs from server TZ.
+  if (!isRunning && (state.nextScheduledRunIso || state.nextScheduledRun)) {
+    secondaryParts.push('Next run ' + formatTimestamp(state.nextScheduledRunIso || state.nextScheduledRun, 'relative'));
+  }
   if (state.lastRun) {
     const dur = state.lastRun.durationSec != null ? Math.round(state.lastRun.durationSec / 60) + 'm' : '';
-    secondaryParts.push('Last run ' + formatTimestamp(state.lastRun.at, 'relative') + ' (' + state.lastRun.status + (dur ? ', ' + dur : '') + ')');
+    secondaryParts.push('Last run ' + formatTimestamp(state.lastRun.atIso || state.lastRun.at, 'relative') + ' (' + state.lastRun.status + (dur ? ', ' + dur : '') + ')');
   }
   let stripSecondary = secondaryParts.join(' · ');
   let stripKind = 'info';
