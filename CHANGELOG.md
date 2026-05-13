@@ -4,6 +4,16 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.5.8
+
+**Lenovo Gaming — configurable notification priority.** A user missed a "drop is LIVE NOW" alert because their phone was in Do-Not-Disturb mode. Lenovo notifications were always firing at default (normal) priority, which respects DnD/quiet hours on Pushover and most other notifiers — exactly the wrong default for a time-critical "claim within minutes" alert. New per-service setting in **Settings → Services → Lenovo Gaming Key Drops → Notification priority** (env: `LENOVO_NOTIFY_PRIORITY`) with apprise's standard ladder: `low` / `moderate` / `normal` (default) / `high` (bypasses Pushover quiet hours) / `emergency` (requires acknowledgment on Pushover). Applies to all Lenovo notifications — new-drop discovery, 1h/5min/at-drop wakes, restock alerts. Default `normal` preserves existing-deploy behavior; users opt into higher priority via the dropdown.
+
+Apprise translates the level to whatever the configured notifier supports — Pushover honors high/emergency literally, Telegram maps to the silent-notification flag, Discord ignores. Notifier-specific behavior is on the user to know.
+
+Under the hood: `notify()` in `src/util.js` now accepts `opts.priority` and passes `--priority <value>` to apprise when set to anything non-`normal`. Other call sites (claim summaries, captcha pause, watcher alerts) continue to use default normal priority and are unaffected.
+
+---
+
 ## What's new in 2.5.7
 
 **Scheduler — fix LOOP-without-anchor drift across restarts ([#32](https://github.com/feldorn/free-games-claimer/issues/32)).** Found while diagnosing xh43k's "MS didn't run for 2 days" report: a deployment with `LOOP=86400` set but no `START_TIME` was supposed to mean "every 24 hours" but the bare-LOOP code path in `computeMainWakeMs` returned `LOOP * 1000` regardless of when the last run actually completed. That meant every panel restart (image pulls, host reboots, panel updates) reset the wake clock to "24 hours from now" and silently skipped days. Users restarting the container at intervals shorter than `LOOP` were watching their scheduler keep getting pushed forward without firing. Now persisted to `data/scheduler-state.json` on every scheduler-main close: a single `lastMainCompletedAt` ISO timestamp. On boot, `computeMainWakeMs` reads it and computes `wake = max(60s, lastMainCompletedAt + LOOP - now)` — past-due fires immediately, future sleeps the remainder. First-run-ever (no state file) falls back to the original sleep-from-now behavior so existing deployments don't suddenly fire on first upgrade. Independent of the TZ display fix in 2.5.6.

@@ -45,6 +45,10 @@ function coerceFromDescriptor(d, type) {
     case 'nullableNumber':  return v => (v === '' || v == null) ? null : Number(v);
     case 'numberOr':        return v => Number(v) || d.fallback;
     case 'numberBounded':   return v => Math.max(d.min, Number(v) || d.fallback);
+    case 'priorityEnum':    return v => {
+      const s = String(v || '').toLowerCase().trim();
+      return ['low', 'moderate', 'normal', 'high', 'emergency'].includes(s) ? s : 'normal';
+    };
     default: throw new Error(`unknown coerce descriptor kind: ${d.kind}`);
   }
 }

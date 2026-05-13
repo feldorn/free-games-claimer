@@ -155,6 +155,15 @@ export const notify = (html, opts = {}) => {
     const args = [cfg.notify, '-i', 'html', '-b', html];
     if (cfg.notify_title) args.push('-t', cfg.notify_title);
     if (attachPath) args.push('-a', attachPath);
+    // Per-call priority (apprise --priority): low | moderate | normal |
+    // high | emergency. Apprise translates the level to whatever the
+    // configured notifier supports. We default to apprise's own default
+    // (no flag = normal) and only emit when the caller explicitly asked
+    // for a non-normal level, so the existing-deploy notifier behavior
+    // is preserved on calls that don't set opts.priority.
+    if (opts.priority && opts.priority !== 'normal') {
+      args.push('--priority', String(opts.priority));
+    }
     if (cfg.debug) console.debug(`apprise ${args.map(a => `'${a}'`).join(' ')}`); // this also doesn't escape, but it's just for info
     execFile('apprise', args, (error, stdout, stderr) => {
       if (error) {

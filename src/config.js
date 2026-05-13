@@ -20,6 +20,7 @@ const gog   = svc['gog']          || {};
 const steam = svc['steam']        || {};
 const ae    = svc['aliexpress']   || {};
 const ms    = svc['microsoft']    || {};
+const lenovo = svc['lenovo-gaming'] || {};
 
 // Options - also see table in README.md
 export const cfg = {
@@ -113,4 +114,10 @@ export const cfg = {
   // filter disabled); a set null override also yields NaN.
   pg_timeLeft: pg.timeLeftDays != null ? Number(pg.timeLeftDays) : NaN,
   pg_pending_max_age_days: pg.pendingMaxAgeDays != null ? Number(pg.pendingMaxAgeDays) : NaN,
+  // Lenovo Gaming Key Drops — apprise priority level for all Lenovo
+  // notifications (new-drop discovery, 1h/5min/at-drop wakes, restocks).
+  // Default 'normal' preserves existing behavior; 'high' or 'emergency'
+  // helps the at-drop wake punch through DnD/quiet-hours on supporting
+  // notifiers (Pushover most notably).
+  lenovo_notify_priority: lenovo.notifyPriority || 'normal',
 };

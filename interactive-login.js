@@ -1770,7 +1770,16 @@ async function fireLenovoWake(wake) {
     drop.lastStatusChange = datetime();
   }
   console.log(`[${datetime()}] Lenovo: firing ${wake.kind} for "${drop.title}"`);
-  await notify(body).catch(e => console.error(`[${datetime()}] Lenovo notify failed: ${e.message.split('\n')[0]}`));
+  // Read priority via describeConfig() so a Settings tab save takes effect
+  // on the next wake without requiring a panel restart — cfg.lenovo_notify_priority
+  // is module-scoped from boot and wouldn't see live edits.
+  let lenovoPriority = 'normal';
+  try {
+    const eff = describeConfig().effective;
+    lenovoPriority = (eff?.services?.['lenovo-gaming']?.notifyPriority) || 'normal';
+  } catch { /* fall back to normal */ }
+  await notify(body, { kind: 'action', priority: lenovoPriority })
+    .catch(e => console.error(`[${datetime()}] Lenovo notify failed: ${e.message.split('\n')[0]}`));
 
   drop.notifications = drop.notifications || {};
   drop.notifications[wake.kind] = datetime();

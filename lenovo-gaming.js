@@ -315,7 +315,8 @@ try {
 
   if (lines.length) {
     const body = lines.join('<br>');
-    await notify(body).catch(err => log.warn(`Notify failed: ${err.message.split('\n')[0]}`));
+    await notify(body, { kind: 'action', priority: cfg.lenovo_notify_priority })
+      .catch(err => log.warn(`Notify failed: ${err.message.split('\n')[0]}`));
   } else {
     log.info('No changes since last cycle');
   }

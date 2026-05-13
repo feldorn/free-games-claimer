@@ -556,7 +556,26 @@ export const SITES = [
     claimDbFile: null,
     scheduleKind: 'watch-only',
     features: [],
-    configFields: [],
+    configFields: [
+      // Notification priority. Apprise translates the level to whatever the
+      // configured notifier supports (Pushover: high bypasses quiet hours,
+      // emergency requires acknowledgment; other notifiers map similarly or
+      // ignore). Default 'normal' preserves existing-deploy behavior; user
+      // bumps to 'high' if they're in DnD-mode and would otherwise miss the
+      // at-drop-time alert. Applies to all Lenovo notifications: new-drop
+      // discovery, the per-drop 1h/5min/at-drop wakes, and restock alerts.
+      { key: 'notifyPriority', env: 'LENOVO_NOTIFY_PRIORITY', type: 'string', default: 'normal',
+        label: 'Notification priority',
+        hint: 'Apprise-standard ladder. Passes through to your apprise notifier — Pushover maps "high" to bypass-quiet-hours and "emergency" to require-acknowledgment. Other notifiers may ignore the value or map differently. Applies to all Lenovo alerts (discovery, the 1h/5min/at-drop wakes, restock).',
+        options: [
+          { value: 'low',       label: 'Low' },
+          { value: 'moderate',  label: 'Moderate' },
+          { value: 'normal',    label: 'Normal (default)' },
+          { value: 'high',      label: 'High — bypass quiet hours on Pushover' },
+          { value: 'emergency', label: 'Emergency — require ack on Pushover' },
+        ],
+        coerce: { kind: 'priorityEnum' } },
+    ],
     checkLogin: null,
   },
 ];
@@ -662,6 +681,10 @@ export function getServiceRows() {
         if (f.hint)   extra.hint   = f.hint;
         if (f.prefix) extra.prefix = f.prefix;
         if (f.kind === 'hour-of-day') extra.options = HOURS_OF_DAY;
+        // Generic options pass-through for enum-style configFields. The
+        // service entry supplies `options` as a list of { value, label }
+        // pairs; the Settings UI renders it as a dropdown via fieldRow.
+        if (f.options && !extra.options) extra.options = f.options;
         return Object.keys(extra).length ? [path, f.label, extra] : [path, f.label];
       });
       return row;
