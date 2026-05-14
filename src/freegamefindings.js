@@ -40,12 +40,19 @@ const API_URL = 'https://www.reddit.com/r/FreeGameFindings/new.json?limit=100';
 // take a different code path (`epic-games-mobile.js`) and we don't
 // auto-claim mobile URLs through the desktop flow. Mobile posts get
 // counted as an unhandled platform instead, signaling the gap.
+//
+// Anchored at `^\[…\]` only — *no* trailing whitespace requirement.
+// Posters in the sub format titles two ways: `[Steam] (Game) X` (with
+// a space after the bracket) and `[Steam](Game) X` (no space). The
+// initial implementation required `\s` after the `]` which silently
+// dropped the no-space variant into the "unhandled" bucket — Steam
+// showed up there even though we cover it (caught 2026-05-14).
 export const COLLECTOR_TITLE_PATTERNS = {
-  'epic-games':   /^\[Epic Games\]\s/i,
-  'steam':        /^\[Steam\]\s/i,
-  'gog':          /^\[GOG\]\s/i,
-  'prime-gaming': /^\[Amazon( Prime)?( Gaming)?\]\s/i,
-  'ubisoft':      /^\[Ubisoft( Connect)?\]\s/i,
+  'epic-games':   /^\[Epic Games\]/i,
+  'steam':        /^\[Steam\]/i,
+  'gog':          /^\[GOG\]/i,
+  'prime-gaming': /^\[Amazon( Prime)?( Gaming)?\]/i,
+  'ubisoft':      /^\[Ubisoft( Connect)?\]/i,
 };
 
 // Reusing the same collector→domain map keeps the URL-validation rule

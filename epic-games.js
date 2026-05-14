@@ -286,13 +286,20 @@ try {
   }
   if (cfg.debug) console.log('  URLs:', urls);
   const loggedTitles = new Set();
+  // Track platform-variant URLs that resolved to a title we already
+  // logged this run. Counted across both the DB-fast-path skip below
+  // and the page-probe `log.owned` branch in claim_offer, so the body
+  // adds up against the upfront `Free games found: N` line (regression
+  // 2026-05-14: 6 URLs in, 5 logged, 1 silently deduped — looked like
+  // a missing game).
+  let dedupedVariants = 0;
 
   for (const url of urls) {
     if (cfg.time) console.time('claim game');
     const skipId = url.split('/').pop();
     if (db.data[user][skipId]?.status == 'claimed') {
       const knownTitle = db.data[user][skipId]?.title || skipId;
-      if (!loggedTitles.has(knownTitle)) {
+      if (!loggedTitles.has(knownTitle) && !ownedLogged.has(knownTitle)) {
         const platforms = titleCounts[knownTitle] || 1;
         const platformNote = platforms > 1 ? ` (${platforms} platforms)` : '';
         log.ok(`${knownTitle} — already claimed${platformNote}`);
@@ -306,6 +313,8 @@ try {
         // three titles all-already-in-library (issue: log/summary
         // mismatch reported 2026-05-07).
         notify_games.push({ title: knownTitle, url, status: 'existed' });
+      } else {
+        dedupedVariants++;
       }
       if (cfg.time) console.timeEnd('claim game');
       continue;
@@ -367,7 +376,12 @@ try {
     notify_games.push(notify_game); // status is updated below
 
     if (btnText == 'in library') {
-      if (!ownedLogged.has(title)) { log.owned(title); ownedLogged.add(title); }
+      if (!ownedLogged.has(title) && !loggedTitles.has(title)) {
+        log.owned(title);
+        ownedLogged.add(title);
+      } else {
+        dedupedVariants++;
+      }
       notify_game.status = 'existed';
       db.data[user][game_id].status ||= 'existed'; // does not overwrite claimed or failed
       if (db.data[user][game_id].status.startsWith('failed')) db.data[user][game_id].status = 'manual'; // was failed but now it's claimed
@@ -541,6 +555,9 @@ try {
       if (!existsSync(p)) await page.screenshot({ path: p, fullPage: false }); // fullPage is quite long...
     }
     if (cfg.time) console.timeEnd('claim game');
+  }
+  if (dedupedVariants > 0) {
+    log.info(`(${dedupedVariants} platform variant${dedupedVariants > 1 ? 's' : ''} of titles above — same game on a different OS/locale URL)`);
   }
 
   const captchaRetries = notify_games.filter(g => g.captcha && g.status === 'failed');
