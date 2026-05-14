@@ -3200,18 +3200,23 @@ function discRenderItem(it, sourceKey) {
     ? (it.tag || 'unknown')
     : (it.platforms || '');
   const metaParts = [];
+  // Source-specific metadata.
   if (sourceKey === 'fgf') {
     if (typeof it.score === 'number') metaParts.push(it.score + ' upvotes');
     if (it.flair) metaParts.push(escapeHtml(it.flair));
   } else {
     if (it.type) metaParts.push(escapeHtml(it.type));
     if (it.endDate && it.endDate !== 'N/A') metaParts.push('ends ' + escapeHtml(it.endDate));
-    if (it.worth && it.worth !== 'N/A' && it.worth !== '$0.00') {
-      const worthStr = 'worth ' + escapeHtml(it.worth);
-      metaParts.push(flaggedFields.has('worth')
-        ? '<span class="disc-item-meta-bad" title="Below your Steam minimum price — caused this SKIP">' + worthStr + '</span>'
-        : worthStr);
-    }
+  }
+  // Worth shows in both sections (FGF entries inherit it from the
+  // matching GamerPower entry server-side, so SKIP-flagging is
+  // consistent across sources). Highlight in red when this is the
+  // field that caused a SKIP forecast.
+  if (it.worth && it.worth !== 'N/A' && it.worth !== '$0.00') {
+    const worthStr = 'worth ' + escapeHtml(it.worth);
+    metaParts.push(flaggedFields.has('worth')
+      ? '<span class="disc-item-meta-bad" title="Below your Steam minimum price — caused this SKIP">' + worthStr + '</span>'
+      : worthStr);
   }
   const metaLine = metaParts.length
     ? '<span class="disc-item-meta">' + metaParts.join(' · ') + '</span>'
@@ -6201,6 +6206,22 @@ const server = http.createServer(async (req, res) => {
       // store DBs works. FGF cleaned titles already drop the bracket prefix.
       const stripGpTail = t => String(t || '').replace(/\s*\([^)]+\)\s*Giveaway\b.*$/i, '').trim();
 
+      // Cross-source price index. GamerPower entries carry a `worth`
+      // field but FGF posts don't — Reddit doesn't aggregate price
+      // metadata. Without bridging the gap, the same skipped game
+      // shows AUTO in the FGF section and SKIP in the GamerPower
+      // section. Build a title→worth map from GP entries; FGF entries
+      // matching by edition-stripped key inherit the price for both
+      // display (meta line) and forecasting (forecastSkip). 2026-05-14:
+      // user reported the inconsistency on Terrors to Unveil ($4.99
+      // Steam, below their $10 threshold).
+      const priceByKey = new Map();
+      for (const e of gpAll) {
+        if (!e || !e.worth || e.worth === 'N/A' || e.worth === '$0.00') continue;
+        const k = matchKey(stripGpTail(e.title));
+        if (k && !priceByKey.has(k)) priceByKey.set(k, e.worth);
+      }
+
       // FGF: title prefix is the canonical platform signal. Iterate the
       // pattern map in collector-key order; first match wins.
       const fgfItems = fgfAll.map(p => {
@@ -6210,6 +6231,14 @@ const server = http.createServer(async (req, res) => {
         }
         const tag = (/^\[([^\]]+)\]/.exec(p.title) || [])[1] || null;
         const title = fgfCleanTitle(p.title);
+        // Inherit worth from GamerPower if the same title is listed
+        // there (priceByKey is title-keyed). Lets the skip forecast
+        // fire on FGF Steam entries too — without this, FGF showed
+        // AUTO for the same game GamerPower correctly flagged as SKIP.
+        const worth = priceByKey.get(matchKey(title)) || null;
+        let coverage = coverageFor(collectorKey);
+        coverage = promoteIfOwned(coverage, collectorKey, p.url, title);
+        coverage = forecastSkip(coverage, collectorKey, worth);
         return {
           title,
           rawTitle: p.title,
@@ -6219,8 +6248,9 @@ const server = http.createServer(async (req, res) => {
           flair: p.flair,
           score: p.score,
           createdUtc: p.createdUtc,
+          worth,
           collectorKey,
-          coverage: promoteIfOwned(coverageFor(collectorKey), collectorKey, p.url, title),
+          coverage,
         };
       });
 
