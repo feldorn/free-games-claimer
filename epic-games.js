@@ -498,29 +498,34 @@ try {
         log.ok(`${title} — claimed!`);
         // context.setDefaultTimeout(cfg.timeout);
       } catch (e) {
-        log.fail(`${title} — failed to claim`);
         if (cfg.debug) console.error(e);
-        const p = screenshot('failed', `${game_id}_${filenamify(datetime())}.png`);
-        await page.screenshot({ path: p, fullPage: true });
-        db.data[user][game_id].status = 'failed';
-        // Re-check the listing's CTA — if it now reads "In Library", we
-        // successfully claimed but the success-modal text-match missed
-        // (Epic's confirmation copy drifts; popup variants etc.). Logged
-        // as `claimed` since the in-library state we observe is the
-        // result of *this run's* Get-button click. Was previously logged
-        // as `existed` (issue #23 / #21) which understated the run's
-        // actual claims.
+        // Race timed out — but the click may have succeeded anyway. Probe
+        // the listing's CTA first: if it now reads "In Library" we claimed
+        // successfully and Epic's success-modal copy just drifted out from
+        // under us (the modal text/iframe race didn't match, but the
+        // ownership state did flip). Only log/screenshot as a failure when
+        // the CTA *also* doesn't confirm — otherwise we noise up the log
+        // with a `✗ failed to claim` line that's immediately followed by a
+        // `✓ claim succeeded` line for the same game (regression report
+        // 2026-05-14 on Arranger).
+        let recoveredViaCta = false;
         try {
           const cta = (await page.locator('button[data-testid="purchase-cta-button"]').first().innerText().catch(() => '')).toLowerCase();
-          if (cta === 'in library') {
-            log.ok(`${title} — claim succeeded (confirmed via post-click CTA)`);
-            db.data[user][game_id].status = notify_game.status = 'claimed';
-            db.data[user][game_id].time = datetime();
-          }
+          if (cta === 'in library') recoveredViaCta = true;
         } catch { /* CTA probe is best-effort */ }
-        if (iframe && (captchaDetected || await iframe.locator('#h_captcha_challenge_checkout_free_prod iframe').count().catch(() => 0) > 0)) {
-          captchaDetected = true;
-          notify_game.captcha = true;
+        if (recoveredViaCta) {
+          log.ok(`${title} — claim succeeded (confirmed via post-click CTA)`);
+          db.data[user][game_id].status = 'claimed';
+          db.data[user][game_id].time = datetime();
+        } else {
+          log.fail(`${title} — failed to claim`);
+          const p = screenshot('failed', `${game_id}_${filenamify(datetime())}.png`);
+          await page.screenshot({ path: p, fullPage: true });
+          db.data[user][game_id].status = 'failed';
+          if (iframe && (captchaDetected || await iframe.locator('#h_captcha_challenge_checkout_free_prod iframe').count().catch(() => 0) > 0)) {
+            captchaDetected = true;
+            notify_game.captcha = true;
+          }
         }
       }
       notify_game.status = db.data[user][game_id].status; // claimed or failed
