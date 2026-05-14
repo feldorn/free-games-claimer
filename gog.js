@@ -2,6 +2,7 @@ import { chromium } from 'patchright';
 import { resolve, jsonDb, datetime, filenamify, prompt, confirm, notify, html_game_list, handleSIGINT, log, normalizeTitle, awaitUserCaptchaSolve } from './src/util.js';
 import { cfg } from './src/config.js';
 import { siteVersion } from './src/sites.js';
+import { fetchGamerPowerGiveaways, filterFor, resolveGamerPowerHref } from './src/gamerpower.js';
 
 const screenshot = (...a) => resolve(cfg.dir.screenshots, 'gog', ...a);
 
@@ -392,6 +393,27 @@ try {
   } catch (e) {
     log.warn(`Catalog watch skipped — ${e.message}`);
     if (cfg.debug) console.error(e);
+  }
+
+  // Supplementary discovery via gamerpower.com — see feldorn#33. Notify-only
+  // (same juice/squeeze framing as the catalog watch): GOG claim UIs are too
+  // varied to auto-claim safely without a live promo to test against. We
+  // resolve each /open/ redirect to capture the canonical gog.com URL when
+  // possible, falling back to the GamerPower link.
+  try {
+    const gpAll = await fetchGamerPowerGiveaways();
+    const gpGog = filterFor(gpAll, 'gog');
+    if (gpGog.length) {
+      log.status('GamerPower (GOG)', `${gpGog.length} entry/entries`);
+      for (const entry of gpGog) {
+        const resolved = await resolveGamerPowerHref(context, entry.open_giveaway_url, 'gog');
+        const url = resolved || entry.open_giveaway_url;
+        log.info(`GamerPower → ${entry.title}: ${url}`);
+        notify_games.push({ title: `${entry.title} (via GamerPower)`, url, status: 'action', details: `<a href="${url}">Claim manually</a>` });
+      }
+    }
+  } catch (e) {
+    log.warn(`GamerPower discovery skipped — ${e.message.split('\n')[0]}`);
   }
 
   // Reconcile Prime Gaming's pending GOG codes against the authenticated user's library.

@@ -4,6 +4,18 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.6.0
+
+**Supplementary discovery via gamerpower.com ([#33](https://github.com/feldorn/free-games-claimer/issues/33)).** Some free games slip past our first-party feeds — DoSpamu reported on 2026-05-14 that *Devil's Island* and *Lost in the Hole* were free on Epic but absent from Epic's own `freeGamesPromotions` API and the `/free-games` page's "Free Now" section (third-party launch promos that Epic routes through their store without flagging on the surfaces our collectors scrape). [GamerPower](https://www.gamerpower.com/) aggregates these. We now query their public API once per collector and merge results into the run.
+
+Coverage: **Epic**, **Steam**, **GOG** (the three collectors that work cleanly today). For Epic and Steam, GamerPower entries get auto-claimed — we follow each `gamerpower.com/open/…` redirect inside the collector's already-authenticated patchright context to capture the canonical store URL, then run the normal claim path. For Steam specifically, only `store.steampowered.com/app/N` results are auto-queued (sub/community/etc. paths are too varied to claim safely). For GOG, the integration is **notify-only** — same juice/squeeze framing as the existing GOG catalog watch: GOG claim UIs are too varied to auto-claim without live promos to test against. Unresolved or non-claim-shape entries surface as manual-action items in the run summary with the GamerPower link, tagged as `action` so they trigger notifications under the `actions` notify level.
+
+Also: each run now logs a one-line summary (from `epic-games.js`, which typically runs first) of GamerPower platforms we don't currently handle — e.g. `GamerPower — platforms without a collector/watcher: Itch.io (7), Android (2), iOS (2)`. Per the user's request: if a platform shows up consistently across weeks, that's a candidate for a new collector or watcher.
+
+Behavior is best-effort. The GamerPower /open/ page sits behind a Cloudflare challenge — patchright usually passes it (real Chromium executing the challenge JS), but when resolution fails we fall back to surfacing the title + GamerPower URL as a manual action so nothing silently drops. Run-summary counts and dashboard counters update normally.
+
+---
+
 ## What's new in 2.5.9
 
 **Run-log header stamps the panel version.** The `=== Free Games Run — 2026-05-14 ===` header at the top of each run now reads `=== Free Games Run v2.5.9 — 2026-05-14 ===` (or whichever version is active). Visible in `docker logs`, in the Logs tab live view, and — since the header is captured in the persisted run record — also visible when browsing past runs via the Past Runs dropdown. Helps when triaging "did this behavior land before or after I upgraded" kinds of questions from a single log line.

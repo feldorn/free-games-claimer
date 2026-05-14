@@ -6,6 +6,7 @@ import { resolve, jsonDb, datetime, filenamify, prompt, confirm, notify, html_ga
 import { cfg } from './src/config.js';
 import { siteVersion } from './src/sites.js';
 import { getMobileGames } from './src/epic-games-mobile.js';
+import { fetchGamerPowerGiveaways, filterFor, resolveGamerPowerHref, unhandledPlatforms } from './src/gamerpower.js';
 
 const screenshot = (...a) => resolve(cfg.dir.screenshots, 'epic-games', ...a);
 
@@ -191,6 +192,50 @@ try {
     log.status('Mobile games', 'included');
     const mobileGames = await getMobileGames(context);
     urls.push(...mobileGames.map(x => x.url));
+  }
+
+  // Supplementary discovery via gamerpower.com — see feldorn#33. Epic's
+  // freeGamesPromotions API + "Free Now" scrape miss third-party indie
+  // launch promos (e.g. Devils Island, Lost in the Hole on 2026-05-14).
+  // GamerPower aggregates those. We follow each /open/ redirect to capture
+  // the canonical store URL; unresolved entries get surfaced as manual
+  // actions on the run summary so nothing silently drops.
+  //
+  // This collector also logs the "unhandled platforms" summary (counts of
+  // platforms in the GamerPower response that no current collector handles)
+  // — done here because epic-games typically runs first/most-frequently and
+  // we only want the report once per run, not once per collector.
+  try {
+    const gpAll = await fetchGamerPowerGiveaways();
+    const gpEpic = filterFor(gpAll, 'epic-games');
+    if (gpEpic.length) {
+      log.status('GamerPower (Epic)', `${gpEpic.length} entry/entries`);
+      for (const entry of gpEpic) {
+        const resolved = await resolveGamerPowerHref(context, entry.open_giveaway_url, 'epic-games');
+        if (resolved) {
+          // Some resolved hrefs land on a region-locale subpath
+          // (e.g. /en-US/p/) — Epic redirects between locales freely, so
+          // we don't normalise.
+          if (!urls.includes(resolved)) {
+            log.info(`GamerPower → ${entry.title}: ${resolved}`);
+            urls.push(resolved);
+          }
+        } else {
+          log.warn(`GamerPower → ${entry.title}: could not resolve store URL — listing as manual action`);
+          notify_games.push({ title: `${entry.title} (via GamerPower)`, url: entry.open_giveaway_url, status: 'action', details: `<a href="${entry.open_giveaway_url}">Claim manually</a>` });
+        }
+      }
+    }
+    const missed = unhandledPlatforms(gpAll);
+    if (missed.size) {
+      const lines = Array.from(missed.entries())
+        .sort((a, b) => b[1] - a[1])
+        .map(([name, n]) => `${name} (${n})`)
+        .join(', ');
+      log.info(`GamerPower — platforms without a collector/watcher: ${lines}`);
+    }
+  } catch (e) {
+    log.warn(`GamerPower discovery skipped — ${e.message.split('\n')[0]}`);
   }
 
   const titleCounts = {};

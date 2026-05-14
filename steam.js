@@ -3,6 +3,7 @@ import { writeFileSync } from 'node:fs';
 import { resolve, jsonDb, datetime, filenamify, prompt, notify, html_game_list, handleSIGINT, log, dataDir } from './src/util.js';
 import { cfg } from './src/config.js';
 import { siteVersion } from './src/sites.js';
+import { fetchGamerPowerGiveaways, filterFor, resolveGamerPowerHref } from './src/gamerpower.js';
 
 const screenshot = (...a) => resolve(cfg.dir.screenshots, 'steam', ...a);
 
@@ -317,6 +318,42 @@ try {
 
   const freeGames = await discoverFreeGames(page);
 
+  // Supplementary discovery via gamerpower.com — see feldorn#33. The
+  // Steam search endpoint is reliable for `specials=1&maxprice=free` but
+  // misses some launch-week free-to-keep promos that go directly to
+  // store pages without being flagged as discounted-to-zero. GamerPower
+  // catches those. Resolve each /open/ redirect to a store.steampowered.com
+  // /app/N URL, extract the appId, and merge into freeGames so the existing
+  // claim loop processes it. Non-/app/ resolutions (sub/, community, etc.)
+  // are surfaced as manual actions.
+  try {
+    const gpAll = await fetchGamerPowerGiveaways();
+    const gpSteam = filterFor(gpAll, 'steam');
+    if (gpSteam.length) {
+      log.status('GamerPower (Steam)', `${gpSteam.length} entry/entries`);
+      const knownIds = new Set(freeGames.map(g => g.appId));
+      for (const entry of gpSteam) {
+        const resolved = await resolveGamerPowerHref(context, entry.open_giveaway_url, 'steam');
+        const appMatch = resolved && /store\.steampowered\.com\/app\/(\d+)/.exec(resolved);
+        if (appMatch) {
+          const appId = appMatch[1];
+          if (knownIds.has(appId)) {
+            log.info(`GamerPower → ${entry.title}: appId ${appId} already in queue`);
+            continue;
+          }
+          knownIds.add(appId);
+          log.info(`GamerPower → ${entry.title}: appId ${appId}`);
+          freeGames.push({ appId, name: entry.title, url: `https://store.steampowered.com/app/${appId}/`, endDate: entry.end_date || null });
+        } else {
+          log.warn(`GamerPower → ${entry.title}: not a /app/ URL — listing as manual action (${resolved || entry.open_giveaway_url})`);
+          notify_games.push({ title: `${entry.title} (via GamerPower)`, url: resolved || entry.open_giveaway_url, status: 'action', details: `<a href="${resolved || entry.open_giveaway_url}">Claim manually</a>` });
+        }
+      }
+    }
+  } catch (e) {
+    log.warn(`GamerPower discovery skipped — ${e.message.split('\n')[0]}`);
+  }
+
   log.status('Promotions found', freeGames.length);
 
   let claimed = 0;
@@ -449,7 +486,7 @@ try {
   if (error.message && process.exitCode != 130) await notify(`steam failed: ${error.message.split('\n')[0]}`, { attachLatestScreenshot: true });
 } finally {
   await db.write();
-  if (notify_games.filter(g => g.status === 'claimed' || g.status === 'failed').length) {
+  if (notify_games.filter(g => g.status === 'claimed' || g.status === 'failed' || g.status === 'action').length) {
     // Tag as 'summary' only when nothing in the list needs user action —
     // failures promote it back to 'action' so xh43k's "actions only"
     // mode still surfaces them. (#31)
