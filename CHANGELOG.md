@@ -4,6 +4,14 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.6.8
+
+**Fix multi-URL `NOTIFY` ([#35](https://github.com/feldorn/free-games-claimer/issues/35)).** When `NOTIFY` was configured as a multi-line YAML block (one URL per line — the standard pattern for multiple notifier endpoints), the helper passed the entire string as one positional argv to apprise. Older apprise releases parsed the embedded newlines forgivingly; apprise ≥ 1.10 treats the concatenated string as a single URL and rejects the second protocol — Telegram's colon-heavy URL shape (`tgram://bot_token:chat_id/`) trips on this first, so it looked like "Telegram is broken" while Discord on the first line still went through. Fix: split `cfg.notify` on whitespace before assembling argv, so each URL becomes its own positional argument and apprise sees them independently. Existing single-URL deployments (the common case) keep working identically.
+
+KairuByte's reproduction in the issue ran on apprise v1.10.0 with a YAML `NOTIFY: |\n  discord://…\n  tgram://…` shape — that's exactly the case this fix resolves.
+
+---
+
 ## What's new in 2.6.7
 
 **Discoveries tab polish.** Two small follow-ups to the SKIP work in 2.6.6:

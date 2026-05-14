@@ -152,7 +152,21 @@ export const notify = (html, opts = {}) => {
       : Promise.resolve(null);
   return attachPromise.then(attachPath => new Promise((resolve, reject) => {
     // const cmd = `apprise '${cfg.notify}' ${title} -i html -b '${html}'`; // this had problems if e.g. ' was used in arg; could have `npm i shell-escape`, but instead using safer execFile which takes args as array instead of exec which spawned a shell to execute the command
-    const args = [cfg.notify, '-i', 'html', '-b', html];
+    //
+    // Split NOTIFY on whitespace (covers spaces, tabs, newlines) so each
+    // configured URL becomes its own positional argv. Without this,
+    // multi-line NOTIFY values from compose
+    //   NOTIFY: |
+    //     discord://…
+    //     tgram://…
+    // collapse into a single argv with embedded newlines. Older apprise
+    // tolerated this; apprise ≥ 1.10 parses the concatenated string as
+    // one URL and rejects the second protocol (Telegram URLs are
+    // colon-heavy so they fail visibly first). Fix per feldorn#35
+    // (KairuByte, 2026-05-14). Apprise URLs don't contain whitespace,
+    // so the split is safe.
+    const notifyUrls = String(cfg.notify || '').split(/\s+/).filter(Boolean);
+    const args = [...notifyUrls, '-i', 'html', '-b', html];
     if (cfg.notify_title) args.push('-t', cfg.notify_title);
     if (attachPath) args.push('-a', attachPath);
     // Per-call priority (apprise --priority): low | moderate | normal |
