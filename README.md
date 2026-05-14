@@ -699,21 +699,33 @@ Live view of community aggregators
 ([gamerpower.com](https://www.gamerpower.com/) +
 [r/FreeGameFindings](https://www.reddit.com/r/FreeGameFindings/)) — every
 currently-active free-game listing, with a clickable store link and a
-coverage badge:
+coverage badge that tells you exactly what the next run will do:
 
-- **AUTO** (green) — we auto-claim this on the next scheduled run
-  (Epic, Steam, Epic Mobile when `EG_MOBILE=1`).
-- **NOTIFY** (yellow) — we send a notification but don't auto-claim
-  (GOG; the claim UI varies too much for a safe auto-path).
 - **MANUAL** (purple) — outside our auto-claim coverage. Click to
   claim manually. Examples: Itch.io games, mobile-only giveaways when
   Epic mobile is off, STOVE / smaller storefronts.
+- **NOTIFY** (yellow) — we send a notification but don't auto-claim
+  (GOG; the claim UI varies too much for a safe auto-path).
+- **SKIP** (red) — your settings will skip this on the next run.
+  Currently fires for Steam entries below your `STEAM_MIN_PRICE`
+  threshold. The offending field (the price chip) is highlighted in
+  red and the tooltip says exactly which setting caused the skip —
+  lower the threshold in Settings → Services → Steam if you want
+  it claimed, or use the link to claim manually.
+- **AUTO** (green) — will be auto-claimed on the next scheduled run
+  (Epic, Steam, Epic Mobile when `EG_MOBILE=1`).
+- **CLAIMED** (blue) — already in your library. The Discoveries tab
+  cross-references each entry against the per-store claim DB by URL
+  slug, Steam appId, and edition-stripped title — `Sunderfolk` on
+  GamerPower correctly matches `Sunderfolk - Standard Edition` in
+  the Epic DB.
 
-Items sort within each source by coverage state (AUTO → NOTIFY → MANUAL)
-so anything needing action surfaces at the top. Each row also shows the
-platform tag, upvote count (FGF) or end date (GamerPower), and a tooltip
-explaining why that coverage state applies. Per-source errors degrade
-independently — a GamerPower fetch failure doesn't hide the FGF section.
+Items sort top-to-bottom by actionability (MANUAL → NOTIFY → SKIP →
+AUTO → CLAIMED) so anything needing your attention surfaces at the top.
+Each row also shows the platform tag, upvote count (FGF) or end date
+(GamerPower), and a tooltip explaining the coverage state. Per-source
+errors degrade independently — a GamerPower fetch failure doesn't hide
+the FGF section.
 
 Use this when you spot something we can't auto-claim — an iOS-only Epic
 launch promo for example — and want a direct link to the store to claim

@@ -4,6 +4,15 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.6.7
+
+**Discoveries tab polish.** Two small follow-ups to the SKIP work in 2.6.6:
+
+- **Uniform badge widths.** AUTO / SKIP / NOTIFY / MANUAL / CLAIMED ranged from 4 to 7 characters, so the title column landed at different x-offsets row to row. `min-width:68px` + `text-align:center` gives every badge the same horizontal footprint.
+- **Cross-source price bridge.** SKIP forecasting was only working on GamerPower (the only aggregator that exposes a `worth` field). The same Steam giveaway in r/FreeGameFindings still showed AUTO because Reddit posts don't carry price metadata. Now: when GamerPower lists the same title, the FGF entry inherits the price by edition-stripped title match, and the SKIP forecast fires consistently across both sections. Worth chip also displays in both sections now (was previously only on the GamerPower side).
+
+---
+
 ## What's new in 2.6.6
 
 **Discoveries tab — SKIP badge for items your settings will filter out.** When a Steam giveaway shows AUTO in Discoveries but its price is below your `STEAM_MIN_PRICE` threshold, the next run will skip it. Now Discoveries forecasts that and shows a red **SKIP** badge instead, with the offending price highlighted in red in the meta line so the cause is obvious at a glance. Tooltip on the badge explains exactly why ("Your Steam minimum price is $10 — this is $4.99…") with a hint at how to override (lower the threshold in Settings → Services → Steam, or claim manually via the link).
