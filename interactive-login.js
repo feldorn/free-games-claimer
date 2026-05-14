@@ -9,6 +9,8 @@ import { datetime, notify, jsonDb, normalizeTitle } from './src/util.js';
 import { cfg } from './src/config.js';
 import { describeConfig, patchConfig, describeEnv, getSchedulerConfig, CONFIG_FILE_PATH } from './src/app-config.js';
 import { SITES as SITE_REGISTRY, getLoginSitesById, getClaimScriptOrder, getLinkedActiveMap, getClaimDbFiles, getServiceRows } from './src/sites.js';
+import { fetchGamerPowerGiveaways, filterFor as filterGpFor, COLLECTOR_PATTERNS as GP_COLLECTOR_PATTERNS } from './src/gamerpower.js';
+import { fetchFGFPosts, filterFor as filterFgfFor, cleanTitle as fgfCleanTitle, COLLECTOR_TITLE_PATTERNS as FGF_COLLECTOR_PATTERNS } from './src/freegamefindings.js';
 
 const PANEL_PORT = Number(process.env.PANEL_PORT) || 7080;
 const NOVNC_PORT = process.env.NOVNC_PORT || 6080;
@@ -2255,6 +2257,7 @@ const PANEL_HTML = `<!DOCTYPE html>
   body[data-tab="stats"] .tab-panel[data-panel="stats"] { display: block; overflow-y: auto; padding: 24px 32px; }
   body[data-tab="schedule"] .tab-panel[data-panel="schedule"] { display: block; overflow-y: auto; padding: 28px 32px; }
   body[data-tab="logs"] .tab-panel[data-panel="logs"] { display: flex; flex: 1; flex-direction: column; }
+  body[data-tab="discoveries"] .tab-panel[data-panel="discoveries"] { display: block; overflow-y: auto; padding: 24px 32px; }
   body[data-tab="settings"] .tab-panel[data-panel="settings"] { display: flex; flex: 1; flex-direction: column; position: relative; }
   body[data-tab="environment"] .tab-panel[data-panel="environment"] { display: flex; flex: 1; flex-direction: column; }
 
@@ -2463,6 +2466,33 @@ const PANEL_HTML = `<!DOCTYPE html>
   .stats-table th.ts,  .stats-table td.ts  { text-align: left;  font-variant-numeric: tabular-nums; }
   .stats-table td.muted.note { text-align: right; }
   .stats-table .muted { color: #8aa0c2; font-style: italic; }
+
+  /* Discoveries tab — aggregator listings with coverage badges. */
+  .disc-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 8px; }
+  .disc-head h3 { margin: 0; }
+  .disc-sub { color: #8aa0c2; font-size: 13px; margin-top: 4px; max-width: 720px; line-height: 1.5; }
+  .disc-meta { color: #8aa0c2; font-size: 12px; margin-bottom: 18px; display: flex; align-items: center; gap: 12px; }
+  .disc-section { margin-top: 20px; background: #0d1830; border-radius: 6px; padding: 14px 16px; border: 1px solid #1c2c4a; }
+  .disc-section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+  .disc-section-title { font-size: 14px; font-weight: 600; color: #eaf1ff; }
+  .disc-section-count { font-size: 12px; color: #8aa0c2; }
+  .disc-section-sub { font-size: 12px; color: #8aa0c2; margin-top: 2px; }
+  .disc-error { background: #3b1f24; border: 1px solid #6b3338; color: #ffb4b4; padding: 8px 12px; border-radius: 4px; font-size: 12px; margin-top: 8px; }
+  .disc-empty { color: #8aa0c2; font-size: 13px; font-style: italic; padding: 8px 0; }
+  .disc-list { display: flex; flex-direction: column; gap: 6px; }
+  .disc-item { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 12px; padding: 8px 10px; background: #122142; border-radius: 4px; border: 1px solid #1c2c4a; }
+  .disc-item a { color: #7ac1ff; text-decoration: none; font-weight: 500; }
+  .disc-item a:hover { text-decoration: underline; }
+  .disc-item-meta { color: #8aa0c2; font-size: 11px; }
+  .disc-badge { font-size: 10px; padding: 3px 8px; border-radius: 10px; text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; white-space: nowrap; }
+  .disc-badge.auto    { background: #1f3d2f; color: #6fd49a; border: 1px solid #2c5a45; }
+  .disc-badge.notify  { background: #3d2f1f; color: #f0c060; border: 1px solid #5a4a2c; }
+  .disc-badge.manual  { background: #2a2540; color: #b3a0e0; border: 1px solid #463a6a; }
+  .disc-tag { font-size: 10px; padding: 3px 6px; border-radius: 3px; background: #1c2c4a; color: #a0b4d4; font-family: 'SF Mono', Menlo, monospace; }
+  .disc-coverage-label { font-size: 11px; color: #8aa0c2; font-style: italic; }
+  .disc-refresh-btn { padding: 6px 14px; background: #1c2c4a; color: #eaf1ff; border: 1px solid #2c4068; border-radius: 4px; cursor: pointer; font-size: 12px; }
+  .disc-refresh-btn:hover { background: #2c4068; }
+  .disc-refresh-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
   .stats-chart-wrap { background: #0d1830; border-radius: 6px; padding: 10px 12px; }
   .chart-plot { display: flex; gap: 8px; }
@@ -2749,6 +2779,7 @@ const PANEL_HTML = `<!DOCTYPE html>
       <button class="tab active" data-tab="sessions" onclick="switchTab('sessions')">Sessions</button>
       <button class="tab" data-tab="stats" onclick="switchTab('stats')">Stats</button>
       <button class="tab" data-tab="schedule" onclick="switchTab('schedule')">Schedule</button>
+      <button class="tab" data-tab="discoveries" onclick="switchTab('discoveries')" title="Free-game listings from gamerpower.com and r/FreeGameFindings — click any link to claim manually">Discoveries</button>
       <button class="tab" data-tab="logs" onclick="switchTab('logs')">Logs</button>
       <button class="tab" data-tab="settings" onclick="switchTab('settings')">Settings</button>
       <button class="tab" data-tab="environment" onclick="switchTab('environment')">Environment</button>
@@ -2828,6 +2859,17 @@ const PANEL_HTML = `<!DOCTYPE html>
       <button class="btn btn-cancel" onclick="discardSettings()" id="btnDiscardSettings">Discard</button>
       <button class="btn btn-run" onclick="saveSettings()" id="btnSaveSettings">Save</button>
     </div>
+  </div>
+  <div class="tab-panel" data-panel="discoveries">
+    <div class="disc-head">
+      <div>
+        <h3>Discoveries</h3>
+        <div class="disc-sub">Free-game listings from <a href="https://www.gamerpower.com/" target="_blank" rel="noopener">gamerpower.com</a> and <a href="https://www.reddit.com/r/FreeGameFindings/" target="_blank" rel="noopener">r/FreeGameFindings</a>, refreshed live. Items we auto-claim show a green <b>AUTO</b> badge; notify-only items show <b>NOTIFY</b>; everything else needs a manual click on the store link. Use this to claim platform variants (iOS / Android), Itch.io games, or anything we don't currently auto-claim.</div>
+      </div>
+      <button class="disc-refresh-btn" id="btnDiscRefresh" onclick="renderDiscoveriesTab(true)">Refresh</button>
+    </div>
+    <div class="disc-meta" id="discMeta"></div>
+    <div id="discBody">Loading…</div>
   </div>
   <div class="tab-panel" data-panel="environment">
     <div class="env-view-head">
@@ -3011,6 +3053,7 @@ async function switchTab(tab) {
   if (tab === 'stats') renderStatsTab();
   if (tab === 'settings') renderSettingsTab();
   if (tab === 'environment') renderEnvironmentTab();
+  if (tab === 'discoveries') renderDiscoveriesTab();
 }
 
 // Native browser dialog for tab close / reload while drafts exist.
@@ -3021,6 +3064,124 @@ window.addEventListener('beforeunload', e => {
     e.returnValue = '';
   }
 });
+
+// --- Discoveries tab ---
+// Live fetch of FGF + GamerPower listings via the panel's /api/discoveries
+// endpoint. Items are grouped by source, then ordered by coverage state
+// (auto → notify → manual) so the user can scan vertically for what
+// needs action. Refresh button does a force-refetch; otherwise the tab
+// caches the last response in JS memory so re-entering the tab is instant.
+let discCache = null;
+let discFetching = false;
+async function renderDiscoveriesTab(forceRefresh) {
+  const body = document.getElementById('discBody');
+  const meta = document.getElementById('discMeta');
+  const btn = document.getElementById('btnDiscRefresh');
+  if (!body) return;
+  if (discCache && !forceRefresh) {
+    discRender(discCache);
+    return;
+  }
+  if (discFetching) return;
+  discFetching = true;
+  if (btn) btn.disabled = true;
+  body.innerHTML = '<div class="disc-empty">Loading aggregator data…</div>';
+  meta.textContent = '';
+  try {
+    const r = await fetch(BASE_PATH + '/api/discoveries');
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    discCache = await r.json();
+    discRender(discCache);
+  } catch (e) {
+    body.innerHTML = '<div class="disc-error">Failed to load: ' + escapeHtml(String(e.message || e)) + '</div>';
+  } finally {
+    discFetching = false;
+    if (btn) btn.disabled = false;
+  }
+}
+
+function discRender(data) {
+  const body = document.getElementById('discBody');
+  const meta = document.getElementById('discMeta');
+  if (!body) return;
+  const when = new Date(data.fetchedAt);
+  meta.innerHTML = 'Fetched ' + escapeHtml(when.toLocaleTimeString()) + ' — ' +
+    'GamerPower: ' + data.sources.gamerpower.total + ' entry/entries, ' +
+    'r/FreeGameFindings: ' + data.sources.freegamefindings.total + ' post(s)';
+  const html = [
+    discRenderSource('GamerPower', 'gamerpower.com — free games + DLC + loot aggregator', data.sources.gamerpower, 'gp'),
+    discRenderSource('r/FreeGameFindings', 'reddit subreddit — community-spotted giveaways across all platforms', data.sources.freegamefindings, 'fgf'),
+  ].join('');
+  body.innerHTML = html;
+}
+
+function discRenderSource(title, subtitle, source, sourceKey) {
+  const items = source.items || [];
+  // Sort: auto first, then notify, then manual; within each, by collector key, then title.
+  const stateOrder = { auto: 0, notify: 1, manual: 2 };
+  const sorted = items.slice().sort((a, b) => {
+    const sa = stateOrder[a.coverage.state] ?? 9;
+    const sb = stateOrder[b.coverage.state] ?? 9;
+    if (sa !== sb) return sa - sb;
+    const ca = a.collectorKey || 'zzz';
+    const cb = b.collectorKey || 'zzz';
+    if (ca !== cb) return ca.localeCompare(cb);
+    return (a.title || '').localeCompare(b.title || '');
+  });
+  let inner;
+  if (source.error) {
+    inner = '<div class="disc-error">Fetch failed: ' + escapeHtml(source.error) + '</div>';
+  } else if (sorted.length === 0) {
+    inner = '<div class="disc-empty">No active listings right now.</div>';
+  } else {
+    inner = '<div class="disc-list">' +
+      sorted.map(it => discRenderItem(it, sourceKey)).join('') +
+      '</div>';
+  }
+  return '<div class="disc-section">' +
+    '<div class="disc-section-head">' +
+      '<div>' +
+        '<div class="disc-section-title">' + escapeHtml(title) + '</div>' +
+        '<div class="disc-section-sub">' + escapeHtml(subtitle) + '</div>' +
+      '</div>' +
+      '<div class="disc-section-count">' + sorted.length + ' item' + (sorted.length === 1 ? '' : 's') + '</div>' +
+    '</div>' +
+    inner +
+  '</div>';
+}
+
+function discRenderItem(it, sourceKey) {
+  const state = it.coverage.state || 'manual';
+  const stateLabel = state.toUpperCase();
+  // Build "tag chip" — for FGF it's the bracketed prefix from the
+  // post title; for GamerPower it's the platforms string truncated.
+  const chip = sourceKey === 'fgf'
+    ? (it.tag || 'unknown')
+    : (it.platforms || '');
+  const metaParts = [];
+  if (sourceKey === 'fgf') {
+    if (typeof it.score === 'number') metaParts.push(it.score + ' upvotes');
+    if (it.flair) metaParts.push(escapeHtml(it.flair));
+  } else {
+    if (it.type) metaParts.push(escapeHtml(it.type));
+    if (it.endDate && it.endDate !== 'N/A') metaParts.push('ends ' + escapeHtml(it.endDate));
+    if (it.worth && it.worth !== 'N/A' && it.worth !== '$0.00') metaParts.push('worth ' + escapeHtml(it.worth));
+  }
+  const metaLine = metaParts.length
+    ? '<span class="disc-item-meta">' + metaParts.join(' · ') + '</span>'
+    : '';
+  return '<div class="disc-item" title="' + escapeHtml(it.coverage.label || '') + '">' +
+    '<span class="disc-badge ' + state + '">' + stateLabel + '</span>' +
+    '<div>' +
+      '<div><a href="' + escapeHtml(it.url) + '" target="_blank" rel="noopener">' + escapeHtml(it.title) + '</a></div>' +
+      '<div class="disc-coverage-label">' + escapeHtml(it.coverage.label || '') + '</div>' +
+    '</div>' +
+    '<div style="display:flex; align-items:center; gap:8px; justify-content:flex-end;">' +
+      (chip ? '<span class="disc-tag">' + escapeHtml(chip) + '</span>' : '') +
+      metaLine +
+    '</div>' +
+  '</div>';
+}
 
 async function renderEnvironmentTab() {
   // Environment is read-only; reuse the same loadEnvTable used to live
@@ -5817,6 +5978,91 @@ const server = http.createServer(async (req, res) => {
       const url = new URL(req.url, `http://${req.headers.host}`);
       const limit = Math.min(100, Math.max(1, parseInt(url.searchParams.get('limit') || '10', 10)));
       sendJson(res, await getActivity(limit));
+      return;
+    }
+
+    // Discoveries — surface what FGF + GamerPower currently list, with
+    // coverage status per entry, so the user can manually click through
+    // to items we don't auto-claim (iOS giveaways, Itch.io, GOG promos,
+    // etc.). Live fetch on each request; both APIs are public + fast.
+    // Errors per source degrade gracefully — one source down doesn't
+    // hide the other.
+    if (req.method === 'GET' && req.url === '/api/discoveries') {
+      const [gpRes, fgfRes] = await Promise.allSettled([
+        fetchGamerPowerGiveaways(),
+        fetchFGFPosts(),
+      ]);
+      const gpAll = gpRes.status === 'fulfilled' ? gpRes.value : [];
+      const fgfAll = fgfRes.status === 'fulfilled' ? fgfRes.value : [];
+      const gpError = gpRes.status === 'rejected' ? String(gpRes.reason?.message || gpRes.reason) : null;
+      const fgfError = fgfRes.status === 'rejected' ? String(fgfRes.reason?.message || fgfRes.reason) : null;
+
+      // Per-collector coverage state. Evaluated at request time so the
+      // EG_MOBILE toggle and other live config reads correctly.
+      const coverageFor = (collectorKey) => {
+        if (!collectorKey) return { state: 'manual', label: 'No collector matches this platform — claim manually via the link' };
+        switch (collectorKey) {
+          case 'epic-games':        return { state: 'auto',   label: 'Auto-claimed by Epic collector' };
+          case 'epic-games-mobile': return cfg.eg_mobile
+            ? { state: 'auto',   label: 'Auto-claimed (EG_MOBILE enabled in Settings)' }
+            : { state: 'manual', label: 'Enable Epic mobile games in Settings to auto-claim — or claim manually' };
+          case 'steam':             return { state: 'auto',   label: 'Auto-claimed by Steam collector' };
+          case 'gog':               return { state: 'notify', label: 'Notify-only — claim manually via the link (GOG claim UIs vary)' };
+          case 'prime-gaming':      return { state: 'manual', label: 'Prime collector handles discovery directly — listed here for awareness' };
+          case 'ubisoft':           return { state: 'manual', label: 'Ubisoft watcher handles discovery directly — listed here for awareness' };
+          default:                  return { state: 'manual', label: 'Click to claim manually' };
+        }
+      };
+
+      // FGF: title prefix is the canonical platform signal. Iterate the
+      // pattern map in collector-key order; first match wins.
+      const fgfItems = fgfAll.map(p => {
+        let collectorKey = null;
+        for (const [k, pat] of Object.entries(FGF_COLLECTOR_PATTERNS)) {
+          if (pat.test(p.title)) { collectorKey = k; break; }
+        }
+        const tag = (/^\[([^\]]+)\]/.exec(p.title) || [])[1] || null;
+        return {
+          title: fgfCleanTitle(p.title),
+          rawTitle: p.title,
+          tag,
+          url: p.url,
+          postUrl: p.postUrl,
+          flair: p.flair,
+          score: p.score,
+          createdUtc: p.createdUtc,
+          collectorKey,
+          coverage: coverageFor(collectorKey),
+        };
+      });
+
+      // GamerPower: platforms is a comma-list. Same collector-key first-
+      // match-wins scan.
+      const gpItems = gpAll.map(e => {
+        let collectorKey = null;
+        for (const [k, pat] of Object.entries(GP_COLLECTOR_PATTERNS)) {
+          if (pat.test(e.platforms || '')) { collectorKey = k; break; }
+        }
+        return {
+          title: e.title,
+          url: e.open_giveaway_url,
+          platforms: e.platforms,
+          type: e.type,
+          endDate: e.end_date,
+          worth: e.worth,
+          thumbnail: e.thumbnail,
+          collectorKey,
+          coverage: coverageFor(collectorKey),
+        };
+      });
+
+      sendJson(res, {
+        fetchedAt: new Date().toISOString(),
+        sources: {
+          gamerpower: { items: gpItems, error: gpError, total: gpItems.length },
+          freegamefindings: { items: fgfItems, error: fgfError, total: fgfItems.length },
+        },
+      });
       return;
     }
 

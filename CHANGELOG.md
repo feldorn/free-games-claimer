@@ -4,6 +4,16 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.6.2
+
+**Discoveries tab — surface aggregator listings with clickable links.** When 2.6.0/2.6.1 added GamerPower and r/FreeGameFindings as supplementary sources, anything we couldn't auto-claim (iOS / Android giveaways with EG_MOBILE off, Itch.io games, STOVE, etc.) only existed as log lines — no in-panel way to act on them. The new **Discoveries** tab fetches both aggregators live on open and renders every active listing with a clickable store link plus a coverage badge: **AUTO** (green) for items we auto-claim, **NOTIFY** (yellow) for notify-only items like GOG, and **MANUAL** (purple) for everything else — Itch.io, Epic Mobile when EG_MOBILE is off, platforms without a collector. The user's case that triggered this: spotting an iOS-only Epic giveaway in the FGF feed and wanting to claim it via the App Store on their phone — now a direct link to `store.epicgames.com/p/…-ios-…` is one click away.
+
+Items sort within each source by coverage state (auto first, then notify, then manual) so what needs attention surfaces at the top. Refresh button does a force-refetch; otherwise re-entering the tab uses the JS-memory cache. Per-source errors degrade independently — if GamerPower is having a bad day, the FGF section still renders.
+
+Backend: new `/api/discoveries` endpoint that parallel-fetches both aggregators and classifies every entry against the same collector-pattern map the claim scripts use, so the badges always reflect the *actual* runtime behavior (toggle EG_MOBILE off and the iOS giveaways flip from AUTO to MANUAL on the next refresh — no code change).
+
+---
+
 ## What's new in 2.6.1
 
 **Second aggregator source: r/FreeGameFindings ([#33](https://github.com/feldorn/free-games-claimer/issues/33) follow-up).** DoSpamu pointed at three third-party aggregators when reporting the Devil's Island gap; 2.6.0 covered [gamerpower.com](https://www.gamerpower.com/), and 2.6.1 adds the [r/FreeGameFindings](https://www.reddit.com/r/FreeGameFindings/) subreddit as the second source. The subreddit's posting rules enforce a structured `[Epic Games]`, `[Steam]`, `[GOG]`, `[Itch.io]`, `[STOVE]`, ... title prefix and a Reddit `link_flair_css_class` of `Expired` / `PreviouslyGiven` / `PSA` etc. that we use to drop stale and non-actionable posts cleanly.
