@@ -2498,7 +2498,9 @@ const PANEL_HTML = `<!DOCTYPE html>
   .disc-badge.auto    { background: #1f3d2f; color: #6fd49a; border: 1px solid #2c5a45; }
   .disc-badge.claimed { background: #14283c; color: #7ac1ff; border: 1px solid #2c4068; }
   .disc-badge.notify  { background: #3d2f1f; color: #f0c060; border: 1px solid #5a4a2c; }
+  .disc-badge.skip    { background: #3d1f24; color: #ff9a8c; border: 1px solid #6b3338; }
   .disc-badge.manual  { background: #2a2540; color: #b3a0e0; border: 1px solid #463a6a; }
+  .disc-item-meta-bad { color: #ff9a8c; font-weight: 600; }
   .disc-tag { font-size: 10px; padding: 3px 6px; border-radius: 3px; background: #1c2c4a; color: #a0b4d4; font-family: 'SF Mono', Menlo, monospace; }
   .disc-coverage-label { font-size: 11px; color: #8aa0c2; font-style: italic; }
   .disc-refresh-btn { padding: 6px 14px; background: #1c2c4a; color: #eaf1ff; border: 1px solid #2c4068; border-radius: 4px; cursor: pointer; font-size: 12px; }
@@ -3144,11 +3146,11 @@ function discRender(data) {
 function discRenderSource(title, subtitle, source, sourceKey) {
   const items = source.items || [];
   // Sort: auto first, then notify, then manual; within each, by collector key, then title.
-  // Sort priority: things needing user awareness first (manual + notify),
-  // then auto-handled items, then already-claimed ones at the bottom.
-  // Already-claimed are the least actionable — surfacing them up top
-  // pushes what needs your attention below the fold.
-  const stateOrder = { manual: 0, notify: 1, auto: 2, claimed: 3 };
+  // Sort priority: things needing user awareness first (manual + notify
+  // + skip), then auto-handled items, then already-claimed ones at the
+  // bottom. SKIP is grouped near the actionable items because the user
+  // can flip their threshold to claim it or click through manually.
+  const stateOrder = { manual: 0, notify: 1, skip: 2, auto: 3, claimed: 4 };
   const sorted = items.slice().sort((a, b) => {
     const sa = stateOrder[a.coverage.state] ?? 9;
     const sb = stateOrder[b.coverage.state] ?? 9;
@@ -3183,6 +3185,11 @@ function discRenderSource(title, subtitle, source, sourceKey) {
 function discRenderItem(it, sourceKey) {
   const state = it.coverage.state || 'manual';
   const stateLabel = state.toUpperCase();
+  // skipFields list comes from the backend's forecastSkip() — currently
+  // ['worth'] when Steam price is below the user's threshold. Each field
+  // name in this list gets a red highlight in the meta line below so
+  // the user can see *which* setting caused the skip.
+  const flaggedFields = new Set(it.coverage.skipFields || []);
   // Build "tag chip" — for FGF it's the bracketed prefix from the
   // post title; for GamerPower it's the platforms string truncated.
   const chip = sourceKey === 'fgf'
@@ -3195,7 +3202,12 @@ function discRenderItem(it, sourceKey) {
   } else {
     if (it.type) metaParts.push(escapeHtml(it.type));
     if (it.endDate && it.endDate !== 'N/A') metaParts.push('ends ' + escapeHtml(it.endDate));
-    if (it.worth && it.worth !== 'N/A' && it.worth !== '$0.00') metaParts.push('worth ' + escapeHtml(it.worth));
+    if (it.worth && it.worth !== 'N/A' && it.worth !== '$0.00') {
+      const worthStr = 'worth ' + escapeHtml(it.worth);
+      metaParts.push(flaggedFields.has('worth')
+        ? '<span class="disc-item-meta-bad" title="Below your Steam minimum price — caused this SKIP">' + worthStr + '</span>'
+        : worthStr);
+    }
   }
   const metaLine = metaParts.length
     ? '<span class="disc-item-meta">' + metaParts.join(' · ') + '</span>'
@@ -6151,6 +6163,35 @@ const server = http.createServer(async (req, res) => {
         return { state: 'claimed', label: 'Already in your library — surfaced here for awareness' };
       };
 
+      // Steam configures two skip thresholds — min price and min rating.
+      // The Steam claim path enforces both (steam.js:432, :438). We can
+      // forecast the price skip here from GamerPower's `worth` field,
+      // so the Discoveries badge tells the user "AUTO won't actually
+      // fire — your settings will skip this" before the next run. We
+      // can't forecast the rating skip without scraping the Steam page,
+      // so leave rating-based skips invisible — they'll show as AUTO
+      // and then skip at runtime.
+      const steamMinPrice = Number(cfg.steam_min_price) || 0;
+      const parseWorth = w => {
+        const m = /\$?\s*(\d+(?:\.\d+)?)/.exec(String(w || ''));
+        return m ? parseFloat(m[1]) : NaN;
+      };
+      // Returns updated coverage; passes through unchanged if not Steam
+      // or no actionable skip applies. `details.skipFields` flags which
+      // chip in the UI to highlight (the price chip turns red when
+      // skipReason==='price').
+      const forecastSkip = (coverage, collectorKey, worth) => {
+        if (coverage.state !== 'auto' || collectorKey !== 'steam') return coverage;
+        const w = parseWorth(worth);
+        if (!Number.isFinite(w) || w >= steamMinPrice) return coverage;
+        return {
+          state: 'skip',
+          label: `Your Steam minimum price is $${steamMinPrice} — this is $${w.toFixed(2)}, so the next run will skip it. Lower the threshold in Settings → Services → Steam, or claim manually via the link.`,
+          skipReason: 'price',
+          skipFields: ['worth'],
+        };
+      };
+
       // For GamerPower titles like "Devil's Island (Epic Games) Giveaway",
       // strip the trailing platform tag + "Giveaway" so title-match against
       // store DBs works. FGF cleaned titles already drop the bracket prefix.
@@ -6195,6 +6236,12 @@ const server = http.createServer(async (req, res) => {
         // button that establishes the CF session correctly. (User report
         // 2026-05-14 — many Discoveries links erroring out.)
         const titleForMatch = stripGpTail(e.title);
+        // Run promotions in order: owned check first (CLAIMED), then
+        // skip forecast (SKIP). promoteIfOwned only fires when state is
+        // 'auto'; if it lands at 'claimed', forecastSkip is a no-op.
+        let coverage = coverageFor(collectorKey);
+        coverage = promoteIfOwned(coverage, collectorKey, e.open_giveaway_url || '', titleForMatch);
+        coverage = forecastSkip(coverage, collectorKey, e.worth);
         return {
           title: e.title,
           url: e.gamerpower_url || e.open_giveaway_url,
@@ -6208,7 +6255,7 @@ const server = http.createServer(async (req, res) => {
           // so the URL-based lookup never hits — promoteIfOwned falls
           // back to the title index, which is why we strip the
           // "(Platform) Giveaway" tail before passing it in.
-          coverage: promoteIfOwned(coverageFor(collectorKey), collectorKey, e.open_giveaway_url || '', titleForMatch),
+          coverage,
         };
       });
 

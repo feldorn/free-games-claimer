@@ -4,6 +4,14 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.6.6
+
+**Discoveries tab — SKIP badge for items your settings will filter out.** When a Steam giveaway shows AUTO in Discoveries but its price is below your `STEAM_MIN_PRICE` threshold, the next run will skip it. Now Discoveries forecasts that and shows a red **SKIP** badge instead, with the offending price highlighted in red in the meta line so the cause is obvious at a glance. Tooltip on the badge explains exactly why ("Your Steam minimum price is $10 — this is $4.99…") with a hint at how to override (lower the threshold in Settings → Services → Steam, or claim manually via the link).
+
+Currently forecasts Steam's price skip (visible in GamerPower's `worth` field). Steam's rating skip can't be forecast from aggregator data — only the live Steam page exposes review counts, and pre-fetching every Steam page would slow Discoveries down — so rating skips still show as AUTO and reveal themselves at runtime. Sort order updated to MANUAL → NOTIFY → SKIP → AUTO → CLAIMED so configured-to-skip items group near the other actionable states.
+
+---
+
 ## What's new in 2.6.5
 
 **Discoveries tab — CLAIMED badge for items already in your library.** The AUTO badge now means "will be auto-claimed on the next run if not already" — items that *are* already in your library get a separate **CLAIMED** badge (blue) so you can tell at a glance what still needs doing vs what's been handled. Cross-references each aggregator entry against the per-store claim DBs (`data/epic-games.json`, `data/steam.json`) using URL slug + Steam appId for Epic / Steam FGF entries, and falls back to a normalised-title match for GamerPower entries (which don't expose a direct store URL).
