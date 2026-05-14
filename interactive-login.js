@@ -2496,6 +2496,7 @@ const PANEL_HTML = `<!DOCTYPE html>
   .disc-item-meta { color: #8aa0c2; font-size: 11px; }
   .disc-badge { font-size: 10px; padding: 3px 8px; border-radius: 10px; text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; white-space: nowrap; }
   .disc-badge.auto    { background: #1f3d2f; color: #6fd49a; border: 1px solid #2c5a45; }
+  .disc-badge.claimed { background: #14283c; color: #7ac1ff; border: 1px solid #2c4068; }
   .disc-badge.notify  { background: #3d2f1f; color: #f0c060; border: 1px solid #5a4a2c; }
   .disc-badge.manual  { background: #2a2540; color: #b3a0e0; border: 1px solid #463a6a; }
   .disc-tag { font-size: 10px; padding: 3px 6px; border-radius: 3px; background: #1c2c4a; color: #a0b4d4; font-family: 'SF Mono', Menlo, monospace; }
@@ -3143,7 +3144,11 @@ function discRender(data) {
 function discRenderSource(title, subtitle, source, sourceKey) {
   const items = source.items || [];
   // Sort: auto first, then notify, then manual; within each, by collector key, then title.
-  const stateOrder = { auto: 0, notify: 1, manual: 2 };
+  // Sort priority: things needing user awareness first (manual + notify),
+  // then auto-handled items, then already-claimed ones at the bottom.
+  // Already-claimed are the least actionable — surfacing them up top
+  // pushes what needs your attention below the fold.
+  const stateOrder = { manual: 0, notify: 1, auto: 2, claimed: 3 };
   const sorted = items.slice().sort((a, b) => {
     const sa = stateOrder[a.coverage.state] ?? 9;
     const sb = stateOrder[b.coverage.state] ?? 9;
@@ -6036,14 +6041,51 @@ const server = http.createServer(async (req, res) => {
     // Errors per source degrade gracefully — one source down doesn't
     // hide the other.
     if (req.method === 'GET' && req.url === '/api/discoveries') {
-      const [gpRes, fgfRes] = await Promise.allSettled([
+      // Load per-collector DBs in parallel with the aggregator fetches.
+      // Wrapped in .catch so a missing DB file (first-run, fresh deploy)
+      // degrades to an empty owned-set rather than a 500 — the user
+      // still sees discoveries, they just won't get CLAIMED badges
+      // until the relevant DB has entries.
+      const safeDb = name => jsonDb(name, {}).then(d => d.data || {}).catch(() => ({}));
+      const [gpRes, fgfRes, epicDb, steamDb, gogDb] = await Promise.allSettled([
         fetchGamerPowerGiveaways(),
         fetchFGFPosts(),
+        safeDb('epic-games.json'),
+        safeDb('steam.json'),
+        safeDb('gog.json'),
       ]);
       const gpAll = gpRes.status === 'fulfilled' ? gpRes.value : [];
       const fgfAll = fgfRes.status === 'fulfilled' ? fgfRes.value : [];
       const gpError = gpRes.status === 'rejected' ? String(gpRes.reason?.message || gpRes.reason) : null;
       const fgfError = fgfRes.status === 'rejected' ? String(fgfRes.reason?.message || fgfRes.reason) : null;
+
+      // Flatten per-user DBs into a single owned-titles set per store.
+      // Each store DB shape is { <user>: { <gameId>: { title, status, ... } } }.
+      // Two indices for lookups:
+      //   ownedIds[store]    : Set of gameIds with status in {claimed, existed}
+      //   ownedTitles[store] : Set of normalised titles, same status filter
+      // ID lookup is exact and fast — used when we can extract a slug or
+      // appId from the URL. Title lookup is a fallback for GamerPower
+      // entries (which don't expose a direct store URL on their public
+      // API).
+      const buildOwnedIndex = (db) => {
+        const ids = new Set();
+        const titles = new Set();
+        for (const games of Object.values(db || {})) {
+          if (!games || typeof games !== 'object') continue;
+          for (const [id, entry] of Object.entries(games)) {
+            if (!entry || typeof entry !== 'object') continue;
+            const status = String(entry.status || '');
+            if (!/claimed|existed/i.test(status)) continue;
+            ids.add(id);
+            if (entry.title) titles.add(normalizeTitle(entry.title));
+          }
+        }
+        return { ids, titles };
+      };
+      const epicOwned = buildOwnedIndex(epicDb.status === 'fulfilled' ? epicDb.value : {});
+      const steamOwned = buildOwnedIndex(steamDb.status === 'fulfilled' ? steamDb.value : {});
+      const gogOwned = buildOwnedIndex(gogDb.status === 'fulfilled' ? gogDb.value : {});
 
       // Per-collector coverage state. Evaluated at request time so the
       // EG_MOBILE toggle and other live config reads correctly.
@@ -6062,6 +6104,42 @@ const server = http.createServer(async (req, res) => {
         }
       };
 
+      // Promote `auto` → `claimed` when the item is already in the
+      // relevant store's claim DB. Doesn't touch `notify` (GOG) or
+      // `manual` items — claimed-ness for those is uncertain (we don't
+      // run the claim path for them, so the DB may not be authoritative).
+      const promoteIfOwned = (coverage, collectorKey, url, title) => {
+        if (coverage.state !== 'auto') return coverage;
+        const isOwned = (() => {
+          const norm = normalizeTitle(title || '');
+          if (collectorKey === 'epic-games' || collectorKey === 'epic-games-mobile') {
+            // Epic URL → slug = last path segment. Both /p/<slug> and
+            // /p/<slug>?lang=… formats land in the DB under that slug.
+            try {
+              const u = new URL(url);
+              const slug = u.pathname.split('/').filter(Boolean).pop();
+              const slugWithQuery = u.search ? slug + u.search : slug;
+              if (epicOwned.ids.has(slug)) return true;
+              if (epicOwned.ids.has(slugWithQuery)) return true;
+            } catch {}
+            return norm && epicOwned.titles.has(norm);
+          }
+          if (collectorKey === 'steam') {
+            const m = /\/app\/(\d+)/.exec(url || '');
+            if (m && steamOwned.ids.has(m[1])) return true;
+            return norm && steamOwned.titles.has(norm);
+          }
+          return false;
+        })();
+        if (!isOwned) return coverage;
+        return { state: 'claimed', label: 'Already in your library — surfaced here for awareness' };
+      };
+
+      // For GamerPower titles like "Devil's Island (Epic Games) Giveaway",
+      // strip the trailing platform tag + "Giveaway" so title-match against
+      // store DBs works. FGF cleaned titles already drop the bracket prefix.
+      const stripGpTail = t => String(t || '').replace(/\s*\([^)]+\)\s*Giveaway\b.*$/i, '').trim();
+
       // FGF: title prefix is the canonical platform signal. Iterate the
       // pattern map in collector-key order; first match wins.
       const fgfItems = fgfAll.map(p => {
@@ -6070,8 +6148,9 @@ const server = http.createServer(async (req, res) => {
           if (pat.test(p.title)) { collectorKey = k; break; }
         }
         const tag = (/^\[([^\]]+)\]/.exec(p.title) || [])[1] || null;
+        const title = fgfCleanTitle(p.title);
         return {
-          title: fgfCleanTitle(p.title),
+          title,
           rawTitle: p.title,
           tag,
           url: p.url,
@@ -6080,7 +6159,7 @@ const server = http.createServer(async (req, res) => {
           score: p.score,
           createdUtc: p.createdUtc,
           collectorKey,
-          coverage: coverageFor(collectorKey),
+          coverage: promoteIfOwned(coverageFor(collectorKey), collectorKey, p.url, title),
         };
       });
 
@@ -6099,6 +6178,7 @@ const server = http.createServer(async (req, res) => {
         // public, describes the offer, and has a working "Open Giveaway"
         // button that establishes the CF session correctly. (User report
         // 2026-05-14 — many Discoveries links erroring out.)
+        const titleForMatch = stripGpTail(e.title);
         return {
           title: e.title,
           url: e.gamerpower_url || e.open_giveaway_url,
@@ -6108,7 +6188,11 @@ const server = http.createServer(async (req, res) => {
           worth: e.worth,
           thumbnail: e.thumbnail,
           collectorKey,
-          coverage: coverageFor(collectorKey),
+          // GamerPower URL is the gamerpower listing, not the store URL,
+          // so the URL-based lookup never hits — promoteIfOwned falls
+          // back to the title index, which is why we strip the
+          // "(Platform) Giveaway" tail before passing it in.
+          coverage: promoteIfOwned(coverageFor(collectorKey), collectorKey, e.open_giveaway_url || '', titleForMatch),
         };
       });
 

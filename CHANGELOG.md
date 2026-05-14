@@ -4,6 +4,14 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.6.5
+
+**Discoveries tab — CLAIMED badge for items already in your library.** The AUTO badge now means "will be auto-claimed on the next run if not already" — items that *are* already in your library get a separate **CLAIMED** badge (blue) so you can tell at a glance what still needs doing vs what's been handled. Cross-references each aggregator entry against the per-store claim DBs (`data/epic-games.json`, `data/steam.json`) using URL slug + Steam appId for Epic / Steam FGF entries, and falls back to a normalised-title match for GamerPower entries (which don't expose a direct store URL).
+
+Also reordered the in-section sort: **MANUAL → NOTIFY → AUTO → CLAIMED**, top-to-bottom. Manual items (the ones requiring user action — Itch.io, mobile-only when EG_MOBILE is off, etc.) now surface first; already-claimed items drop to the bottom as informational. Matches the typical workflow: you open Discoveries to find what to do, not to admire what's done.
+
+---
+
 ## What's new in 2.6.4
 
 **External-link mode setting — Discoveries / footer links honor iframe context (and an explicit override).** User reported Discoveries-tab links erroring out *after* the GamerPower CF fix: clicking through landed on the GamerPower page fine, but then clicking GamerPower's "Open Giveaway" button failed because the panel was running inside a reverse-proxy dashboard iframe and the new tab inherited iframe sandboxing that Epic / Steam refuse to render in. The site-card and Lenovo-drop links already had an iframe-aware click handler (`openSiteUrl`) that navigates the top window when iframed — but the Discoveries-tab links and the GitHub footer links were plain `target="_blank"` without it. Now they all use the same handler.
