@@ -6059,15 +6059,31 @@ const server = http.createServer(async (req, res) => {
       const gpError = gpRes.status === 'rejected' ? String(gpRes.reason?.message || gpRes.reason) : null;
       const fgfError = fgfRes.status === 'rejected' ? String(fgfRes.reason?.message || fgfRes.reason) : null;
 
+      // Strip common edition-suffix tails AFTER normalizeTitle, so e.g.
+      // "Sunderfolk - Standard Edition" (DB) and "Sunderfolk" (GamerPower)
+      // both reduce to "sunderfolk" and match. Edition labels are the
+      // dominant source of cross-source title drift — aggregators tend
+      // to use the short marketing name while store DBs hold the full
+      // SKU. Word-boundary anchored to the end so "Hades II" doesn't
+      // accidentally match "Hades". (User report 2026-05-14 on
+      // Sunderfolk showing AUTO instead of CLAIMED.)
+      const stripEditionSuffix = s => s
+        .replace(/\s+(standard|deluxe|premium|complete|definitive|ultimate|gold|special|anniversary|enhanced|collectors|collector|directors cut|game of the year|goty)(\s+edition)?$/, '')
+        .replace(/\s+edition$/, '')
+        .trim();
+      const matchKey = s => stripEditionSuffix(normalizeTitle(s || ''));
+
       // Flatten per-user DBs into a single owned-titles set per store.
       // Each store DB shape is { <user>: { <gameId>: { title, status, ... } } }.
       // Two indices for lookups:
       //   ownedIds[store]    : Set of gameIds with status in {claimed, existed}
-      //   ownedTitles[store] : Set of normalised titles, same status filter
+      //   ownedTitles[store] : Set of edition-stripped match keys
       // ID lookup is exact and fast — used when we can extract a slug or
       // appId from the URL. Title lookup is a fallback for GamerPower
       // entries (which don't expose a direct store URL on their public
-      // API).
+      // API). Storing match keys (not raw normalised titles) means the
+      // edition-suffix reduction happens once at index build, not on
+      // every lookup.
       const buildOwnedIndex = (db) => {
         const ids = new Set();
         const titles = new Set();
@@ -6078,7 +6094,7 @@ const server = http.createServer(async (req, res) => {
             const status = String(entry.status || '');
             if (!/claimed|existed/i.test(status)) continue;
             ids.add(id);
-            if (entry.title) titles.add(normalizeTitle(entry.title));
+            if (entry.title) titles.add(matchKey(entry.title));
           }
         }
         return { ids, titles };
@@ -6111,7 +6127,7 @@ const server = http.createServer(async (req, res) => {
       const promoteIfOwned = (coverage, collectorKey, url, title) => {
         if (coverage.state !== 'auto') return coverage;
         const isOwned = (() => {
-          const norm = normalizeTitle(title || '');
+          const key = matchKey(title || '');
           if (collectorKey === 'epic-games' || collectorKey === 'epic-games-mobile') {
             // Epic URL → slug = last path segment. Both /p/<slug> and
             // /p/<slug>?lang=… formats land in the DB under that slug.
@@ -6122,12 +6138,12 @@ const server = http.createServer(async (req, res) => {
               if (epicOwned.ids.has(slug)) return true;
               if (epicOwned.ids.has(slugWithQuery)) return true;
             } catch {}
-            return norm && epicOwned.titles.has(norm);
+            return key && epicOwned.titles.has(key);
           }
           if (collectorKey === 'steam') {
             const m = /\/app\/(\d+)/.exec(url || '');
             if (m && steamOwned.ids.has(m[1])) return true;
-            return norm && steamOwned.titles.has(norm);
+            return key && steamOwned.titles.has(key);
           }
           return false;
         })();
