@@ -2494,6 +2494,14 @@ const PANEL_HTML = `<!DOCTYPE html>
   .disc-refresh-btn:hover { background: #2c4068; }
   .disc-refresh-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
+  /* Project links footer — sits below the main area, always visible.
+     Compact so it doesn't compete with tab content for vertical space.
+     Discussions is where new aggregator suggestions go (per user ask). */
+  .project-links { display: flex; align-items: center; justify-content: center; gap: 6px; padding: 8px 16px; font-size: 11px; color: #6a83a8; background: #08111f; border-top: 1px solid #1c2c4a; }
+  .project-links a { color: #7ac1ff; text-decoration: none; }
+  .project-links a:hover { text-decoration: underline; }
+  .project-links-sep { color: #2c4068; }
+
   .stats-chart-wrap { background: #0d1830; border-radius: 6px; padding: 10px 12px; }
   .chart-plot { display: flex; gap: 8px; }
   .chart-y-axis { display: flex; flex-direction: column-reverse; justify-content: space-between; font-size: 10px; color: #8aa0c2; padding-bottom: 20px; min-width: 18px; text-align: right; font-variant-numeric: tabular-nums; }
@@ -2881,6 +2889,13 @@ const PANEL_HTML = `<!DOCTYPE html>
     </div>
     <div class="env-view-body" id="envView">Loading…</div>
   </div>
+</div>
+<div class="project-links">
+  <a href="https://github.com/feldorn/free-games-claimer" target="_blank" rel="noopener" title="Browse the source on GitHub">Repo</a>
+  <span class="project-links-sep">·</span>
+  <a href="https://github.com/feldorn/free-games-claimer/issues" target="_blank" rel="noopener" title="Report a bug or request a feature">Issues</a>
+  <span class="project-links-sep">·</span>
+  <a href="https://github.com/feldorn/free-games-claimer/discussions" target="_blank" rel="noopener" title="Ask a question or share an idea on Discussions — including new aggregator sources to add">Discussions</a>
 </div>
 <div class="run-picker-modal" id="runPickerModal" role="dialog" aria-modal="true" aria-labelledby="runPickerTitle" style="display:none" onclick="rpBackdropClick(event)">
   <div class="run-picker-card" onclick="event.stopPropagation()">
