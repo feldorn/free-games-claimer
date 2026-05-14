@@ -37,11 +37,12 @@ export const COLLECTOR_PATTERNS = {
 // /open/ page, the collector looks for an anchor pointing at one of
 // these domains and uses that href as the claim URL.
 export const COLLECTOR_DOMAINS = {
-  'epic-games':   ['store.epicgames.com'],
-  'steam':        ['store.steampowered.com', 'steamcommunity.com'],
-  'gog':          ['gog.com'],
-  'prime-gaming': ['gaming.amazon.com', 'amazon.com'],
-  'ubisoft':      ['store.ubisoft.com', 'ubisoftconnect.com'],
+  'epic-games':        ['store.epicgames.com'],
+  'epic-games-mobile': ['store.epicgames.com'],
+  'steam':             ['store.steampowered.com', 'steamcommunity.com'],
+  'gog':               ['gog.com'],
+  'prime-gaming':      ['gaming.amazon.com', 'amazon.com'],
+  'ubisoft':           ['store.ubisoft.com', 'ubisoftconnect.com'],
 };
 
 export async function fetchGamerPowerGiveaways() {

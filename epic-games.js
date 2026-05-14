@@ -248,10 +248,19 @@ try {
   // dedupe (urls.includes / knownIds) handles overlap with GamerPower.
   try {
     const fgfAll = await fetchFGFPosts();
+    // Desktop slice always runs. The mobile slice only runs when the user
+    // has opted into mobile (cfg.eg_mobile / EG_MOBILE=1) — same gate as
+    // Epic's own mobile-games API path. Posts in both slices live on
+    // store.epicgames.com so they go into the same `urls` queue and
+    // get processed by the same claim loop; the existing mobile flow
+    // happily handles the iOS/Android URL variants.
     const fgfEpic = filterFgfFor(fgfAll, 'epic-games');
-    if (fgfEpic.length) {
-      log.status('FreeGameFindings (Epic)', `${fgfEpic.length} post(s)`);
-      for (const post of fgfEpic) {
+    const fgfEpicMobile = cfg.eg_mobile ? filterFgfFor(fgfAll, 'epic-games-mobile') : [];
+    const fgfEpicAll = [...fgfEpic, ...fgfEpicMobile];
+    if (fgfEpicAll.length) {
+      const mobileNote = fgfEpicMobile.length ? `, ${fgfEpicMobile.length} mobile` : '';
+      log.status('FreeGameFindings (Epic)', `${fgfEpicAll.length} post(s) (${fgfEpic.length} desktop${mobileNote})`);
+      for (const post of fgfEpicAll) {
         if (urls.includes(post.url)) {
           log.info(`FGF → ${fgfClean(post.title)}: already in queue`);
           continue;
@@ -260,7 +269,19 @@ try {
         urls.push(post.url);
       }
     }
+    // Pass the user's eg_mobile preference into the unhandled-platforms
+    // bucket: when mobile is off, we want `Epic Games Mobile` to show
+    // up there as a coverage gap; when it's on, we cover it and it
+    // shouldn't appear. The helper checks pattern membership against
+    // COLLECTOR_TITLE_PATTERNS, which now includes `epic-games-mobile`.
+    // When the user has *not* opted in, filter the helper's output to
+    // re-surface that tag as a gap.
     const missed = fgfUnhandled(fgfAll);
+    if (!cfg.eg_mobile) {
+      // Count Epic Mobile posts ourselves and add them back to `missed`.
+      const mobileCount = fgfAll.filter(p => /^\[Epic Games Mobile\]/i.test(p.title)).length;
+      if (mobileCount) missed.set('Epic Games Mobile', mobileCount);
+    }
     if (missed.size) {
       const lines = Array.from(missed.entries())
         .sort((a, b) => b[1] - a[1])

@@ -36,23 +36,32 @@ const API_URL = 'https://www.reddit.com/r/FreeGameFindings/new.json?limit=100';
 // this format consistently. Case-insensitive because we've observed
 // both `[Steam]` and `[STEAM]` in the feed.
 //
-// `[Epic Games]` ≠ `[Epic Games Mobile]` deliberately — mobile claims
-// take a different code path (`epic-games-mobile.js`) and we don't
-// auto-claim mobile URLs through the desktop flow. Mobile posts get
-// counted as an unhandled platform instead, signaling the gap.
+// `[Epic Games]` and `[Epic Games Mobile]` are two distinct tags in the
+// sub. Both go through epic-games.js — desktop unconditionally, mobile
+// only when cfg.eg_mobile is enabled (env EG_MOBILE=1). Keeping them as
+// separate keys lets the caller pull each slice independently AND lets
+// unhandledPlatforms() correctly recognise `[Epic Games Mobile]` as
+// covered when mobile is on (otherwise it'd show as an unhandled tag
+// every run even though the user opted in — caught 2026-05-14).
 //
 // Anchored at `^\[…\]` only — *no* trailing whitespace requirement.
 // Posters in the sub format titles two ways: `[Steam] (Game) X` (with
 // a space after the bracket) and `[Steam](Game) X` (no space). The
 // initial implementation required `\s` after the `]` which silently
 // dropped the no-space variant into the "unhandled" bucket — Steam
-// showed up there even though we cover it (caught 2026-05-14).
+// showed up there even though we cover it.
+//
+// `[Epic Games]` uses a negative lookahead to refuse `[Epic Games Mobile]`,
+// since the literal `]` boundary alone would match `[Epic Games Mobile]`'s
+// `[Epic Games` prefix — wait, it wouldn't, because `\]` requires the
+// closing bracket. Kept the lookahead anyway for explicit intent.
 export const COLLECTOR_TITLE_PATTERNS = {
-  'epic-games':   /^\[Epic Games\]/i,
-  'steam':        /^\[Steam\]/i,
-  'gog':          /^\[GOG\]/i,
-  'prime-gaming': /^\[Amazon( Prime)?( Gaming)?\]/i,
-  'ubisoft':      /^\[Ubisoft( Connect)?\]/i,
+  'epic-games':        /^\[Epic Games\](?! Mobile)/i,
+  'epic-games-mobile': /^\[Epic Games Mobile\]/i,
+  'steam':             /^\[Steam\]/i,
+  'gog':               /^\[GOG\]/i,
+  'prime-gaming':      /^\[Amazon( Prime)?( Gaming)?\]/i,
+  'ubisoft':           /^\[Ubisoft( Connect)?\]/i,
 };
 
 // Reusing the same collector→domain map keeps the URL-validation rule
