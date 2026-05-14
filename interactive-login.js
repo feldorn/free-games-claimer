@@ -2494,7 +2494,11 @@ const PANEL_HTML = `<!DOCTYPE html>
   .disc-item a { color: #7ac1ff; text-decoration: none; font-weight: 500; }
   .disc-item a:hover { text-decoration: underline; }
   .disc-item-meta { color: #8aa0c2; font-size: 11px; }
-  .disc-badge { font-size: 10px; padding: 3px 8px; border-radius: 10px; text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; white-space: nowrap; }
+  /* min-width + text-align:center: badge widths are uniform regardless
+     of label length, so the title column starts at the same x-offset
+     on every row. Longest label is CLAIMED (7 chars); 68px covers it
+     with breathing room. */
+  .disc-badge { font-size: 10px; padding: 3px 8px; border-radius: 10px; text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; white-space: nowrap; min-width: 68px; text-align: center; box-sizing: border-box; }
   .disc-badge.auto    { background: #1f3d2f; color: #6fd49a; border: 1px solid #2c5a45; }
   .disc-badge.claimed { background: #14283c; color: #7ac1ff; border: 1px solid #2c4068; }
   .disc-badge.notify  { background: #3d2f1f; color: #f0c060; border: 1px solid #5a4a2c; }
