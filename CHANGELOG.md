@@ -4,6 +4,14 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.6.3
+
+**Discoveries tab — fix Cloudflare-gated link errors + footer GitHub links.** User reported many Discoveries-tab links erroring out when opened in a new tab. Root cause: we were linking to GamerPower's `open_giveaway_url` field, which is the `/open/<slug>` redirect page — Cloudflare gates it aggressively and a cold browser tab without a CF session gets a 403 challenge instead of the giveaway content. GamerPower's API also exposes `gamerpower_url` (the public listing page for the same giveaway), which is clean 200 with no CF challenge. Switched to that. The user lands on the public page, reads the offer, and clicks GamerPower's own "Open Giveaway" button, which establishes the CF session correctly so the subsequent click works. r/FreeGameFindings links were already direct store URLs and unaffected.
+
+**Compact footer links — Repo · Issues · Discussions.** Always-visible footer below all tabs gives users a direct way to interact with the project. Tooltip on Discussions calls out that new aggregator-source suggestions belong there. Took the simplest path (plain links to the existing GitHub spaces) over a submission form — no auth, no submission backend, no spam exposure.
+
+---
+
 ## What's new in 2.6.2
 
 **Discoveries tab — surface aggregator listings with clickable links.** When 2.6.0/2.6.1 added GamerPower and r/FreeGameFindings as supplementary sources, anything we couldn't auto-claim (iOS / Android giveaways with EG_MOBILE off, Itch.io games, STOVE, etc.) only existed as log lines — no in-panel way to act on them. The new **Discoveries** tab fetches both aggregators live on open and renders every active listing with a clickable store link plus a coverage badge: **AUTO** (green) for items we auto-claim, **NOTIFY** (yellow) for notify-only items like GOG, and **MANUAL** (purple) for everything else — Itch.io, Epic Mobile when EG_MOBILE is off, platforms without a collector. The user's case that triggered this: spotting an iOS-only Epic giveaway in the FGF feed and wanting to claim it via the App Store on their phone — now a direct link to `store.epicgames.com/p/…-ios-…` is one click away.

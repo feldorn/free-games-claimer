@@ -560,8 +560,11 @@ Running once daily (`86400`) is recommended.
 ## Control Panel
 
 The control panel at **`http://localhost:7080`** is always running and
-organises everything under six tabs. The header compresses to ~70px once
+organises everything under seven tabs. The header compresses to ~70px once
 setup is complete, so the main area is free for whichever tool you're in.
+A compact footer below the tabs links to the project's GitHub repo,
+issues, and discussions — use **Discussions** to suggest new aggregator
+sources or share tips with other users.
 
 ### Sessions tab (default)
 
@@ -689,6 +692,32 @@ first with a one-line summary `2026-05-09 07:30 · 8 svc, 2 claimed,
 mode; selecting `Live (current run)` resumes tail polling. Auto-refreshes
 when a run completes so the just-finished entry appears without a
 manual reload.
+
+### Discoveries tab
+
+Live view of community aggregators
+([gamerpower.com](https://www.gamerpower.com/) +
+[r/FreeGameFindings](https://www.reddit.com/r/FreeGameFindings/)) — every
+currently-active free-game listing, with a clickable store link and a
+coverage badge:
+
+- **AUTO** (green) — we auto-claim this on the next scheduled run
+  (Epic, Steam, Epic Mobile when `EG_MOBILE=1`).
+- **NOTIFY** (yellow) — we send a notification but don't auto-claim
+  (GOG; the claim UI varies too much for a safe auto-path).
+- **MANUAL** (purple) — outside our auto-claim coverage. Click to
+  claim manually. Examples: Itch.io games, mobile-only giveaways when
+  Epic mobile is off, STOVE / smaller storefronts.
+
+Items sort within each source by coverage state (AUTO → NOTIFY → MANUAL)
+so anything needing action surfaces at the top. Each row also shows the
+platform tag, upvote count (FGF) or end date (GamerPower), and a tooltip
+explaining why that coverage state applies. Per-source errors degrade
+independently — a GamerPower fetch failure doesn't hide the FGF section.
+
+Use this when you spot something we can't auto-claim — an iOS-only Epic
+launch promo for example — and want a direct link to the store to claim
+it manually (open the link, claim through the storefront, done).
 
 ### Settings tab
 
