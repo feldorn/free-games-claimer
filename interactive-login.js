@@ -1062,7 +1062,12 @@ function runAllScripts({ source = 'panel', sites = null, extraEnv = null } = {})
   // without a redundant timestamp prefix (`=== Free Games Run — … ===`
   // is meant to be a clean visual delimiter, not another data row).
   const runDate = new Date().toISOString().slice(0, 10);
-  const runHeader = `=== Free Games Run — ${runDate} ===`;
+  // Include the panel's APP_VERSION inline so a glance at the run-log
+  // header (in docker logs or the Past Runs picker) tells you which
+  // version of the fork produced this run — important when triaging
+  // "did this bug land before or after I upgraded" kinds of questions.
+  const versionTag = APP_VERSION ? ` v${APP_VERSION}` : '';
+  const runHeader = `=== Free Games Run${versionTag} — ${runDate} ===`;
   process.stdout.write(`\n${runHeader}\n\n`);
   runLog.push({ type: 'system', text: runHeader, time: null });
 

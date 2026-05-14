@@ -4,6 +4,12 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.5.9
+
+**Run-log header stamps the panel version.** The `=== Free Games Run — 2026-05-14 ===` header at the top of each run now reads `=== Free Games Run v2.5.9 — 2026-05-14 ===` (or whichever version is active). Visible in `docker logs`, in the Logs tab live view, and — since the header is captured in the persisted run record — also visible when browsing past runs via the Past Runs dropdown. Helps when triaging "did this behavior land before or after I upgraded" kinds of questions from a single log line.
+
+---
+
 ## What's new in 2.5.8
 
 **Lenovo Gaming — configurable notification priority.** A user missed a "drop is LIVE NOW" alert because their phone was in Do-Not-Disturb mode. Lenovo notifications were always firing at default (normal) priority, which respects DnD/quiet hours on Pushover and most other notifiers — exactly the wrong default for a time-critical "claim within minutes" alert. New per-service setting in **Settings → Services → Lenovo Gaming Key Drops → Notification priority** (env: `LENOVO_NOTIFY_PRIORITY`) with apprise's standard ladder: `low` / `moderate` / `normal` (default) / `high` (bypasses Pushover quiet hours) / `emergency` (requires acknowledgment on Pushover). Applies to all Lenovo notifications — new-drop discovery, 1h/5min/at-drop wakes, restock alerts. Default `normal` preserves existing-deploy behavior; users opt into higher priority via the dropdown.
