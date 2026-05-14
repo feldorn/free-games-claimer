@@ -1076,10 +1076,18 @@ function runAllScripts({ source = 'panel', sites = null, extraEnv = null } = {})
   // them into a single run-complete line.
   const runAgg = { services: 0, claimed: 0, skipped: 0, failed: 0, alreadyOwned: 0, tracked: 0, new: 0, pointsEarned: 0, onPage: 0, coins: 0 };
 
+  // detached:true makes bash the leader of a new process group so the
+  // Stop endpoint can SIGTERM the whole group (bash + node children +
+  // their patchright Chromium descendants) via `process.kill(-child.pid)`.
+  // Without this, signalling the immediate child only reaches bash, which
+  // doesn't forward signals mid-pipeline, so SIGTERM was effectively a
+  // no-op — children kept running while runProcess was cleared, causing
+  // overlapping pipelines to fight over /fgc/data/browser (2026-05-14).
   const child = spawn('bash', ['-c', cmd], {
     cwd: process.cwd(),
     env: childEnv,
     stdio: ['ignore', 'pipe', 'pipe'],
+    detached: true,
   });
 
   runProcess = child;
@@ -4379,7 +4387,7 @@ function getStep() {
   const anyChecked = state.sites.some(s => s.status !== 'unknown');
   if (!anyChecked) return 1;
   if (!state.allLoggedIn) return 2;
-  if (state.runStatus === 'running') return 3;
+  if (state.runStatus === 'running' || state.runStatus === 'stopping') return 3;
   if (state.lastRun) return 4;
   // Logged in, no run yet. If scheduler is enabled the scheduler will handle
   // it — return 'waiting' so the step shows subtle yellow instead of active
@@ -4503,7 +4511,8 @@ function render() {
   cards.style.display = (state.activeBrowser || sessionsCollapsed) ? 'none' : 'grid';
 
   const isRunning = state.runStatus === 'running';
-  const disabled = busy || !!state.activeBrowser || isRunning;
+  const isStopping = state.runStatus === 'stopping';
+  const disabled = busy || !!state.activeBrowser || isRunning || isStopping;
   btnCheckAll.disabled = disabled;
   btnRunAll.disabled = disabled && !isRunning;
 
@@ -4512,6 +4521,18 @@ function render() {
     btnRunAll.className = 'btn btn-stop';
     btnRunAll.disabled = false;
     btnRunAll.onclick = stopRun;
+  } else if (isStopping) {
+    // Stop was clicked but the child subtree is still draining (Chromium
+    // takes a few seconds to release /fgc/data/browser). Keep the button
+    // visually in "stop" colors and disabled — clicking again wouldn't
+    // do anything useful, and flipping to "Run Now" while runProcess is
+    // still truthy would let the user trigger an immediately-rejected
+    // request (server's browserBusy mutex catches it, but the UX is
+    // confusing).
+    btnRunAll.textContent = 'Stopping...';
+    btnRunAll.className = 'btn btn-stop';
+    btnRunAll.disabled = true;
+    btnRunAll.onclick = null;
   } else {
     btnRunAll.textContent = 'Run Now';
     btnRunAll.className = 'btn btn-run';
@@ -5801,10 +5822,23 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === 'POST' && req.url === '/api/stop-run') {
       if (runProcess) {
-        runProcess.kill('SIGTERM');
-        runLog.push({ type: 'system', text: 'Scripts stopped by user.', time: datetime() });
-        runStatus = 'stopped';
-        runProcess = null;
+        // Signal the *process group* so SIGTERM reaches bash, the node
+        // children, and any patchright Chromium descendants — not just
+        // bash, which wouldn't forward mid-pipeline. Negative PID =
+        // process group leader's PID; detached:true on spawn makes
+        // child.pid the group leader.
+        try { process.kill(-runProcess.pid, 'SIGTERM'); }
+        catch (e) { console.error(`[${datetime()}] stop-run: group SIGTERM failed (${e.code || e.message}); falling back to child SIGTERM`); runProcess.kill('SIGTERM'); }
+        runLog.push({ type: 'system', text: 'Scripts stopping — waiting for in-flight processes to exit cleanly...', time: datetime() });
+        runStatus = 'stopping';
+        // Deliberately do NOT clear runProcess here — the close handler
+        // (see child.on('close', …) above) clears it once the bash
+        // subtree has actually exited. Pre-clearing here was the root
+        // cause of the 2026-05-14 chaos: it released the browserBusy
+        // mutex while old Chromium instances were still holding the
+        // userDataDir, letting a new run start and fight the old one
+        // over /fgc/data/browser (`Target page, context or browser has
+        // been closed` across every script that used patchright).
         captchaPending = null;
         sendJson(res, { success: true });
       } else {
