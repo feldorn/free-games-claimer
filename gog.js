@@ -2,7 +2,8 @@ import { chromium } from 'patchright';
 import { resolve, jsonDb, datetime, filenamify, prompt, confirm, notify, html_game_list, handleSIGINT, log, normalizeTitle, awaitUserCaptchaSolve } from './src/util.js';
 import { cfg } from './src/config.js';
 import { siteVersion } from './src/sites.js';
-import { fetchGamerPowerGiveaways, filterFor, resolveGamerPowerHref } from './src/gamerpower.js';
+import { fetchGamerPowerGiveaways, filterFor as filterGpFor, resolveGamerPowerHref } from './src/gamerpower.js';
+import { fetchFGFPosts, filterFor as filterFgfFor, cleanTitle as fgfClean } from './src/freegamefindings.js';
 
 const screenshot = (...a) => resolve(cfg.dir.screenshots, 'gog', ...a);
 
@@ -402,7 +403,7 @@ try {
   // possible, falling back to the GamerPower link.
   try {
     const gpAll = await fetchGamerPowerGiveaways();
-    const gpGog = filterFor(gpAll, 'gog');
+    const gpGog = filterGpFor(gpAll, 'gog');
     if (gpGog.length) {
       log.status('GamerPower (GOG)', `${gpGog.length} entry/entries`);
       for (const entry of gpGog) {
@@ -414,6 +415,23 @@ try {
     }
   } catch (e) {
     log.warn(`GamerPower discovery skipped — ${e.message.split('\n')[0]}`);
+  }
+
+  // Supplementary discovery via r/FreeGameFindings — notify-only, same
+  // framing as the catalog watch above and the GamerPower block. Reddit
+  // gives us direct store URLs so there's no redirect step.
+  try {
+    const fgfAll = await fetchFGFPosts();
+    const fgfGog = filterFgfFor(fgfAll, 'gog');
+    if (fgfGog.length) {
+      log.status('FreeGameFindings (GOG)', `${fgfGog.length} post(s)`);
+      for (const post of fgfGog) {
+        log.info(`FGF → ${fgfClean(post.title)}: ${post.url}`);
+        notify_games.push({ title: `${fgfClean(post.title)} (via FGF)`, url: post.url, status: 'action', details: `<a href="${post.url}">Claim manually</a>` });
+      }
+    }
+  } catch (e) {
+    log.warn(`FreeGameFindings discovery skipped — ${e.message.split('\n')[0]}`);
   }
 
   // Reconcile Prime Gaming's pending GOG codes against the authenticated user's library.

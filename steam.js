@@ -3,7 +3,8 @@ import { writeFileSync } from 'node:fs';
 import { resolve, jsonDb, datetime, filenamify, prompt, notify, html_game_list, handleSIGINT, log, dataDir } from './src/util.js';
 import { cfg } from './src/config.js';
 import { siteVersion } from './src/sites.js';
-import { fetchGamerPowerGiveaways, filterFor, resolveGamerPowerHref } from './src/gamerpower.js';
+import { fetchGamerPowerGiveaways, filterFor as filterGpFor, resolveGamerPowerHref } from './src/gamerpower.js';
+import { fetchFGFPosts, filterFor as filterFgfFor, cleanTitle as fgfClean } from './src/freegamefindings.js';
 
 const screenshot = (...a) => resolve(cfg.dir.screenshots, 'steam', ...a);
 
@@ -328,7 +329,7 @@ try {
   // are surfaced as manual actions.
   try {
     const gpAll = await fetchGamerPowerGiveaways();
-    const gpSteam = filterFor(gpAll, 'steam');
+    const gpSteam = filterGpFor(gpAll, 'steam');
     if (gpSteam.length) {
       log.status('GamerPower (Steam)', `${gpSteam.length} entry/entries`);
       const knownIds = new Set(freeGames.map(g => g.appId));
@@ -352,6 +353,39 @@ try {
     }
   } catch (e) {
     log.warn(`GamerPower discovery skipped — ${e.message.split('\n')[0]}`);
+  }
+
+  // Supplementary discovery via r/FreeGameFindings — direct store URLs
+  // mean no browser-tab redirect dance (unlike GamerPower's CF-gated
+  // /open/ page). Extract appId from store.steampowered.com/app/N and
+  // merge into freeGames so the existing claim loop processes it. The
+  // knownIds set dedupes against Steam-search-discovered entries and
+  // anything GamerPower already added.
+  try {
+    const fgfAll = await fetchFGFPosts();
+    const fgfSteam = filterFgfFor(fgfAll, 'steam');
+    if (fgfSteam.length) {
+      log.status('FreeGameFindings (Steam)', `${fgfSteam.length} post(s)`);
+      const knownIds = new Set(freeGames.map(g => g.appId));
+      for (const post of fgfSteam) {
+        const appMatch = /store\.steampowered\.com\/app\/(\d+)/.exec(post.url);
+        if (!appMatch) {
+          log.warn(`FGF → ${fgfClean(post.title)}: not a /app/ URL — listing as manual action (${post.url})`);
+          notify_games.push({ title: `${fgfClean(post.title)} (via FGF)`, url: post.url, status: 'action', details: `<a href="${post.url}">Claim manually</a>` });
+          continue;
+        }
+        const appId = appMatch[1];
+        if (knownIds.has(appId)) {
+          log.info(`FGF → ${fgfClean(post.title)}: appId ${appId} already in queue`);
+          continue;
+        }
+        knownIds.add(appId);
+        log.info(`FGF → ${fgfClean(post.title)}: appId ${appId}`);
+        freeGames.push({ appId, name: fgfClean(post.title), url: post.url, endDate: null });
+      }
+    }
+  } catch (e) {
+    log.warn(`FreeGameFindings discovery skipped — ${e.message.split('\n')[0]}`);
   }
 
   log.status('Promotions found', freeGames.length);

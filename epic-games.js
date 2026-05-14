@@ -6,7 +6,8 @@ import { resolve, jsonDb, datetime, filenamify, prompt, confirm, notify, html_ga
 import { cfg } from './src/config.js';
 import { siteVersion } from './src/sites.js';
 import { getMobileGames } from './src/epic-games-mobile.js';
-import { fetchGamerPowerGiveaways, filterFor, resolveGamerPowerHref, unhandledPlatforms } from './src/gamerpower.js';
+import { fetchGamerPowerGiveaways, filterFor as filterGpFor, resolveGamerPowerHref, unhandledPlatforms as gpUnhandled } from './src/gamerpower.js';
+import { fetchFGFPosts, filterFor as filterFgfFor, unhandledPlatforms as fgfUnhandled, cleanTitle as fgfClean } from './src/freegamefindings.js';
 
 const screenshot = (...a) => resolve(cfg.dir.screenshots, 'epic-games', ...a);
 
@@ -207,7 +208,7 @@ try {
   // we only want the report once per run, not once per collector.
   try {
     const gpAll = await fetchGamerPowerGiveaways();
-    const gpEpic = filterFor(gpAll, 'epic-games');
+    const gpEpic = filterGpFor(gpAll, 'epic-games');
     if (gpEpic.length) {
       log.status('GamerPower (Epic)', `${gpEpic.length} entry/entries`);
       for (const entry of gpEpic) {
@@ -226,7 +227,7 @@ try {
         }
       }
     }
-    const missed = unhandledPlatforms(gpAll);
+    const missed = gpUnhandled(gpAll);
     if (missed.size) {
       const lines = Array.from(missed.entries())
         .sort((a, b) => b[1] - a[1])
@@ -236,6 +237,39 @@ try {
     }
   } catch (e) {
     log.warn(`GamerPower discovery skipped — ${e.message.split('\n')[0]}`);
+  }
+
+  // Supplementary discovery via r/FreeGameFindings — same coverage goal
+  // as GamerPower, different aggregator with often-broader catch (the
+  // subreddit indexes a wider set of community-spotted launches). Reddit
+  // returns post.url already as the direct store URL (no Cloudflare
+  // redirect step), so this is cheaper than GamerPower per entry —
+  // single HTTPS request, no browser tab needed. The collectors' own
+  // dedupe (urls.includes / knownIds) handles overlap with GamerPower.
+  try {
+    const fgfAll = await fetchFGFPosts();
+    const fgfEpic = filterFgfFor(fgfAll, 'epic-games');
+    if (fgfEpic.length) {
+      log.status('FreeGameFindings (Epic)', `${fgfEpic.length} post(s)`);
+      for (const post of fgfEpic) {
+        if (urls.includes(post.url)) {
+          log.info(`FGF → ${fgfClean(post.title)}: already in queue`);
+          continue;
+        }
+        log.info(`FGF → ${fgfClean(post.title)}: ${post.url}`);
+        urls.push(post.url);
+      }
+    }
+    const missed = fgfUnhandled(fgfAll);
+    if (missed.size) {
+      const lines = Array.from(missed.entries())
+        .sort((a, b) => b[1] - a[1])
+        .map(([name, n]) => `${name} (${n})`)
+        .join(', ');
+      log.info(`FreeGameFindings — platform tags without a collector/watcher: ${lines}`);
+    }
+  } catch (e) {
+    log.warn(`FreeGameFindings discovery skipped — ${e.message.split('\n')[0]}`);
   }
 
   const titleCounts = {};

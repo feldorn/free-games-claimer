@@ -4,6 +4,20 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.6.1
+
+**Second aggregator source: r/FreeGameFindings ([#33](https://github.com/feldorn/free-games-claimer/issues/33) follow-up).** DoSpamu pointed at three third-party aggregators when reporting the Devil's Island gap; 2.6.0 covered [gamerpower.com](https://www.gamerpower.com/), and 2.6.1 adds the [r/FreeGameFindings](https://www.reddit.com/r/FreeGameFindings/) subreddit as the second source. The subreddit's posting rules enforce a structured `[Epic Games]`, `[Steam]`, `[GOG]`, `[Itch.io]`, `[STOVE]`, ... title prefix and a Reddit `link_flair_css_class` of `Expired` / `PreviouslyGiven` / `PSA` etc. that we use to drop stale and non-actionable posts cleanly.
+
+Unlike GamerPower, Reddit posts link directly at the store URL — no Cloudflare-gated redirect step. That makes this aggregator both cheaper per entry (single HTTPS request, no patchright tab) and more reliable. The integration follows the same pattern as the GamerPower one: per-collector filter (Epic, Steam, GOG), URL validation against the collector's store domain, merge into the existing claim queue (Epic/Steam) or notify-only surface (GOG). The collectors' own dedupe logic (Epic `urls.includes`, Steam `knownIds`) catches the substantial overlap between the two aggregators silently.
+
+Three subtle filter rules: (1) PSA megaposts that point back at the Reddit comments thread are skipped — selftext parsing them is Phase 2; the same games typically also show up as individual platform-tagged posts. (2) Cross-posts of Lenovo Key Drops giveaways (URL `gaming.lenovo.com`) are skipped because our Lenovo watcher already alerts on those — without this, every Lenovo drop would surface twice. (3) Posts older than 72h are skipped to keep the noise floor low.
+
+Run log now shows two unhandled-platforms summaries (one per aggregator source) — e.g. `FreeGameFindings — platform tags without a collector/watcher: Itch.io (12), Amazon Prime (3), STOVE (2)` — covering "what to consider building next" from both sides.
+
+Reddit identifies us as `free-games-claimer/2.6.1 (https://github.com/feldorn/free-games-claimer)` per their User-Agent policy. Single request per collector per run; well under the unauthenticated 60 req/min cap.
+
+---
+
 ## What's new in 2.6.0
 
 **Supplementary discovery via gamerpower.com ([#33](https://github.com/feldorn/free-games-claimer/issues/33)).** Some free games slip past our first-party feeds — DoSpamu reported on 2026-05-14 that *Devil's Island* and *Lost in the Hole* were free on Epic but absent from Epic's own `freeGamesPromotions` API and the `/free-games` page's "Free Now" section (third-party launch promos that Epic routes through their store without flagging on the surfaces our collectors scrape). [GamerPower](https://www.gamerpower.com/) aggregates these. We now query their public API once per collector and merge results into the run.
