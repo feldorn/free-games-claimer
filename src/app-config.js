@@ -111,6 +111,24 @@ export const CONFIG_SCHEMA = [
     },
     validate: v => (v === 'all' || v === 'actions' || v === 'off') ? null : 'expected all, actions, or off' },
   { path: 'panel.publicUrl',                 env: 'PUBLIC_URL',                 type: 'string',  default: '' },
+  // External-link target mode. Controls how the Discoveries-tab and
+  // similar off-site links open. Three values:
+  //   'auto' (default)  — iframed → top-nav (break out), top-level → new tab
+  //   'same-tab'        — always navigate the top window (replaces dashboard
+  //                       if iframed; replaces the panel page if top-level).
+  //                       Useful when the auto-detect doesn't fit your setup
+  //                       or you simply prefer same-tab navigation.
+  //   'new-tab'         — always force target="_blank" semantics. Useful
+  //                       only in unusual setups; the default 'auto' covers
+  //                       both common cases.
+  // 2026-05-14: triggered by Discoveries tab fail-to-open report when
+  // the panel is embedded in a reverse-proxy dashboard iframe.
+  { path: 'panel.externalLinkMode',          env: 'EXTERNAL_LINK_MODE',         type: 'string',  default: 'auto',
+    coerce: v => {
+      const s = String(v || '').toLowerCase().trim();
+      return (s === 'same-tab' || s === 'new-tab' || s === 'auto') ? s : 'auto';
+    },
+    validate: v => (v === 'auto' || v === 'same-tab' || v === 'new-tab') ? null : 'expected auto, same-tab, or new-tab' },
   // advanced / debug
   { path: 'advanced.dryrun',          env: 'DRYRUN',        type: 'boolean', default: false, coerce: toBool },
   { path: 'advanced.record',          env: 'RECORD',        type: 'boolean', default: false, coerce: toBool },

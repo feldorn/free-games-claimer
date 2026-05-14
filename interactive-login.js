@@ -1957,6 +1957,16 @@ async function getState() {
     lastRun,
     captchaPending,
     runOnStartup: cfg.run_on_startup || 0,
+    externalLinkMode: (() => {
+      // Read via describeConfig() so the Settings tab can hot-update
+      // this without needing a panel restart (same pattern as the other
+      // panel-UI knobs that affect render-time decisions).
+      try {
+        const eff = describeConfig().effective;
+        const v = eff?.panel?.externalLinkMode;
+        return (v === 'same-tab' || v === 'new-tab') ? v : 'auto';
+      } catch { return 'auto'; }
+    })(),
     // Pending batch-redeem counts rolled into the main state response
     // (issue #17). Previously the panel polled /api/pending-gog-count
     // and /api/pending-steam-count separately on every cycle, tripling
@@ -2872,7 +2882,7 @@ const PANEL_HTML = `<!DOCTYPE html>
     <div class="disc-head">
       <div>
         <h3>Discoveries</h3>
-        <div class="disc-sub">Free-game listings from <a href="https://www.gamerpower.com/" target="_blank" rel="noopener">gamerpower.com</a> and <a href="https://www.reddit.com/r/FreeGameFindings/" target="_blank" rel="noopener">r/FreeGameFindings</a>, refreshed live. Items we auto-claim show a green <b>AUTO</b> badge; notify-only items show <b>NOTIFY</b>; everything else needs a manual click on the store link. Use this to claim platform variants (iOS / Android), Itch.io games, or anything we don't currently auto-claim.</div>
+        <div class="disc-sub">Free-game listings from <a href="https://www.gamerpower.com/" onclick="return openSiteUrl(this)" target="_blank" rel="noopener">gamerpower.com</a> and <a href="https://www.reddit.com/r/FreeGameFindings/" onclick="return openSiteUrl(this)" target="_blank" rel="noopener">r/FreeGameFindings</a>, refreshed live. Items we auto-claim show a green <b>AUTO</b> badge; notify-only items show <b>NOTIFY</b>; everything else needs a manual click on the store link. Use this to claim platform variants (iOS / Android), Itch.io games, or anything we don't currently auto-claim.</div>
       </div>
       <button class="disc-refresh-btn" id="btnDiscRefresh" onclick="renderDiscoveriesTab(true)">Refresh</button>
     </div>
@@ -2891,11 +2901,11 @@ const PANEL_HTML = `<!DOCTYPE html>
   </div>
 </div>
 <div class="project-links">
-  <a href="https://github.com/feldorn/free-games-claimer" target="_blank" rel="noopener" title="Browse the source on GitHub">Repo</a>
+  <a href="https://github.com/feldorn/free-games-claimer" onclick="return openSiteUrl(this)" target="_blank" rel="noopener" title="Browse the source on GitHub">Repo</a>
   <span class="project-links-sep">·</span>
-  <a href="https://github.com/feldorn/free-games-claimer/issues" target="_blank" rel="noopener" title="Report a bug or request a feature">Issues</a>
+  <a href="https://github.com/feldorn/free-games-claimer/issues" onclick="return openSiteUrl(this)" target="_blank" rel="noopener" title="Report a bug or request a feature">Issues</a>
   <span class="project-links-sep">·</span>
-  <a href="https://github.com/feldorn/free-games-claimer/discussions" target="_blank" rel="noopener" title="Ask a question or share an idea on Discussions — including new aggregator sources to add">Discussions</a>
+  <a href="https://github.com/feldorn/free-games-claimer/discussions" onclick="return openSiteUrl(this)" target="_blank" rel="noopener" title="Ask a question or share an idea on Discussions — including new aggregator sources to add">Discussions</a>
 </div>
 <div class="run-picker-modal" id="runPickerModal" role="dialog" aria-modal="true" aria-labelledby="runPickerTitle" style="display:none" onclick="rpBackdropClick(event)">
   <div class="run-picker-card" onclick="event.stopPropagation()">
@@ -3188,7 +3198,7 @@ function discRenderItem(it, sourceKey) {
   return '<div class="disc-item" title="' + escapeHtml(it.coverage.label || '') + '">' +
     '<span class="disc-badge ' + state + '">' + stateLabel + '</span>' +
     '<div>' +
-      '<div><a href="' + escapeHtml(it.url) + '" target="_blank" rel="noopener">' + escapeHtml(it.title) + '</a></div>' +
+      '<div><a href="' + escapeHtml(it.url) + '" onclick="return openSiteUrl(this)" target="_blank" rel="noopener">' + escapeHtml(it.title) + '</a></div>' +
       '<div class="disc-coverage-label">' + escapeHtml(it.coverage.label || '') + '</div>' +
     '</div>' +
     '<div style="display:flex; align-items:center; gap:8px; justify-content:flex-end;">' +
@@ -3636,7 +3646,14 @@ function paintSettings() {
       ) +
       settingGroup('Panel link',
         fieldRow('panel.publicUrl', 'Public URL',
-          { hint: 'External URL used in notifications so tap-targets land on the panel.' })
+          { hint: 'External URL used in notifications so tap-targets land on the panel.' }) +
+        fieldRow('panel.externalLinkMode', 'External link behavior',
+          { options: [
+              { value: 'auto',     label: 'Auto — new tab when panel is top-level, break out of iframe when embedded in a dashboard' },
+              { value: 'same-tab', label: 'Same tab — always navigate the top window (replaces the current page)' },
+              { value: 'new-tab',  label: 'New tab — always open in a new tab (may fail if your dashboard iframe sandboxes them)' },
+            ],
+            hint: 'Controls how Discoveries-tab links, GitHub footer links, and site shortcuts open. Default Auto detects iframe embedding and adapts. Override if Auto doesn\\'t fit your setup — e.g. you\\'re running the panel inside an iframe but want same-tab navigation anyway.' })
       );
   } else if (currentSettingsSection === 'services') {
     // Three-way split by row category (set by getServiceRows in
@@ -5271,23 +5288,39 @@ async function refreshState() {
   } catch {}
 }
 
-// Sessions card "↗" click handler. When the panel is at top-level
-// (most users), default anchor behaviour (target="_blank") opens a new
-// tab — return true and the browser handles it. When the panel is
-// iframed inside Organizr (or similar), Chromium's iframe-sandbox
-// interactions with cross-origin-isolation headers (CORP/COEP/COOP
-// same-origin) on destinations like Epic / MS Rewards / Steam cause
-// new-tab navigation to fail with ERR_BLOCKED_BY_RESPONSE even with
-// allow-popups-to-escape-sandbox set. Workaround: navigate the top
-// browsing context (window.top.location), which breaks free of the
+// External-link click handler. Honors the panel.externalLinkMode
+// setting from /api/state. Three modes:
+//   - 'auto' (default): iframed → break out via window.top, top-level
+//     → let target="_blank" do its thing (new tab).
+//   - 'same-tab':       always navigate the top window. Replaces the
+//     dashboard if iframed; replaces the panel if top-level. Lets the
+//     user prefer same-tab regardless of context.
+//   - 'new-tab':        always force target="_blank" semantics.
+//
+// Background on auto-mode: when the panel is iframed inside Organizr
+// (or similar), Chromium's iframe-sandbox interactions with
+// cross-origin-isolation headers (CORP/COEP/COOP same-origin) on
+// destinations like Epic / MS Rewards / Steam cause new-tab navigation
+// to fail with ERR_BLOCKED_BY_RESPONSE even with
+// allow-popups-to-escape-sandbox set. Top-nav breaks free of the
 // iframe entirely. Middle-click still uses the browser's native new-
 // tab mechanism (independent of this handler) and works regardless.
 function openSiteUrl(linkEl) {
-  if (window.self === window.top) return true; // not iframed — let target="_blank" do its thing
+  const mode = (state && state.externalLinkMode) || 'auto';
+  if (mode === 'same-tab') {
+    const url = linkEl.href;
+    try { (window.top || window).location.href = url; return false; }
+    catch { return true; }
+  }
+  if (mode === 'new-tab') {
+    return true; // let target="_blank" do its thing in any context
+  }
+  // 'auto': iframed → top-nav, else default-blank.
+  if (window.self === window.top) return true;
   const url = linkEl.href;
   try { window.top.location.href = url; }
-  catch { return true; } // iframe blocked top-nav for some reason — fall back to anchor default
-  return false; // we handled it
+  catch { return true; }
+  return false;
 }
 
 async function launchSite(siteId) {

@@ -4,6 +4,19 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.6.4
+
+**External-link mode setting — Discoveries / footer links honor iframe context (and an explicit override).** User reported Discoveries-tab links erroring out *after* the GamerPower CF fix: clicking through landed on the GamerPower page fine, but then clicking GamerPower's "Open Giveaway" button failed because the panel was running inside a reverse-proxy dashboard iframe and the new tab inherited iframe sandboxing that Epic / Steam refuse to render in. The site-card and Lenovo-drop links already had an iframe-aware click handler (`openSiteUrl`) that navigates the top window when iframed — but the Discoveries-tab links and the GitHub footer links were plain `target="_blank"` without it. Now they all use the same handler.
+
+Plus a new Settings field — **Panel link → External link behavior** — with three modes:
+- **Auto** (default) — auto-detect iframe context; break out via top-nav when embedded, new tab when top-level.
+- **Same tab** — always navigate the top window (replaces the current page). Useful if you prefer same-tab navigation regardless of context.
+- **New tab** — always force new-tab semantics (may fail in some embedded contexts; included for unusual setups).
+
+Env var: `EXTERNAL_LINK_MODE`.
+
+---
+
 ## What's new in 2.6.3
 
 **Discoveries tab — fix Cloudflare-gated link errors + footer GitHub links.** User reported many Discoveries-tab links erroring out when opened in a new tab. Root cause: we were linking to GamerPower's `open_giveaway_url` field, which is the `/open/<slug>` redirect page — Cloudflare gates it aggressively and a cold browser tab without a CF session gets a 403 challenge instead of the giveaway content. GamerPower's API also exposes `gamerpower_url` (the public listing page for the same giveaway), which is clean 200 with no CF challenge. Switched to that. The user lands on the public page, reads the offer, and clicks GamerPower's own "Open Giveaway" button, which establishes the CF session correctly so the subsequent click works. r/FreeGameFindings links were already direct store URLs and unaffected.
