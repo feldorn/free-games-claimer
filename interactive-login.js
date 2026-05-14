@@ -6058,9 +6058,17 @@ const server = http.createServer(async (req, res) => {
         for (const [k, pat] of Object.entries(GP_COLLECTOR_PATTERNS)) {
           if (pat.test(e.platforms || '')) { collectorKey = k; break; }
         }
+        // Use `gamerpower_url` (public listing page) not `open_giveaway_url`
+        // (CF-gated redirect). Direct fetch of the /open/ URL returns 403
+        // — Cloudflare's bot mitigation rejects browsers that come in
+        // cold without a session cookie established by clicking through
+        // GamerPower's own UI first. The /…-giveaway listing page is
+        // public, describes the offer, and has a working "Open Giveaway"
+        // button that establishes the CF session correctly. (User report
+        // 2026-05-14 — many Discoveries links erroring out.)
         return {
           title: e.title,
-          url: e.open_giveaway_url,
+          url: e.gamerpower_url || e.open_giveaway_url,
           platforms: e.platforms,
           type: e.type,
           endDate: e.end_date,
