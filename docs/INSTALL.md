@@ -69,6 +69,32 @@ volumes:
 
 ---
 
+## Keeping the image up to date
+
+There are two complementary mechanisms:
+
+### Built-in update notification
+
+The panel polls GitHub every 6 hours and shows a small **`vX.Y.Z → vX.Y.Z+N available`** pill in the header when a newer release is published. Click the pill to read the release notes, then run `docker compose pull && docker compose up -d` (or your equivalent) to apply the update. The pill stays hidden when you're current.
+
+Set `UPDATE_CHECK=0` in your environment to disable the poll entirely — useful for offline / air-gapped deployments. See [docs/CONFIGURATION.md](CONFIGURATION.md) for the full env reference.
+
+### Fully-automatic pulls (recommended for unattended deployments)
+
+If you'd rather have the image pulled and restarted automatically when a new tag lands, run a watcher container alongside FGC. Three good options — pick one:
+
+| Tool | Notes |
+|---|---|
+| **[Watchtower](https://github.com/containrrr/watchtower)** | The classic. Drop it into your compose with `command: --schedule "0 0 4 * * *"` (daily 4am) or use the polling default. Watches all containers with the right label and pulls+restarts when a new image is published. |
+| **[Diun](https://github.com/crazy-max/diun)** | Notify-only by default — pings you when a new image lands instead of auto-applying. Useful if you want the heads-up but want to time the restart yourself. |
+| **[Komodo](https://github.com/mbecker20/komodo)** | Full multi-host Docker management with an in-app upgrade button. Heavier than Watchtower but worth it if you're managing several stacks. |
+
+The panel's update pill works fine alongside any of these — it just stops appearing once the watcher applies the update.
+
+**We deliberately do not run `docker pull` from inside the container.** That would require mounting `/var/run/docker.sock` into the container, which gives any process inside it root on the host (it can spawn arbitrary privileged containers, mount host paths, etc.). For a tool that executes JavaScript scraped from third-party storefronts inside Chromium, that's not an acceptable default. The two-piece pattern above — pull-aware watcher + pull-naive app — is the right shape. See [issue #39](https://github.com/feldorn/free-games-claimer/issues/39) for the full rationale.
+
+---
+
 ## Without Docker
 
 1. Install [Node.js](https://nodejs.org/en/download) (v18+)
