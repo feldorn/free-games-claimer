@@ -28,8 +28,49 @@ export const COLLECTOR_PATTERNS = {
   'epic-games':   /epic games store|\bepic store\b/i,
   'steam':        /\bsteam\b/i,
   'gog':          /\bgog\b|good old games/i,
+  'itch-io':      /itch\.?\s*io/i,
+  'indiegala':    /indie\s*gala/i,
+  'stove':        /\bstove\b/i,
   'prime-gaming': /amazon prime|\bprime gaming\b/i,
   'ubisoft':      /ubisoft connect|\buplay\b/i,
+  'mobile':       /\bandroid\b|\bios\b/i,
+  'console':      /\bps[2-5]\b|\bxbox\b|\bswitch\b|\bnintendo\b/i,
+  'vr':           /\b(vr|oculus|rift|steamvr|quest)\b/i,
+};
+
+// GamerPower titles include a parenthetical storefront hint:
+//   "Carlos the Taco (IndieGala) Giveaway"   platforms="PC"  ← platforms field is useless
+// The (Storefront) hint is the real signal for cases where the platforms
+// field is a generic catch-all like "PC". Used as a *fallback* — primary
+// match against platforms first; this kicks in only when no platform
+// pattern hit. Keys map normalized hint (lowercase, non-alphanumerics
+// stripped) to the collector key. Extend here when a new storefront
+// shows up in GamerPower listings.
+export const GP_TITLE_HINTS = {
+  'epicgames':       'epic-games',
+  'steam':           'steam',
+  'gog':             'gog',
+  'itchio':          'itch-io',
+  'indiegala':       'indiegala',
+  'stove':           'stove',
+  'amazon':          'prime-gaming',
+  'amazonprime':     'prime-gaming',
+  'amazonprimegaming':'prime-gaming',
+  'ubisoft':         'ubisoft',
+  'ubisoftconnect':  'ubisoft',
+  'mobile':          'mobile',
+  'android':         'mobile',
+  'ios':             'mobile',
+  'rift':            'vr',
+  'vr':              'vr',
+  'oculus':          'vr',
+  'steamvr':         'vr',
+  'quest':           'vr',
+  'ps4':             'console',
+  'ps5':             'console',
+  'xbox':            'console',
+  'switch':          'console',
+  'nintendo':        'console',
 };
 
 // Domain patterns each collector recognises as a "real" claim URL.
@@ -41,6 +82,9 @@ export const COLLECTOR_DOMAINS = {
   'epic-games-mobile': ['store.epicgames.com'],
   'steam':             ['store.steampowered.com', 'steamcommunity.com'],
   'gog':               ['gog.com'],
+  'itch-io':           ['itch.io'],
+  'indiegala':         ['indiegala.com', 'freebies.indiegala.com'],
+  'stove':             ['onstove.com'],
   'prime-gaming':      ['gaming.amazon.com', 'amazon.com'],
   'ubisoft':           ['store.ubisoft.com', 'ubisoftconnect.com'],
 };

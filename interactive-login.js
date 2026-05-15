@@ -9,7 +9,7 @@ import { datetime, notify, jsonDb, normalizeTitle, cleanProfileLocks } from './s
 import { cfg } from './src/config.js';
 import { describeConfig, patchConfig, describeEnv, getSchedulerConfig, CONFIG_FILE_PATH } from './src/app-config.js';
 import { SITES as SITE_REGISTRY, getLoginSitesById, getClaimScriptOrder, getLinkedActiveMap, getClaimDbFiles, getServiceRows } from './src/sites.js';
-import { fetchGamerPowerGiveaways, filterFor as filterGpFor, COLLECTOR_PATTERNS as GP_COLLECTOR_PATTERNS } from './src/gamerpower.js';
+import { fetchGamerPowerGiveaways, filterFor as filterGpFor, COLLECTOR_PATTERNS as GP_COLLECTOR_PATTERNS, GP_TITLE_HINTS } from './src/gamerpower.js';
 import { fetchFGFPosts, filterFor as filterFgfFor, cleanTitle as fgfCleanTitle, COLLECTOR_TITLE_PATTERNS as FGF_COLLECTOR_PATTERNS } from './src/freegamefindings.js';
 
 const PANEL_PORT = Number(process.env.PANEL_PORT) || 7080;
@@ -334,6 +334,15 @@ let runHistoryDb = null;
 // scheduler honors "24h from last completion" across restarts —
 // firing immediately when past-due, sleeping the remainder when not.
 let schedulerStateDb = null;
+
+// Persisted user-state for the Discoveries tab — per-item "ignored" or
+// "manually-claimed" markers the user applies via row actions. Keyed by
+// `${collectorKey}::${normalizedTitle}` so the same game discovered by
+// both GamerPower and FGF dedupes to one state entry. Entries auto-prune
+// 14d after their `at` timestamp when the corresponding game has dropped
+// out of the active aggregator feeds (so the state file doesn't grow
+// unbounded). Loaded lazily in the /api/discoveries endpoint.
+let discoveriesStateDb = null;
 function getRunHistoryMax() {
   try {
     const eff = describeConfig().effective;
@@ -2482,6 +2491,37 @@ const PANEL_HTML = `<!DOCTYPE html>
   .stats-table td.muted.note { text-align: right; }
   .stats-table .muted { color: #8aa0c2; font-style: italic; }
 
+  /* Discoveries tab v2 — sub-tabs by storefront, global filters,
+     per-row user actions. */
+  .disc-filters { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 10px 12px; background: #0d1830; border: 1px solid #1c2c4a; border-radius: 6px; margin-bottom: 12px; position: sticky; top: 0; z-index: 5; }
+  .disc-search { flex: 1; min-width: 180px; max-width: 300px; padding: 6px 10px; background: #122142; color: #eaf1ff; border: 1px solid #2c4068; border-radius: 4px; font-size: 13px; }
+  .disc-search:focus { outline: none; border-color: #4a6fa0; }
+  .disc-filter-label { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #a0b4d4; cursor: pointer; }
+  .disc-filter-label select { background: #122142; color: #eaf1ff; border: 1px solid #2c4068; border-radius: 4px; padding: 4px 6px; font-size: 12px; cursor: pointer; }
+  .disc-filter-label input[type="checkbox"] { cursor: pointer; }
+  .disc-filter-spacer { flex: 1; }
+  .disc-filter-hint { color: #6a83a8; font-size: 11px; }
+  .disc-subtabs { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 14px; border-bottom: 1px solid #1c2c4a; padding-bottom: 8px; }
+  .disc-subtab { padding: 6px 12px; background: #0d1830; color: #a0b4d4; border: 1px solid #1c2c4a; border-radius: 4px 4px 0 0; cursor: pointer; font-size: 12px; font-weight: 500; transition: background 0.1s; }
+  .disc-subtab:hover { background: #122142; color: #eaf1ff; }
+  .disc-subtab.active { background: #1c2c4a; color: #eaf1ff; border-color: #4a6fa0; }
+  .disc-subtab-count { color: #6a83a8; font-weight: 400; margin-left: 4px; }
+  .disc-subtab.active .disc-subtab-count { color: #a0b4d4; }
+  .disc-tab-empty { padding: 32px 16px; text-align: center; color: #6a83a8; font-size: 13px; }
+  .disc-tab-empty-icon { font-size: 32px; display: block; margin-bottom: 8px; opacity: 0.5; }
+  /* Per-row action buttons (Ignore, Mark, Undo). */
+  .disc-actions { display: flex; gap: 4px; align-items: center; }
+  .disc-action-btn { background: #122142; color: #a0b4d4; border: 1px solid #2c4068; border-radius: 4px; cursor: pointer; padding: 4px 8px; font-size: 13px; line-height: 1; transition: background 0.1s, color 0.1s; }
+  .disc-action-btn:hover { background: #2c4068; color: #eaf1ff; }
+  .disc-action-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .disc-action-btn.danger:hover { background: #3d1f24; color: #ff9a8c; border-color: #6b3338; }
+  .disc-action-btn.ok:hover { background: #1f3d2f; color: #6fd49a; border-color: #2c5a45; }
+  /* Items the user has marked appear dimmed when shown (i.e. when the
+     "Hide ignored" or "Hide claimed" toggle is off). Makes the user-
+     marked state obvious without being shouty. */
+  .disc-item.user-marked { opacity: 0.55; }
+  .disc-item.user-marked:hover { opacity: 0.85; }
+
   /* Discoveries tab — aggregator listings with coverage badges. */
   .disc-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 8px; }
   .disc-head h3 { margin: 0; }
@@ -2509,6 +2549,7 @@ const PANEL_HTML = `<!DOCTYPE html>
   .disc-badge.notify  { background: #3d2f1f; color: #f0c060; border: 1px solid #5a4a2c; }
   .disc-badge.skip    { background: #3d1f24; color: #ff9a8c; border: 1px solid #6b3338; }
   .disc-badge.manual  { background: #2a2540; color: #b3a0e0; border: 1px solid #463a6a; }
+  .disc-badge.ignored { background: #232838; color: #7a8aa0; border: 1px solid #3a4860; }
   .disc-item-meta-bad { color: #ff9a8c; font-weight: 600; }
   .disc-tag { font-size: 10px; padding: 3px 6px; border-radius: 3px; background: #1c2c4a; color: #a0b4d4; font-family: 'SF Mono', Menlo, monospace; }
   .disc-coverage-label { font-size: 11px; color: #8aa0c2; font-style: italic; }
@@ -2894,11 +2935,29 @@ const PANEL_HTML = `<!DOCTYPE html>
     <div class="disc-head">
       <div>
         <h3>Discoveries</h3>
-        <div class="disc-sub">Free-game listings from <a href="https://www.gamerpower.com/" onclick="return openSiteUrl(this)" target="_blank" rel="noopener">gamerpower.com</a> and <a href="https://www.reddit.com/r/FreeGameFindings/" onclick="return openSiteUrl(this)" target="_blank" rel="noopener">r/FreeGameFindings</a>, refreshed live. Items we auto-claim show a green <b>AUTO</b> badge; notify-only items show <b>NOTIFY</b>; everything else needs a manual click on the store link. Use this to claim platform variants (iOS / Android), Itch.io games, or anything we don't currently auto-claim.</div>
+        <div class="disc-sub">Free-game listings from <a href="https://www.gamerpower.com/" onclick="return openSiteUrl(this)" target="_blank" rel="noopener">gamerpower.com</a> and <a href="https://www.reddit.com/r/FreeGameFindings/" onclick="return openSiteUrl(this)" target="_blank" rel="noopener">r/FreeGameFindings</a>, grouped by storefront. <b>AUTO</b>/<b>SKIP</b>/<b>NOTIFY</b>/<b>MANUAL</b>/<b>CLAIMED</b> badges tell you what the next run will do. Hover a row's 🚫 or ✓ to dismiss or mark as manually-claimed; ↺ undoes.</div>
       </div>
       <button class="disc-refresh-btn" id="btnDiscRefresh" onclick="renderDiscoveriesTab(true)">Refresh</button>
     </div>
     <div class="disc-meta" id="discMeta"></div>
+    <div class="disc-filters">
+      <input type="text" class="disc-search" id="discSearch" placeholder="Search title..." oninput="onDiscFilterChange()">
+      <label class="disc-filter-label">Min price
+        <select id="discMinPrice" onchange="onDiscFilterChange()">
+          <option value="0">$0 (show all)</option>
+          <option value="5">$5</option>
+          <option value="10">$10</option>
+          <option value="15">$15</option>
+          <option value="20">$20</option>
+          <option value="25">$25</option>
+        </select>
+      </label>
+      <label class="disc-filter-label"><input type="checkbox" id="discHideClaimed" checked onchange="onDiscFilterChange()"> Hide claimed</label>
+      <label class="disc-filter-label" title="Hides both items you dismissed (🚫) and items the SKIP forecast says your settings will filter at run time."><input type="checkbox" id="discHideIgnored" checked onchange="onDiscFilterChange()"> Hide ignored / skipped</label>
+      <span class="disc-filter-spacer"></span>
+      <span class="disc-filter-hint" id="discHiddenHint"></span>
+    </div>
+    <div class="disc-subtabs" id="discSubtabs"></div>
     <div id="discBody">Loading…</div>
   </div>
   <div class="tab-panel" data-panel="environment">
@@ -3104,19 +3163,86 @@ window.addEventListener('beforeunload', e => {
 
 // --- Discoveries tab ---
 // Live fetch of FGF + GamerPower listings via the panel's /api/discoveries
-// endpoint. Items are grouped by source, then ordered by coverage state
-// (auto → notify → manual) so the user can scan vertically for what
-// needs action. Refresh button does a force-refetch; otherwise the tab
-// caches the last response in JS memory so re-entering the tab is instant.
+// endpoint. Items are grouped by storefront into sub-tabs (Epic / Steam /
+// GOG / Itch.io / IndieGala / STOVE / Mobile / etc.); the source
+// (GamerPower vs FGF) is a small pill on each row. Refresh button does a
+// force-refetch; otherwise the tab caches the last response in JS
+// memory so re-entering the tab is instant.
+//
+// Filter state (search / min-price / hide-claimed / hide-ignored) persists
+// in localStorage so it survives panel reloads. Per-row actions
+// (🚫 Ignore / ✓ Mark claimed / ↺ Undo) POST to /api/discoveries/mark
+// and /unmark, then re-render with the cached data + the optimistic
+// state update.
 let discCache = null;
 let discFetching = false;
+let discActiveTab = 'all';
+const DISC_TAB_ORDER = [
+  'epic-games', 'epic-games-mobile', 'steam', 'gog',
+  'itch-io', 'indiegala', 'stove', 'mobile', 'console', 'vr',
+  'prime-gaming', 'ubisoft', 'other',
+];
+const DISC_TAB_LABELS = {
+  'epic-games': 'Epic',
+  'epic-games-mobile': 'Epic Mobile',
+  'steam': 'Steam',
+  'gog': 'GOG',
+  'itch-io': 'Itch.io',
+  'indiegala': 'IndieGala',
+  'stove': 'STOVE',
+  'mobile': 'Mobile',
+  'console': 'Console',
+  'vr': 'VR',
+  'prime-gaming': 'Prime',
+  'ubisoft': 'Ubisoft',
+  'other': 'Other',
+};
+
+function discLoadFilters() {
+  try {
+    const s = JSON.parse(localStorage.getItem('discFilters') || '{}');
+    const search = document.getElementById('discSearch');
+    const minPrice = document.getElementById('discMinPrice');
+    const hideClaimed = document.getElementById('discHideClaimed');
+    const hideIgnored = document.getElementById('discHideIgnored');
+    if (search && typeof s.search === 'string') search.value = s.search;
+    if (minPrice && typeof s.minPrice === 'number') minPrice.value = String(s.minPrice);
+    if (hideClaimed && typeof s.hideClaimed === 'boolean') hideClaimed.checked = s.hideClaimed;
+    if (hideIgnored && typeof s.hideIgnored === 'boolean') hideIgnored.checked = s.hideIgnored;
+    if (typeof s.activeTab === 'string') discActiveTab = s.activeTab;
+  } catch {}
+}
+function discSaveFilters() {
+  try {
+    const s = {
+      search: document.getElementById('discSearch')?.value || '',
+      minPrice: Number(document.getElementById('discMinPrice')?.value || 0),
+      hideClaimed: !!document.getElementById('discHideClaimed')?.checked,
+      hideIgnored: !!document.getElementById('discHideIgnored')?.checked,
+      activeTab: discActiveTab,
+    };
+    localStorage.setItem('discFilters', JSON.stringify(s));
+  } catch {}
+}
+function onDiscFilterChange() {
+  discSaveFilters();
+  if (discCache) discApplyAndRender();
+}
+function discSwitchSubtab(tab) {
+  discActiveTab = tab;
+  discSaveFilters();
+  discApplyAndRender();
+}
 async function renderDiscoveriesTab(forceRefresh) {
   const body = document.getElementById('discBody');
   const meta = document.getElementById('discMeta');
   const btn = document.getElementById('btnDiscRefresh');
   if (!body) return;
+  // Restore filter state before first render so the toggles reflect the
+  // user's saved prefs immediately rather than flipping after data arrives.
+  discLoadFilters();
   if (discCache && !forceRefresh) {
-    discRender(discCache);
+    discApplyAndRender();
     return;
   }
   if (discFetching) return;
@@ -3128,7 +3254,7 @@ async function renderDiscoveriesTab(forceRefresh) {
     const r = await fetch(BASE_PATH + '/api/discoveries');
     if (!r.ok) throw new Error('HTTP ' + r.status);
     discCache = await r.json();
-    discRender(discCache);
+    discApplyAndRender();
   } catch (e) {
     body.innerHTML = '<div class="disc-error">Failed to load: ' + escapeHtml(String(e.message || e)) + '</div>';
   } finally {
@@ -3137,30 +3263,126 @@ async function renderDiscoveriesTab(forceRefresh) {
   }
 }
 
-function discRender(data) {
-  const body = document.getElementById('discBody');
-  const meta = document.getElementById('discMeta');
-  if (!body) return;
-  const when = new Date(data.fetchedAt);
-  meta.innerHTML = 'Fetched ' + escapeHtml(when.toLocaleTimeString()) + ' — ' +
-    'GamerPower: ' + data.sources.gamerpower.total + ' entry/entries, ' +
-    'r/FreeGameFindings: ' + data.sources.freegamefindings.total + ' post(s)';
-  const html = [
-    discRenderSource('GamerPower', 'gamerpower.com — free games + DLC + loot aggregator', data.sources.gamerpower, 'gp'),
-    discRenderSource('r/FreeGameFindings', 'reddit subreddit — community-spotted giveaways across all platforms', data.sources.freegamefindings, 'fgf'),
-  ].join('');
-  body.innerHTML = html;
+// Parse "$4.99" / "$0.00" / "N/A" to numeric (NaN for unknown).
+// Regex built via RegExp constructor so the backslashes survive the
+// outer PANEL_HTML template-literal evaluation. A literal regex would
+// have its \d / \s / \. eaten by the template evaluation and become
+// /d+/ in the browser, throwing a SyntaxError that kills every tab
+// (caught 2026-05-15). Avoid backticks in comments inside PANEL_HTML
+// for the same template-literal reason.
+const DISC_WORTH_RE = new RegExp('\\\\$?\\\\s*(\\\\d+(?:\\\\.\\\\d+)?)');
+function discParseWorth(w) {
+  const m = DISC_WORTH_RE.exec(String(w || ''));
+  return m ? parseFloat(m[1]) : NaN;
 }
 
-function discRenderSource(title, subtitle, source, sourceKey) {
-  const items = source.items || [];
-  // Sort: auto first, then notify, then manual; within each, by collector key, then title.
-  // Sort priority: things needing user awareness first (manual + notify
-  // + skip), then auto-handled items, then already-claimed ones at the
-  // bottom. SKIP is grouped near the actionable items because the user
-  // can flip their threshold to claim it or click through manually.
-  const stateOrder = { manual: 0, notify: 1, skip: 2, auto: 3, claimed: 4 };
-  const sorted = items.slice().sort((a, b) => {
+// Decide whether an item passes the current global filters. Returns
+// { pass, reason } so the empty-state hint can explain why a tab is
+// empty ("3 items hidden by your filters").
+function discPassesFilters(it, filters) {
+  if (filters.search) {
+    const needle = filters.search.toLowerCase();
+    if (!(it.title || '').toLowerCase().includes(needle)) return { pass: false, reason: 'search' };
+  }
+  if (filters.minPrice > 0) {
+    const w = discParseWorth(it.worth);
+    // Items with a known worth below threshold get filtered. Unknown
+    // worth (NaN) stays — we can't tell, and false-hiding is worse
+    // than false-showing for unknown-price items.
+    if (Number.isFinite(w) && w < filters.minPrice) return { pass: false, reason: 'price' };
+  }
+  if (filters.hideClaimed && it.coverage.state === 'claimed') return { pass: false, reason: 'claimed' };
+  // SKIP rolls into the "hide ignored" bucket — both are "you've already
+  // decided not to claim this" from the user's POV. SKIP is implicit
+  // (set by your settings); IGNORED is explicit (you clicked 🚫). Same
+  // outcome, same hiding rule.
+  if (filters.hideIgnored && (it.coverage.state === 'ignored' || it.coverage.state === 'skip')) return { pass: false, reason: 'ignored' };
+  return { pass: true };
+}
+
+function discReadFilters() {
+  return {
+    search: (document.getElementById('discSearch')?.value || '').trim(),
+    minPrice: Number(document.getElementById('discMinPrice')?.value || 0),
+    hideClaimed: !!document.getElementById('discHideClaimed')?.checked,
+    hideIgnored: !!document.getElementById('discHideIgnored')?.checked,
+  };
+}
+
+function discApplyAndRender() {
+  const body = document.getElementById('discBody');
+  const meta = document.getElementById('discMeta');
+  const subtabs = document.getElementById('discSubtabs');
+  const hint = document.getElementById('discHiddenHint');
+  if (!body || !discCache) return;
+  const filters = discReadFilters();
+  // Flatten and tag every item with sourceKey for rendering.
+  const all = [];
+  for (const it of (discCache.sources.gamerpower.items || [])) all.push({ ...it, sourceKey: 'gp' });
+  for (const it of (discCache.sources.freegamefindings.items || [])) all.push({ ...it, sourceKey: 'fgf' });
+  // Apply filters. Track hidden counts for the hint line.
+  const hiddenCounts = { search: 0, price: 0, claimed: 0, ignored: 0 };
+  const visible = [];
+  for (const it of all) {
+    const r = discPassesFilters(it, filters);
+    if (r.pass) visible.push(it);
+    else hiddenCounts[r.reason] = (hiddenCounts[r.reason] || 0) + 1;
+  }
+  // Group by collectorKey (bucket nulls into 'other'). Build the tab
+  // count map BEFORE picking which tabs to show (so empty tabs can be
+  // hidden — only render a tab if at least one item lives there after
+  // filters).
+  const bucket = {};
+  for (const it of visible) {
+    const k = it.collectorKey || 'other';
+    (bucket[k] = bucket[k] || []).push(it);
+  }
+  // Sub-tab list: "All" first, then any collector in DISC_TAB_ORDER
+  // that has items, in that order. "Other" only shows when populated.
+  const orderedTabs = ['all'];
+  for (const k of DISC_TAB_ORDER) {
+    if (bucket[k] && bucket[k].length > 0) orderedTabs.push(k);
+  }
+  // If discActiveTab no longer has items, fall back to 'all'.
+  if (discActiveTab !== 'all' && !bucket[discActiveTab]?.length) discActiveTab = 'all';
+  // Render sub-tab nav.
+  if (subtabs) {
+    subtabs.innerHTML = orderedTabs.map(k => {
+      const label = k === 'all' ? 'All' : (DISC_TAB_LABELS[k] || k);
+      const count = k === 'all' ? visible.length : bucket[k].length;
+      const active = k === discActiveTab ? ' active' : '';
+      return '<button class="disc-subtab' + active + '" data-disc-tab="' + escapeHtml(k) + '">' +
+        escapeHtml(label) +
+        '<span class="disc-subtab-count">' + count + '</span>' +
+      '</button>';
+    }).join('');
+  }
+  // Render meta + hidden hint.
+  if (meta) {
+    const when = new Date(discCache.fetchedAt);
+    meta.innerHTML = 'Fetched ' + escapeHtml(when.toLocaleTimeString()) +
+      ' · GamerPower: ' + discCache.sources.gamerpower.total +
+      ' · FreeGameFindings: ' + discCache.sources.freegamefindings.total +
+      ' · Showing ' + visible.length + ' of ' + all.length;
+  }
+  if (hint) {
+    const hidden = all.length - visible.length;
+    hint.textContent = hidden > 0 ? hidden + ' hidden by filters' : '';
+  }
+  // Render the active tab's content.
+  const tabItems = discActiveTab === 'all' ? visible : (bucket[discActiveTab] || []);
+  if (tabItems.length === 0) {
+    body.innerHTML = '<div class="disc-tab-empty">' +
+      '<span class="disc-tab-empty-icon">✓</span>' +
+      'All clear in ' + escapeHtml(discActiveTab === 'all' ? 'every tab' : (DISC_TAB_LABELS[discActiveTab] || discActiveTab)) +
+      ' — nothing needs your attention here.' +
+    '</div>';
+    return;
+  }
+  // Sort within tab: MANUAL → NOTIFY → SKIP → AUTO → CLAIMED → IGNORED,
+  // then by collector key, then alpha.
+  const stateOrder = { manual: 0, notify: 1, skip: 2, auto: 3, claimed: 4, ignored: 5 };
+  const sorted = tabItems.slice().sort((a, b) => {
     const sa = stateOrder[a.coverage.state] ?? 9;
     const sb = stateOrder[b.coverage.state] ?? 9;
     if (sa !== sb) return sa - sb;
@@ -3169,43 +3391,27 @@ function discRenderSource(title, subtitle, source, sourceKey) {
     if (ca !== cb) return ca.localeCompare(cb);
     return (a.title || '').localeCompare(b.title || '');
   });
-  let inner;
-  if (source.error) {
-    inner = '<div class="disc-error">Fetch failed: ' + escapeHtml(source.error) + '</div>';
-  } else if (sorted.length === 0) {
-    inner = '<div class="disc-empty">No active listings right now.</div>';
-  } else {
-    inner = '<div class="disc-list">' +
-      sorted.map(it => discRenderItem(it, sourceKey)).join('') +
-      '</div>';
-  }
-  return '<div class="disc-section">' +
-    '<div class="disc-section-head">' +
-      '<div>' +
-        '<div class="disc-section-title">' + escapeHtml(title) + '</div>' +
-        '<div class="disc-section-sub">' + escapeHtml(subtitle) + '</div>' +
-      '</div>' +
-      '<div class="disc-section-count">' + sorted.length + ' item' + (sorted.length === 1 ? '' : 's') + '</div>' +
-    '</div>' +
-    inner +
-  '</div>';
+  body.innerHTML = '<div class="disc-list">' +
+    sorted.map(it => discRenderItem(it)).join('') +
+    '</div>';
 }
 
-function discRenderItem(it, sourceKey) {
+function discRenderItem(it) {
   const state = it.coverage.state || 'manual';
   const stateLabel = state.toUpperCase();
+  const sourceKey = it.sourceKey;
   // skipFields list comes from the backend's forecastSkip() — currently
   // ['worth'] when Steam price is below the user's threshold. Each field
   // name in this list gets a red highlight in the meta line below so
   // the user can see *which* setting caused the skip.
   const flaggedFields = new Set(it.coverage.skipFields || []);
-  // Build "tag chip" — for FGF it's the bracketed prefix from the
-  // post title; for GamerPower it's the platforms string truncated.
+  // Source pill (GP / FGF). Storefront chip moved to row meta-line.
+  const sourcePill = sourceKey === 'fgf' ? 'FGF' : 'GP';
+  // Tag chip — FGF bracketed prefix or GamerPower platform list.
   const chip = sourceKey === 'fgf'
     ? (it.tag || 'unknown')
     : (it.platforms || '');
   const metaParts = [];
-  // Source-specific metadata.
   if (sourceKey === 'fgf') {
     if (typeof it.score === 'number') metaParts.push(it.score + ' upvotes');
     if (it.flair) metaParts.push(escapeHtml(it.flair));
@@ -3213,10 +3419,6 @@ function discRenderItem(it, sourceKey) {
     if (it.type) metaParts.push(escapeHtml(it.type));
     if (it.endDate && it.endDate !== 'N/A') metaParts.push('ends ' + escapeHtml(it.endDate));
   }
-  // Worth shows in both sections (FGF entries inherit it from the
-  // matching GamerPower entry server-side, so SKIP-flagging is
-  // consistent across sources). Highlight in red when this is the
-  // field that caused a SKIP forecast.
   if (it.worth && it.worth !== 'N/A' && it.worth !== '$0.00') {
     const worthStr = 'worth ' + escapeHtml(it.worth);
     metaParts.push(flaggedFields.has('worth')
@@ -3226,17 +3428,150 @@ function discRenderItem(it, sourceKey) {
   const metaLine = metaParts.length
     ? '<span class="disc-item-meta">' + metaParts.join(' · ') + '</span>'
     : '';
-  return '<div class="disc-item" title="' + escapeHtml(it.coverage.label || '') + '">' +
+  // Per-row action buttons. Values go through data-* attributes (NOT
+  // inline onclick arguments) because titles like "Devil's Island"
+  // contain apostrophes — HTML-escaping outputs &#39; which the browser
+  // decodes back to ' inside an attribute, breaking the JS string and
+  // throwing a SyntaxError that kills the whole render. data-* uses
+  // HTML escaping only, which is reversible and safe.
+  const keyAttr = escapeHtml(it.dedupKey || '');
+  const titleAttr = escapeHtml(it.title || '');
+  let actions;
+  if (it.userState) {
+    actions =
+      '<button class="disc-action-btn" title="Undo — restore this item to its automatic state" data-disc-act="unmark" data-key="' + keyAttr + '">↺</button>';
+  } else {
+    actions =
+      '<button class="disc-action-btn ok" title="Mark as manually-claimed by you" data-disc-act="mark" data-key="' + keyAttr + '" data-status="manually-claimed" data-title="' + titleAttr + '">✓</button>' +
+      '<button class="disc-action-btn danger" title="Ignore — dismiss this row" data-disc-act="mark" data-key="' + keyAttr + '" data-status="ignored" data-title="' + titleAttr + '">🚫</button>';
+  }
+  const dimmed = it.userState ? ' user-marked' : '';
+  return '<div class="disc-item' + dimmed + '" title="' + escapeHtml(it.coverage.label || '') + '">' +
     '<span class="disc-badge ' + state + '">' + stateLabel + '</span>' +
     '<div>' +
-      '<div><a href="' + escapeHtml(it.url) + '" onclick="return openSiteUrl(this)" target="_blank" rel="noopener">' + escapeHtml(it.title) + '</a></div>' +
+      '<div><a href="' + escapeHtml(it.url) + '" onclick="return openSiteUrl(this)" target="_blank" rel="noopener">' + escapeHtml(it.title) + '</a> <span class="disc-tag" title="source">' + sourcePill + '</span></div>' +
       '<div class="disc-coverage-label">' + escapeHtml(it.coverage.label || '') + '</div>' +
     '</div>' +
     '<div style="display:flex; align-items:center; gap:8px; justify-content:flex-end;">' +
       (chip ? '<span class="disc-tag">' + escapeHtml(chip) + '</span>' : '') +
       metaLine +
+      '<div class="disc-actions">' + actions + '</div>' +
     '</div>' +
   '</div>';
+}
+
+// Delegated click handler for per-row Discoveries action buttons.
+// Buttons are rendered fresh on every discApplyAndRender call, so
+// hooking via onclick property would need rebinding each render —
+// delegation is one-shot and survives re-renders. Reads the action
+// kind + key/status/title from data-* attributes (HTML-escaped only,
+// safe for titles containing apostrophes etc).
+document.addEventListener('click', (ev) => {
+  const btn = ev.target.closest('[data-disc-act]');
+  if (btn) {
+    const act = btn.dataset.discAct;
+    if (act === 'mark') {
+      discMarkItem(btn.dataset.key, btn.dataset.status, btn.dataset.title || '');
+    } else if (act === 'unmark') {
+      discUnmarkItem(btn.dataset.key);
+    }
+    return;
+  }
+  const tab = ev.target.closest('[data-disc-tab]');
+  if (tab) {
+    discSwitchSubtab(tab.dataset.discTab);
+  }
+});
+
+// POST /api/discoveries/mark — flips the item's userState. Optimistic
+// update: mutate the local cache so the next render reflects the
+// change without a refetch, then call the server. On error, revert.
+async function discMarkItem(key, status, title) {
+  if (!discCache || !key) return;
+  // Apply local mutation to every cache entry sharing this key.
+  const prev = discApplyUserStateLocally(key, status, title);
+  discApplyAndRender();
+  try {
+    const r = await fetch(BASE_PATH + '/api/discoveries/mark', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key, status, title: title || '' }),
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const j = await r.json();
+    if (!j.success) throw new Error(j.error || 'unknown');
+  } catch (e) {
+    // Revert: restore the previous coverage/userState on each mutated item.
+    if (prev) discApplyUserStateLocally(key, null, title, prev);
+    discApplyAndRender();
+    showToast('Failed to mark item: ' + e.message, 'error');
+  }
+}
+
+async function discUnmarkItem(key) {
+  if (!discCache || !key) return;
+  const prev = discApplyUserStateLocally(key, null);
+  discApplyAndRender();
+  try {
+    const r = await fetch(BASE_PATH + '/api/discoveries/unmark', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key }),
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const j = await r.json();
+    if (!j.success) throw new Error(j.error || 'unknown');
+  } catch (e) {
+    if (prev) discApplyUserStateLocally(key, null, null, prev);
+    discApplyAndRender();
+    showToast('Failed to undo: ' + e.message, 'error');
+  }
+}
+
+// Mutate discCache so all items with the given dedupKey get the new
+// userState + matching coverage. A single game often appears in BOTH
+// GP and FGF, sharing one dedupKey — they MUST flip together so the
+// optimistic local view matches what the server would return on a
+// refresh. Returns an array of previous values (one per mutated item)
+// for revert on POST failure. A status of null clears user-state (undo).
+function discApplyUserStateLocally(key, status, title, restoreList) {
+  const mutated = [];
+  let restoreIdx = 0;
+  for (const src of ['gamerpower', 'freegamefindings']) {
+    const items = discCache?.sources?.[src]?.items;
+    if (!Array.isArray(items)) continue;
+    for (const it of items) {
+      if (it.dedupKey !== key) continue;
+      // Capture prior state for revert.
+      mutated.push({ src, coverage: it.coverage, userState: it.userState, title: it.title });
+      // Restore path: apply the previously-captured state.
+      if (Array.isArray(restoreList) && restoreList[restoreIdx]) {
+        it.coverage = restoreList[restoreIdx].coverage;
+        it.userState = restoreList[restoreIdx].userState;
+        restoreIdx++;
+        continue;
+      }
+      if (status === null) {
+        // Undo. Best-effort revert of coverage. Original auto-derived
+        // coverage isn't preserved locally; coerce to AUTO/MANUAL until
+        // next /api/discoveries fetch reconciles server-side truth.
+        it.userState = null;
+        if (it.coverage && it.coverage.userMarked) {
+          it.coverage = { state: 'auto', label: 'Restored — Refresh to resync coverage state' };
+        } else if (it.coverage && it.coverage.state === 'ignored') {
+          it.coverage = { state: 'manual', label: 'Restored — Refresh to resync coverage state' };
+        }
+        continue;
+      }
+      it.userState = { status, at: new Date().toISOString() };
+      if (status === 'ignored') {
+        it.coverage = { state: 'ignored', label: 'You ignored this. Use the undo button to restore.' };
+      } else if (status === 'manually-claimed') {
+        it.coverage = { state: 'claimed', label: 'Marked as manually-claimed by you. Use the undo button if this was accidental.', userMarked: true };
+      }
+    }
+  }
+  return mutated.length ? mutated : null;
 }
 
 async function renderEnvironmentTab() {
@@ -3673,7 +4008,16 @@ function paintSettings() {
               { value: 'actions', label: 'Actions Required — login issues, captchas, errors, watcher new-items, redeem reminders (silences per-run summaries when nothing needed your attention)' },
               { value: 'off',     label: 'Off — silence all notifications' },
             ],
-            hint: 'Default is All. Choose Actions Required to skip the per-run "X claimed, Y already owned" summary on uneventful runs while keeping anything that asks you to do something. Off silences everything globally — captchas + login errors included.' })
+            hint: 'Default is All. Choose Actions Required to skip the per-run "X claimed, Y already owned" summary on uneventful runs while keeping anything that asks you to do something. Off silences everything globally — captchas + login errors included.' }) +
+        fieldRow('notifications.captchaPriority', 'Captcha priority',
+          { options: [
+              { value: 'low',       label: 'Low' },
+              { value: 'moderate',  label: 'Moderate' },
+              { value: 'normal',    label: 'Normal' },
+              { value: 'high',      label: 'High (default — punches through DnD)' },
+              { value: 'emergency', label: 'Emergency (Pushover requires acknowledgment)' },
+            ],
+            hint: 'Priority sent with captcha alerts (apprise --priority). Captchas are time-sensitive — Epic / GOG / AliExpress iframes time out within minutes — so High is the default to break through Do-Not-Disturb on Pushover and similar notifiers. Lower it to Normal if these wake you up too often.' })
       ) +
       settingGroup('Panel link',
         fieldRow('panel.publicUrl', 'Public URL',
@@ -6067,6 +6411,11 @@ const server = http.createServer(async (req, res) => {
     // Errors per source degrade gracefully — one source down doesn't
     // hide the other.
     if (req.method === 'GET' && req.url === '/api/discoveries') {
+      // Lazy-init the user-state DB. Schema: { items: { <key>: { status, title, at } } }
+      if (!discoveriesStateDb) discoveriesStateDb = await jsonDb('discoveries-state.json', { items: {} });
+      if (!discoveriesStateDb.data || typeof discoveriesStateDb.data !== 'object') discoveriesStateDb.data = { items: {} };
+      if (!discoveriesStateDb.data.items) discoveriesStateDb.data.items = {};
+
       // Load per-collector DBs in parallel with the aggregator fetches.
       // Wrapped in .catch so a missing DB file (first-run, fresh deploy)
       // degrades to an empty owned-set rather than a 500 — the user
@@ -6140,8 +6489,14 @@ const server = http.createServer(async (req, res) => {
             : { state: 'manual', label: 'Enable Epic mobile games in Settings to auto-claim — or claim manually' };
           case 'steam':             return { state: 'auto',   label: 'Auto-claimed by Steam collector' };
           case 'gog':               return { state: 'notify', label: 'Notify-only — claim manually via the link (GOG claim UIs vary)' };
+          case 'itch-io':           return { state: 'manual', label: 'Itch.io — claim manually via the link' };
+          case 'indiegala':         return { state: 'manual', label: 'IndieGala — claim manually via the link' };
+          case 'stove':             return { state: 'manual', label: 'STOVE storefront — claim manually via the link' };
           case 'prime-gaming':      return { state: 'manual', label: 'Prime collector handles discovery directly — listed here for awareness' };
           case 'ubisoft':           return { state: 'manual', label: 'Ubisoft watcher handles discovery directly — listed here for awareness' };
+          case 'mobile':            return { state: 'manual', label: 'Mobile platform — claim via the App Store / Play Store' };
+          case 'console':           return { state: 'manual', label: 'Console giveaway — claim through the platform store on your console' };
+          case 'vr':                return { state: 'manual', label: 'VR-platform giveaway — claim through the VR storefront' };
           default:                  return { state: 'manual', label: 'Click to claim manually' };
         }
       };
@@ -6227,6 +6582,33 @@ const server = http.createServer(async (req, res) => {
         if (k && !priceByKey.has(k)) priceByKey.set(k, e.worth);
       }
 
+      // Dedup-key + user-state merge helpers. The key is `${collector}::${matchKey(title)}`
+      // — stable across both aggregators so the same game gets the same key
+      // regardless of whether it surfaced via GP or FGF. User-state mutations
+      // POST this key back. promoteUserState transforms the coverage when
+      // the user has marked the item: 'ignored' takes precedence over any
+      // automatic state (it's an explicit dismiss); 'manually-claimed'
+      // promotes to a CLAIMED variant.
+      const userStates = discoveriesStateDb.data.items;
+      const buildKey = (collectorKey, title) => `${collectorKey || 'other'}::${matchKey(title || '')}`;
+      const promoteUserState = (coverage, key) => {
+        const us = userStates[key];
+        if (!us) return { coverage, userState: null };
+        if (us.status === 'ignored') {
+          return {
+            coverage: { state: 'ignored', label: 'You ignored this. Use the undo button to restore.' },
+            userState: { status: 'ignored', at: us.at },
+          };
+        }
+        if (us.status === 'manually-claimed') {
+          return {
+            coverage: { state: 'claimed', label: 'Marked as manually-claimed by you. Use the undo button if this was accidental.', userMarked: true },
+            userState: { status: 'manually-claimed', at: us.at },
+          };
+        }
+        return { coverage, userState: null };
+      };
+
       // FGF: title prefix is the canonical platform signal. Iterate the
       // pattern map in collector-key order; first match wins.
       const fgfItems = fgfAll.map(p => {
@@ -6244,27 +6626,53 @@ const server = http.createServer(async (req, res) => {
         let coverage = coverageFor(collectorKey);
         coverage = promoteIfOwned(coverage, collectorKey, p.url, title);
         coverage = forecastSkip(coverage, collectorKey, worth);
+        // "ReadComments" flair class = key is randomly distributed in the
+        // Reddit comments thread, not on the external page. The post.url
+        // points at the redeem endpoint (e.g. nvidia.com/redeem) which is
+        // useless without first grabbing a key from the comments. Swap
+        // the row's link target to the Reddit post and update the label.
+        // (Caught 2026-05-15 on HITMAN Purple Streak NVIDIA giveaway.)
+        let displayUrl = p.url;
+        if (p.flairClass === 'ReadComments') {
+          displayUrl = p.postUrl;
+          coverage = { state: coverage.state, label: 'Key is randomly distributed in the Reddit comments — open the thread, grab a key, then redeem at ' + p.url };
+        }
+        const dedupKey = buildKey(collectorKey, title);
+        const promoted = promoteUserState(coverage, dedupKey);
         return {
           title,
           rawTitle: p.title,
           tag,
-          url: p.url,
+          url: displayUrl,
+          storeUrl: p.url,
           postUrl: p.postUrl,
           flair: p.flair,
+          flairClass: p.flairClass,
           score: p.score,
           createdUtc: p.createdUtc,
           worth,
           collectorKey,
-          coverage,
+          dedupKey,
+          userState: promoted.userState,
+          coverage: promoted.coverage,
         };
       });
 
-      // GamerPower: platforms is a comma-list. Same collector-key first-
-      // match-wins scan.
+      // GamerPower: platforms is a comma-list. Primary match is platforms
+      // string; title-parenthetical fallback handles cases where platforms
+      // is just a generic "PC" (most IndieGala/Stove/Itch.io entries).
       const gpItems = gpAll.map(e => {
         let collectorKey = null;
         for (const [k, pat] of Object.entries(GP_COLLECTOR_PATTERNS)) {
           if (pat.test(e.platforms || '')) { collectorKey = k; break; }
+        }
+        if (!collectorKey) {
+          // Extract "(Storefront)" from title and look up in hint map.
+          const m = /\(([^)]+)\)\s*Giveaway\b/i.exec(e.title || '');
+          if (m) {
+            const norm = m[1].toLowerCase().replace(/[^a-z0-9]/g, '');
+            if (GP_TITLE_HINTS[norm]) collectorKey = GP_TITLE_HINTS[norm];
+          }
         }
         // Use `gamerpower_url` (public listing page) not `open_giveaway_url`
         // (CF-gated redirect). Direct fetch of the /open/ URL returns 403
@@ -6281,6 +6689,8 @@ const server = http.createServer(async (req, res) => {
         let coverage = coverageFor(collectorKey);
         coverage = promoteIfOwned(coverage, collectorKey, e.open_giveaway_url || '', titleForMatch);
         coverage = forecastSkip(coverage, collectorKey, e.worth);
+        const dedupKey = buildKey(collectorKey, titleForMatch);
+        const promoted = promoteUserState(coverage, dedupKey);
         return {
           title: e.title,
           url: e.gamerpower_url || e.open_giveaway_url,
@@ -6290,13 +6700,38 @@ const server = http.createServer(async (req, res) => {
           worth: e.worth,
           thumbnail: e.thumbnail,
           collectorKey,
+          dedupKey,
+          userState: promoted.userState,
           // GamerPower URL is the gamerpower listing, not the store URL,
           // so the URL-based lookup never hits — promoteIfOwned falls
           // back to the title index, which is why we strip the
           // "(Platform) Giveaway" tail before passing it in.
-          coverage,
+          coverage: promoted.coverage,
         };
       });
+
+      // Auto-prune: drop user-state entries older than 14d that are no
+      // longer present in either aggregator feed. Safety net so the
+      // state file doesn't grow unbounded over years. Entries still in
+      // the feed are kept regardless of age — those are the "I claimed
+      // this and want it to stay hidden" markers, valuable on long-
+      // running giveaways. Done synchronously per request because the
+      // cost is tiny (object iteration + occasional file write).
+      const liveKeys = new Set([...fgfItems, ...gpItems].map(it => it.dedupKey));
+      const PRUNE_MS = 14 * 24 * 3600 * 1000;
+      const nowMs = Date.now();
+      let pruned = 0;
+      for (const [k, v] of Object.entries(userStates)) {
+        const ageMs = nowMs - new Date(v.at || 0).getTime();
+        if (ageMs > PRUNE_MS && !liveKeys.has(k)) {
+          delete userStates[k];
+          pruned++;
+        }
+      }
+      if (pruned > 0) {
+        try { await discoveriesStateDb.write(); }
+        catch (e) { console.warn(`[${datetime()}] discoveries-state prune write failed: ${e.message}`); }
+      }
 
       sendJson(res, {
         fetchedAt: new Date().toISOString(),
@@ -6305,6 +6740,62 @@ const server = http.createServer(async (req, res) => {
           freegamefindings: { items: fgfItems, error: fgfError, total: fgfItems.length },
         },
       });
+      return;
+    }
+
+    // POST /api/discoveries/mark — set { status: 'ignored' | 'manually-claimed' }
+    // for a given dedup key. Body: { key, status, title? }. Idempotent.
+    if (req.method === 'POST' && req.url === '/api/discoveries/mark') {
+      try {
+        const body = await parseBody(req);
+        const { key, status, title } = body || {};
+        if (typeof key !== 'string' || !key) {
+          sendJson(res, { success: false, error: 'missing key' }, 400);
+          return;
+        }
+        if (status !== 'ignored' && status !== 'manually-claimed') {
+          sendJson(res, { success: false, error: 'status must be "ignored" or "manually-claimed"' }, 400);
+          return;
+        }
+        if (!discoveriesStateDb) discoveriesStateDb = await jsonDb('discoveries-state.json', { items: {} });
+        if (!discoveriesStateDb.data) discoveriesStateDb.data = { items: {} };
+        if (!discoveriesStateDb.data.items) discoveriesStateDb.data.items = {};
+        discoveriesStateDb.data.items[key] = {
+          status,
+          title: typeof title === 'string' ? title : undefined,
+          at: new Date().toISOString(),
+        };
+        await discoveriesStateDb.write();
+        sendJson(res, { success: true });
+      } catch (e) {
+        sendJson(res, { success: false, error: e.message }, 500);
+      }
+      return;
+    }
+
+    // POST /api/discoveries/unmark — remove the user-state entry for the
+    // given dedup key. Body: { key }. Used by the Undo button on a
+    // previously ignored / manually-claimed row. Idempotent (deleting
+    // a missing key is a no-op success).
+    if (req.method === 'POST' && req.url === '/api/discoveries/unmark') {
+      try {
+        const body = await parseBody(req);
+        const { key } = body || {};
+        if (typeof key !== 'string' || !key) {
+          sendJson(res, { success: false, error: 'missing key' }, 400);
+          return;
+        }
+        if (!discoveriesStateDb) discoveriesStateDb = await jsonDb('discoveries-state.json', { items: {} });
+        if (!discoveriesStateDb.data) discoveriesStateDb.data = { items: {} };
+        if (!discoveriesStateDb.data.items) discoveriesStateDb.data.items = {};
+        if (discoveriesStateDb.data.items[key]) {
+          delete discoveriesStateDb.data.items[key];
+          await discoveriesStateDb.write();
+        }
+        sendJson(res, { success: true });
+      } catch (e) {
+        sendJson(res, { success: false, error: e.message }, 500);
+      }
       return;
     }
 

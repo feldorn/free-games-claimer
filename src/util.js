@@ -268,6 +268,11 @@ const _captchaNotifyBody = (service, label, kind) => {
     : `${escapeHtml(service)} captcha: ${escapeHtml(label)} — solve later when you can`;
   return url ? `${intro}<br>${url}` : `${intro}. Open the panel to solve.`;
 };
+// Urgent captchas get high priority by default (CAPTCHA_NOTIFY_PRIORITY).
+// Deferred follow-ups stay at normal — the user already missed the window,
+// blasting DnD again is annoying. Read via cfg so a Settings save takes
+// effect without restart.
+const _captchaPriority = (kind) => kind === 'urgent' ? (cfg.captcha_notify_priority || 'high') : 'normal';
 export const awaitUserCaptchaSolve = async (page, {
   service,
   label = 'verification',
@@ -287,14 +292,14 @@ export const awaitUserCaptchaSolve = async (page, {
   // Abandoned path — user gave up earlier. Single deferred notification so
   // they have a record + link, then return false without blocking.
   if (state === 'abandoned') {
-    notify(_captchaNotifyBody(service, safeLabel, 'deferred'))
+    notify(_captchaNotifyBody(service, safeLabel, 'deferred'), { priority: _captchaPriority('deferred'), kind: 'action' })
       .catch(e => console.error(`captcha notify (deferred) failed: ${e.message}`));
     return false;
   }
 
   // Engagement path — fresh or previously engaged. Banner + urgent notify + poll.
   console.log(`[CAPTCHA-START] service=${service} label=${safeLabel}`);
-  notify(_captchaNotifyBody(service, safeLabel, 'urgent'))
+  notify(_captchaNotifyBody(service, safeLabel, 'urgent'), { priority: _captchaPriority('urgent'), kind: 'action' })
     .catch(e => console.error(`captcha notify (urgent) failed: ${e.message}`));
 
   const deadline = Date.now() + timeoutMs;
@@ -314,7 +319,7 @@ export const awaitUserCaptchaSolve = async (page, {
   // captcha doesn't disappear from the user's awareness, return false.
   _captchaServiceState.set(service, 'abandoned');
   console.log(`[CAPTCHA-END] service=${service} reason=timeout`);
-  notify(_captchaNotifyBody(service, safeLabel, 'deferred'))
+  notify(_captchaNotifyBody(service, safeLabel, 'deferred'), { priority: _captchaPriority('deferred'), kind: 'action' })
     .catch(e => console.error(`captcha notify (deferred) failed: ${e.message}`));
   return false;
 };

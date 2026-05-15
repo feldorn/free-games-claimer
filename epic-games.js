@@ -126,7 +126,9 @@ try {
       // await page.click('text=Sign in with Epic Games');
       page.waitForSelector('.h_captcha_challenge iframe').then(async () => {
         log.warn('Got captcha during login — solve in browser, get a new IP or try again later');
-        await notify('epic-games: got captcha during login. Please check.');
+        const panelLink = cfg.public_url ? `${cfg.public_url}/?focus=captcha` : '';
+        const body = `epic-games: got captcha during login. Please check.${panelLink ? '<br>' + panelLink : ''}`;
+        await notify(body, { priority: cfg.captcha_notify_priority || 'high', kind: 'action' });
       }).catch(_ => { });
       page.waitForSelector('p:has-text("Incorrect response.")').then(async () => {
         log.warn('Incorrect captcha response');
@@ -505,11 +507,22 @@ try {
         captcha.waitFor().then(async () => { // don't await, since element may not be shown
           captchaDetected = true;
           log.warn('Got hCaptcha challenge — solve in browser or get a new IP address');
-          await notify(`epic-games: got captcha challenge for ${title}.\nGame link: ${url}`);
+          // Include the panel deep-link (?focus=captcha auto-opens the
+          // browser view on the active service) so tapping the push
+          // takes the user straight to where they need to be. Game link
+          // kept as a secondary line for context. Priority is configurable
+          // via Settings → Notifications → Captcha priority (default
+          // high so it punches through DnD — captchas have minutes
+          // before the iframe times out).
+          const panelLink = cfg.public_url ? `${cfg.public_url}/?focus=captcha` : '';
+          const body = `epic-games: got captcha challenge for ${title} — solve now${panelLink ? '<br>' + panelLink : ''}<br>Game: ${url}`;
+          await notify(body, { priority: cfg.captcha_notify_priority || 'high', kind: 'action' });
         }).catch(_ => { }); // may time out if not shown
         iframe.locator('.payment__errors:has-text("Failed to challenge captcha, please try again later.")').waitFor().then(async () => {
           log.fail('Failed captcha challenge — try again later');
-          await notify(`epic-games: failed captcha challenge for ${title}.\nGame link: ${url}`, { attachLatestScreenshot: true });
+          const panelLink = cfg.public_url ? `${cfg.public_url}/?focus=captcha` : '';
+          const body = `epic-games: failed captcha challenge for ${title}${panelLink ? '<br>' + panelLink : ''}<br>Game: ${url}`;
+          await notify(body, { priority: cfg.captcha_notify_priority || 'high', kind: 'action', attachLatestScreenshot: true });
         }).catch(_ => { });
         // Race three success signals — whichever fires first wins. Epic's
         // post-purchase modal copy drifts (was "Thanks for your order!",

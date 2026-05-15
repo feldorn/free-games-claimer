@@ -4,6 +4,23 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.7.0
+
+**Discoveries tab v2 — storefront sub-tabs, filter bar, per-row actions, user-state persistence.** Built in response to the user trigger "I want to highlight what needs my attention" — the v1 single-list view forced you to scan every entry across both aggregators every time. Now:
+
+- **Sub-tabs by storefront.** Each destination store (Epic / Steam / GOG / Itch.io / IndieGala / STOVE / Mobile / Console / VR / Prime / Ubisoft / Other) gets its own tab with a count badge. Empty tabs hide automatically so the nav stays compact. "All" is the firehose; per-store tabs filter to one destination. Tab order is by coverage state (auto → manual) so the most actionable storefronts surface first.
+- **Storefront classification extended.** FGF title-prefix patterns now cover Itch.io, IndieGala, STOVE, Mobile (`[Android]`/`[iOS]`/`[Mobile]`), Console (`[PS4]`/`[Xbox]`/`[Switch]`), and VR (`[Oculus]`/`[Rift]`/`[Quest]`). GamerPower entries fall back to a title-parenthetical hint (`<Name> (IndieGala) Giveaway`) when their platforms field is just `PC` — caught from real-world data where Indiegala / Stove / Itch.io entries were all bucketed as Other.
+- **Sticky filter bar.** Search by title (live), Min-price dropdown ($0 / $5 / $10 / $15 / $20 / $25; hides items below threshold when worth is known, leaves unknown-price items alone), Hide claimed (default on), Hide ignored / skipped (default on — SKIP-forecast items are treated as implicitly ignored). State persists in localStorage so it survives panel reloads.
+- **Per-row actions.** Each row gets 🚫 Ignore and ✓ Mark claimed buttons; ↺ Undo reverses them. Marks persist server-side in `data/discoveries-state.json`, keyed by `${collectorKey}::${normalizedTitle}` so the same game discovered by both GamerPower and FGF dedupes to one state entry — marking one flips both immediately (optimistic update, then server roundtrip). State entries auto-prune 14 days after their mark date when the game has dropped out of all aggregator feeds, so the file stays bounded.
+- **CLAIMED + SKIP forecasts.** AUTO items the user already has in their store DB get a blue CLAIMED badge (cross-references claim DBs by URL slug + Steam appId + edition-stripped title). Steam items below `STEAM_MIN_PRICE` get a red SKIP badge with the worth chip highlighted, so you can see exactly which setting caused the skip.
+- **ReadComments routing.** FGF posts with `link_flair_css_class === 'ReadComments'` (random-key distributions on NVIDIA/IndieGala/etc.) now link to the Reddit thread instead of the redeem endpoint — the redeem page is useless without a key from the comments. Coverage label gets a hint pointing back at the store URL for once-you-have-a-key redemption.
+
+Backend: new `/api/discoveries/mark` + `/api/discoveries/unmark` endpoints; `/api/discoveries` now folds user-state into every item and includes a stable `dedupKey` field.
+
+**Captcha notification deep-links + configurable priority.** When Epic / GOG / AliExpress hits a captcha mid-claim, the push notification now includes the panel's `?focus=captcha` deep link — tapping it auto-opens the browser view on the active service so you can solve the slider/hCaptcha without hunting through tabs. Plus a new Settings → Notifications → Captcha priority field (env `CAPTCHA_NOTIFY_PRIORITY`, default `high`) so the alert breaks through Pushover's DnD / quiet hours — captcha iframes time out in minutes and a delayed-by-2-hours notification is useless.
+
+---
+
 ## What's new in 2.6.9
 
 **Fix stale Chromium profile locks after container restart ([#37](https://github.com/feldorn/free-games-claimer/issues/37)).** Lifeng77X reported AliExpress refusing to launch with:

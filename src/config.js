@@ -56,6 +56,9 @@ export const cfg = {
   // everything that requires user action (login issues, captchas, errors,
   // watcher new-item alerts, redeem reminders).
   notify_level: notif.notifyLevel || 'all',
+  // Priority for time-sensitive captcha notifications. Default high so it
+  // breaks through DnD; user can dial down via Settings → Notifications.
+  captcha_notify_priority: notif.captchaPriority || 'high',
   // scheduler (moved out of interactive-login.js so Settings can override)
   loop: sched.loopSeconds ?? 0,
   daily_start_time: sched.dailyStartTime ?? '',

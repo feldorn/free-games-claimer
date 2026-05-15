@@ -101,6 +101,18 @@ export const CONFIG_SCHEMA = [
   { path: 'notifications.notify',            env: 'NOTIFY',                     type: 'string',  default: '' },
   { path: 'notifications.notifyTitle',       env: 'NOTIFY_TITLE',               type: 'string',  default: '' },
   { path: 'notifications.attachScreenshots', env: 'NOTIFY_ATTACH_SCREENSHOTS',  type: 'boolean', default: true, coerce: toBoolDefaultTrue },
+  // Captcha-event notification priority — sent when a claim run hits a
+  // captcha and you need to solve it interactively. Default 'high' so
+  // these break through Do-Not-Disturb / quiet hours; the prompt is
+  // time-sensitive (you have minutes before Epic's iframe times out).
+  // 2026-05-15 user report (Vaudeville Epic captcha): existing message
+  // had only the game URL; now includes panel deep-link too.
+  { path: 'notifications.captchaPriority', env: 'CAPTCHA_NOTIFY_PRIORITY',     type: 'string',  default: 'high',
+    coerce: v => {
+      const s = String(v || '').toLowerCase().trim();
+      return ['low','moderate','normal','high','emergency'].includes(s) ? s : 'high';
+    },
+    validate: v => ['low','moderate','normal','high','emergency'].includes(v) ? null : 'expected low, moderate, normal, high, or emergency' },
   // Notification verbosity (#31): 'all' (default — current behavior),
   // 'actions' (suppress per-run summaries; keep login issues, captchas,
   // errors, watcher new-item alerts, redeem reminders), 'off' (silent).

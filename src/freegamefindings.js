@@ -60,8 +60,14 @@ export const COLLECTOR_TITLE_PATTERNS = {
   'epic-games-mobile': /^\[Epic Games Mobile\]/i,
   'steam':             /^\[Steam\]/i,
   'gog':               /^\[GOG\]/i,
+  'itch-io':           /^\[Itch\.?\s*io\]/i,
+  'indiegala':         /^\[Indie\s*Gala\]/i,
+  'stove':             /^\[Stove\]/i,
   'prime-gaming':      /^\[Amazon( Prime)?( Gaming)?\]/i,
   'ubisoft':           /^\[Ubisoft( Connect)?\]/i,
+  'mobile':            /^\[(Android|iOS|Mobile)\]/i,
+  'console':           /^\[(PS[2-5]|PSN|Xbox|XBL|Switch|Nintendo)\]/i,
+  'vr':                /^\[(VR|Oculus|Rift|SteamVR|Quest)\]/i,
 };
 
 // Reusing the same collector→domain map keeps the URL-validation rule
