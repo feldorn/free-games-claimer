@@ -3141,6 +3141,8 @@ const PANEL_HTML = `<!DOCTYPE html>
 <div class="project-links">
   <a href="https://github.com/feldorn/free-games-claimer" onclick="return openSiteUrl(this)" target="_blank" rel="noopener" title="Browse the source on GitHub">Repo</a>
   <span class="project-links-sep">·</span>
+  <a href="https://github.com/feldorn/free-games-claimer/blob/main/CHANGELOG.md" onclick="return openSiteUrl(this)" target="_blank" rel="noopener" title="Release notes — see what shipped in each version">What's new</a>
+  <span class="project-links-sep">·</span>
   <a href="https://github.com/feldorn/free-games-claimer/issues" onclick="return openSiteUrl(this)" target="_blank" rel="noopener" title="Report a bug or request a feature">Issues</a>
   <span class="project-links-sep">·</span>
   <a href="https://github.com/feldorn/free-games-claimer/discussions" onclick="return openSiteUrl(this)" target="_blank" rel="noopener" title="Ask a question or share an idea on Discussions — including new aggregator sources to add">Discussions</a>
