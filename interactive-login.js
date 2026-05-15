@@ -3302,6 +3302,14 @@ async function switchTab(tab) {
   document.querySelectorAll('.tab-nav .tab').forEach(t => {
     t.classList.toggle('active', t.dataset.tab === tab);
   });
+  // Stash the active tab in the URL hash so it survives a navigation
+  // away and back — covers the iframe-bust case from the Discoveries
+  // tab (click external link → bust replaces window.top → user hits
+  // browser back → reload picks the tab back up from the hash instead
+  // of falling through to the default 'sessions'). Uses replaceState
+  // so tab switches don't pollute browser history with one entry per
+  // click — only the most-recent tab state lives in the current URL.
+  try { history.replaceState(null, '', '#tab=' + tab); } catch {}
   if (tab === 'logs') startLogsTabPoll();
   else stopLogsTabPoll();
   if (tab === 'schedule') renderScheduleTab();
@@ -3310,6 +3318,21 @@ async function switchTab(tab) {
   if (tab === 'environment') renderEnvironmentTab();
   if (tab === 'discoveries') renderDiscoveriesTab();
 }
+
+// Restore the active tab from the URL hash on initial load + on browser
+// back/forward. Valid tab whitelist guards against junk in the URL. No
+// effect if hash is missing or points at an unknown tab — body keeps
+// its default data-tab="sessions" from the HTML.
+const VALID_TABS = ['sessions', 'stats', 'schedule', 'discoveries', 'logs', 'settings', 'environment'];
+function _initTabFromHash() {
+  const m = /^#tab=([a-z-]+)/i.exec(location.hash || '');
+  if (!m) return;
+  const tab = m[1];
+  if (!VALID_TABS.includes(tab)) return;
+  if (document.body.dataset.tab === tab) return; // already on it
+  switchTab(tab);
+}
+window.addEventListener('popstate', _initTabFromHash);
 
 // Native browser dialog for tab close / reload while drafts exist.
 // Browser shows a generic localized message; can't customise the text.
@@ -6396,6 +6419,11 @@ document.addEventListener('visibilitychange', () => {
     startPolling();
   }
 });
+// Sync active tab from URL hash on initial load (before first paint —
+// the hash, if present, takes precedence over the body's default
+// data-tab="sessions"). Covers browser-back from an iframe-busted
+// external link returning the user to the tab they came from.
+_initTabFromHash();
 if (document.visibilityState !== 'hidden') startPolling();
 </script>
 </body>
