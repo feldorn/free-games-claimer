@@ -4,6 +4,31 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.7.1
+
+**Settings UX overhaul, doc split, and update-check banner.** Three related polish items addressing usability and discoverability.
+
+**Settings — grid alignment + section hierarchy + credential masking + cross-tab dirty indicator.** Every row is now a 3-column CSS grid (220px label · 1fr control · auto-width revert), so labels start at the same x-offset on every Settings sub-page — the eye no longer re-anchors when moving from Scheduler to Notifications to Advanced. Section headers bumped from 10px/0.08em to 12px/0.12em with a stronger divider rule so they visually dominate field labels. A small `● = field is overridden from default. Click Revert to restore.` legend appears at the top of each pane making the dot's meaning discoverable.
+
+Apprise URL field is now masked by default with a **Reveal** toggle — the URL embeds bearer tokens (`pover://USER_KEY@APP_KEY`, `tgram://botid:chatid/`, etc.) that were leaking on every screen-share and screenshot. Sidebar tabs get a small yellow dirty-count badge when fields in another section have pending changes — easier to see at a glance which tabs have un-saved work.
+
+**README split into `docs/`.** The README had grown to 1,100+ lines. New shape: a slim landing `README.md` (~110 lines: header, services tables, feature highlights, screenshots tour, quick-start, doc index) plus six topic-focused docs:
+
+- [docs/INSTALL.md](docs/INSTALL.md) — Docker, Compose, bare-metal, non-root
+- [docs/CONFIGURATION.md](docs/CONFIGURATION.md) — Env vars, notifications, scheduling
+- [docs/PANEL.md](docs/PANEL.md) — Tour of all seven panel tabs + Settings reference
+- [docs/AUTH.md](docs/AUTH.md) — Automatic login + cookie upload + captcha pause
+- [docs/NETWORKING.md](docs/NETWORKING.md) — Reverse-proxy setups
+- [docs/REFERENCE.md](docs/REFERENCE.md) — Bot detection, data storage, HTTP API, troubleshooting
+
+Discoveries tab gets its own screenshot in `docs/PANEL.md`; Settings screenshot refreshed to show the new grid alignment + legend.
+
+**Update-available banner ([#39](https://github.com/feldorn/free-games-claimer/issues/39)).** New panel header pill that appears when a newer release is published. Polls `api.github.com/repos/feldorn/free-games-claimer/releases/latest` (and falls back to `/tags?per_page=20` when no releases are published — the fork uses git tags, not GitHub Releases) every six hours; cached in `data/update-check.json` so reloads don't hammer GitHub. Clicking the pill opens the release notes. Manual `docker pull` + restart still required to actually apply the update — we deliberately do **not** call the host docker socket (would need it mounted into the container, a real security concern).
+
+Set `UPDATE_CHECK=0` to disable for offline / air-gapped deployments.
+
+---
+
 ## What's new in 2.7.0
 
 **Discoveries tab v2 — storefront sub-tabs, filter bar, per-row actions, user-state persistence.** Built in response to the user trigger "I want to highlight what needs my attention" — the v1 single-list view forced you to scan every entry across both aggregators every time. Now:

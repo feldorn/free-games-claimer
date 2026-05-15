@@ -98,7 +98,7 @@ export const CONFIG_SCHEMA = [
     const n = Number(v); return n === 1 || n === 2 ? n : 0;
   }, validate: v => v === 0 || v === 1 || v === 2 ? null : 'expected 0, 1, or 2' },
   // notifications + panel URL
-  { path: 'notifications.notify',            env: 'NOTIFY',                     type: 'string',  default: '' },
+  { path: 'notifications.notify',            env: 'NOTIFY',                     type: 'string',  default: '', sensitive: true },
   { path: 'notifications.notifyTitle',       env: 'NOTIFY_TITLE',               type: 'string',  default: '' },
   { path: 'notifications.attachScreenshots', env: 'NOTIFY_ATTACH_SCREENSHOTS',  type: 'boolean', default: true, coerce: toBoolDefaultTrue },
   // Captcha-event notification priority — sent when a claim run hits a
@@ -272,6 +272,7 @@ export function describeConfig() {
       type: f.type,
       default: f.default,
       nullable: !!f.nullable,
+      sensitive: !!f.sensitive,
       appValue: r.appValue,
       envValue: r.envValue,
       effective: r.effective,
@@ -296,6 +297,8 @@ export const ENV_DISPLAY = [
   { env: 'BASE_PATH',      category: 'panel',  label: 'Base path (reverse-proxy subfolder)' },
   { env: 'PANEL_PASSWORD', category: 'panel',  label: 'Panel password' },
   { env: 'VNC_PASSWORD',   category: 'panel',  label: 'VNC password' },
+  { env: 'UPDATE_CHECK',   category: 'panel',  label: 'Update-check (set 0 to disable)',
+    note: 'Polls https://api.github.com/repos/feldorn/free-games-claimer/releases/latest every 6h and shows a header pill when a newer image is published. Manual `docker pull` + restart still required — we never call the host docker socket. Default enabled; set UPDATE_CHECK=0 for offline / air-gapped deployments.' },
   // data paths
   { env: 'BROWSER_DIR',     category: 'paths', label: 'Browser profile dir' },
   { env: 'SCREENSHOTS_DIR', category: 'paths', label: 'Screenshots dir' },

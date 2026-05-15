@@ -343,6 +343,116 @@ let schedulerStateDb = null;
 // out of the active aggregator feeds (so the state file doesn't grow
 // unbounded). Loaded lazily in the /api/discoveries endpoint.
 let discoveriesStateDb = null;
+
+// Update check (issue #39). Periodic poll of GitHub releases to detect
+// when a newer image is published; surfaces in the panel header as a
+// small pill linking to the changelog. Manual pull / restart still
+// required — we never call docker.sock (would need the host's socket
+// mounted, security smell). Disabled by env UPDATE_CHECK=0 for offline
+// / air-gapped deployments. Cached in JS memory + persisted to
+// data/update-check.json so we don't hammer GitHub on every panel
+// reload. Check cadence: once every 6 hours.
+const UPDATE_CHECK_INTERVAL_MS = 6 * 3600 * 1000;
+const UPDATE_CHECK_DISABLED = (() => {
+  const v = String(process.env.UPDATE_CHECK || '').toLowerCase().trim();
+  return v === '0' || v === 'false' || v === 'no' || v === 'off';
+})();
+let updateCheckCache = null; // { latest, current, behind, checkedAt, releaseUrl }
+let updateCheckDb = null;
+let updateCheckTimer = null;
+async function loadUpdateCheckCache() {
+  if (updateCheckDb) return;
+  try { updateCheckDb = await jsonDb('update-check.json', {}); }
+  catch { updateCheckDb = { data: {}, write: async () => {} }; }
+  if (updateCheckDb.data && updateCheckDb.data.checkedAt) updateCheckCache = updateCheckDb.data;
+}
+// Compare semver-ish strings ("2.7.0" vs "2.8.0"). Returns true when
+// `latest` is strictly newer than `current`. Tolerant of trailing -beta
+// / -rc / + build metadata — those get sorted lexically after the bare
+// version, so 2.7.0 < 2.7.0-rc1 (a release candidate published after
+// the stable would be considered newer, which is correct).
+function isNewerVersion(latest, current) {
+  if (!latest || !current) return false;
+  const norm = s => String(s).replace(/^v/i, '').split(/[.\-+]/).map(p => /^\d+$/.test(p) ? p.padStart(8, '0') : p);
+  const a = norm(latest);
+  const b = norm(current);
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    const ai = a[i] || '';
+    const bi = b[i] || '';
+    if (ai > bi) return true;
+    if (ai < bi) return false;
+  }
+  return false;
+}
+async function fetchLatestRelease() {
+  // Primary: /releases/latest. Returns a real release if one is published.
+  // Falls back to /tags when no releases exist on the repo — covers the
+  // case where the maintainer pushes a version-shaped git tag (v2.7.0)
+  // without going through GitHub's "create release" workflow. /tags is
+  // always available as long as any tag is pushed.
+  const headers = { 'Accept': 'application/vnd.github+json', 'User-Agent': `free-games-claimer/${APP_VERSION || '0.0.0'}` };
+  try {
+    const r = await fetch('https://api.github.com/repos/feldorn/free-games-claimer/releases/latest', {
+      headers, signal: AbortSignal.timeout(10000),
+    });
+    if (r.ok) {
+      const j = await r.json();
+      if (j.tag_name) return { tag: j.tag_name, url: j.html_url || '' };
+    } else if (r.status !== 404) {
+      console.warn(`[${datetime()}] update check: /releases/latest returned ${r.status}`);
+      return null;
+    }
+    // 404 → fall through to /tags
+  } catch (e) {
+    console.warn(`[${datetime()}] update check: /releases fetch failed — ${e.message}`);
+    return null;
+  }
+  // Tags fallback. Returns array of tags newest-first by commit date.
+  // Pick the first one that parses as a version (vN.N.N or N.N.N).
+  try {
+    const r = await fetch('https://api.github.com/repos/feldorn/free-games-claimer/tags?per_page=20', {
+      headers, signal: AbortSignal.timeout(10000),
+    });
+    if (!r.ok) {
+      console.warn(`[${datetime()}] update check: /tags returned ${r.status}`);
+      return null;
+    }
+    const tags = await r.json();
+    if (!Array.isArray(tags)) return null;
+    // GitHub's /tags ordering isn't strictly by version — pick the
+    // highest semver-shaped tag explicitly to avoid latching onto an
+    // old back-tagged hotfix as "newest".
+    const versioned = tags.filter(t => /^v?\d+(\.\d+)+/.test(t.name || ''));
+    if (!versioned.length) return null;
+    versioned.sort((a, b) => isNewerVersion(a.name, b.name) ? -1 : 1);
+    const top = versioned[0];
+    return { tag: top.name, url: `https://github.com/feldorn/free-games-claimer/releases/tag/${encodeURIComponent(top.name)}` };
+  } catch (e) {
+    console.warn(`[${datetime()}] update check: /tags fetch failed — ${e.message}`);
+    return null;
+  }
+}
+async function runUpdateCheck() {
+  if (UPDATE_CHECK_DISABLED) return;
+  await loadUpdateCheckCache();
+  const latest = await fetchLatestRelease();
+  if (!latest) return;
+  const current = APP_VERSION || '0.0.0';
+  const behind = isNewerVersion(latest.tag, current);
+  updateCheckCache = { latest: latest.tag, current, behind, checkedAt: new Date().toISOString(), releaseUrl: latest.url };
+  if (updateCheckDb) {
+    updateCheckDb.data = updateCheckCache;
+    try { await updateCheckDb.write(); } catch {}
+  }
+}
+function startUpdateCheckLoop() {
+  if (UPDATE_CHECK_DISABLED) return;
+  if (updateCheckTimer) return;
+  // Initial check after panel boot (delayed 30s so first-paint isn't
+  // gated on a network round-trip), then every UPDATE_CHECK_INTERVAL_MS.
+  setTimeout(() => { runUpdateCheck().catch(() => {}); }, 30000);
+  updateCheckTimer = setInterval(() => { runUpdateCheck().catch(() => {}); }, UPDATE_CHECK_INTERVAL_MS);
+}
 function getRunHistoryMax() {
   try {
     const eff = describeConfig().effective;
@@ -1971,6 +2081,11 @@ async function getState() {
     lastRun,
     captchaPending,
     runOnStartup: cfg.run_on_startup || 0,
+    // Update-check pill — present only when a newer release is published
+    // (issue #39). Null if checks disabled or no newer version found.
+    updateAvailable: (updateCheckCache && updateCheckCache.behind)
+      ? { current: updateCheckCache.current, latest: updateCheckCache.latest, releaseUrl: updateCheckCache.releaseUrl }
+      : null,
     externalLinkMode: (() => {
       // Read via describeConfig() so the Settings tab can hot-update
       // this without needing a panel restart (same pattern as the other
@@ -2266,7 +2381,13 @@ const PANEL_HTML = `<!DOCTYPE html>
   .headless-banner .hb-text small { display: block; font-weight: 400; opacity: 0.85; margin-top: 2px; }
   .header-top { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
   .header h1 { font-size: 18px; color: #e94560; white-space: nowrap; }
-  .header-actions { display: flex; gap: 8px; margin-left: auto; flex-wrap: wrap; justify-content: flex-end; }
+  .header-actions { display: flex; gap: 8px; margin-left: auto; flex-wrap: wrap; justify-content: flex-end; align-items: center; }
+  /* Update-available pill (issue #39). Subtle teal chip in the header
+     actions area when a newer release is published; clicking opens the
+     GitHub release notes. Manual pull still required — we don't auto-
+     update. Disabled entirely when UPDATE_CHECK=0 env is set. */
+  .update-pill { background: #1f3d2f; color: #6fd49a; border: 1px solid #2c5a45; border-radius: 12px; padding: 4px 12px; font-size: 11px; font-weight: 600; text-decoration: none; white-space: nowrap; cursor: pointer; letter-spacing: 0.02em; }
+  .update-pill:hover { background: #2c5a45; color: #aeefcd; border-color: #4ecca3; }
 
   .tab-nav { display: flex; gap: 2px; }
   .tab-nav .tab { padding: 5px 12px; background: transparent; color: #a0a0c0; font-size: 13px; cursor: pointer; border: none; border-radius: 6px; font-weight: 500; }
@@ -2389,23 +2510,36 @@ const PANEL_HTML = `<!DOCTYPE html>
      sits ~24px to its right. No more stretched grid pushing controls to a
      far-edge column. flex-wrap allows revert + popover to wrap onto extra
      rows when needed. */
-  .setting { display: flex; align-items: center; gap: 24px; padding: 12px 0; border-bottom: 1px solid #1a2a48; flex-wrap: wrap; }
-  .setting:last-child { border-bottom: none; }
-  .setting > .setting-label { flex: 0 0 auto; white-space: nowrap; min-width: 0; }
-  .setting > .setting-input { flex: 0 0 auto; }
-  .setting > .setting-help-popover { flex-basis: 100%; }
-  /* Below 640px: labels wrap naturally and controls drop below.
-     Boolean Variant C keeps its checkbox-left inline layout. */
+  /* Grid layout (2026-05-15 Settings UX overhaul, feedback item #1). Each
+     setting row becomes a three-column grid: fixed-width label · stretch
+     control · auto-width trailing tail (revert button). The label column
+     is 220px so labels of varying length all start at the same x-offset
+     across every Settings sub-page — the eye no longer has to re-anchor
+     when switching from Scheduler to Notifications to Advanced. The
+     trailing column hosts the Revert button so it stays glued to the
+     right edge of the row regardless of control width. Help popover
+     spans all three columns (grid-column: 1 / -1, defined earlier). */
+  .setting { display: grid; grid-template-columns: 220px 1fr auto; column-gap: 18px; row-gap: 6px; align-items: center; padding: 10px 0; }
+  .setting > .setting-label { min-width: 0; }
+  .setting > .setting-input { min-width: 0; }
+  /* Below 640px: labels wrap onto their own row, controls follow on a
+     second row. Boolean variant keeps its checkbox-left inline layout. */
   @media (max-width: 640px) {
-    .setting:not(.setting-bool) { flex-direction: column; align-items: flex-start; gap: 8px; }
+    .setting:not(.setting-bool) { grid-template-columns: 1fr; row-gap: 4px; }
     .setting:not(.setting-bool) > .setting-label { white-space: normal; }
   }
-  /* Grouped fields: small-caps subheader replaces the per-field hairline so
-     related settings (Timeouts, Debug, Viewport, etc.) read as one cluster. */
-  .setting-group { margin-bottom: 24px; }
+  /* Grouped fields: small-caps subheader. Bumped from 10px / 0.08em
+     letter-spacing to 12px / 0.12em with a stronger divider rule
+     (feedback item #3) so section boundaries stand out from the
+     field labels they group. */
+  .setting-group { margin-bottom: 28px; }
   .setting-group:last-child { margin-bottom: 0; }
-  .setting-group-head { font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: #6a7e9e; margin: 0 0 4px; padding-bottom: 6px; border-bottom: 1px solid #1a2a48; }
-  .setting-group .setting { border-bottom: none; padding: 8px 0; }
+  .setting-group-head { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.12em; color: #8aa0c2; margin: 0 0 14px; padding-bottom: 10px; border-bottom: 1px solid #2a3a5a; }
+  .setting-group .setting { padding: 8px 0; }
+  /* Legend at the top of each Settings page explaining the green dot +
+     Revert pattern (feedback item #8 — the dot wasn't discoverable). */
+  .settings-pane-legend { font-size: 11px; color: #8aa0c2; margin: 0 0 18px; padding: 8px 10px; background: #0d1830; border: 1px solid #1c2c4a; border-radius: 4px; line-height: 1.5; }
+  .settings-pane-legend .setting-dot { vertical-align: middle; }
   .setting-label { font-size: 13px; color: #e0e0e0; line-height: 1.4; }
   .setting-env { font-size: 11px; color: #8aa0c2; font-family: 'Menlo', 'Consolas', monospace; margin-left: 6px; }
   .setting-dot { width: 6px; height: 6px; border-radius: 50%; background: #4ecca3; display: inline-block; margin-left: 6px; vertical-align: middle; }
@@ -2438,6 +2572,30 @@ const PANEL_HTML = `<!DOCTYPE html>
   .setting-revert { background: transparent; border: 1px solid #233454; border-radius: 4px; padding: 5px 10px; color: #8aa0c2; cursor: pointer; font-size: 11px; white-space: nowrap; margin-top: 3px; }
   .setting-revert:hover:not(:disabled) { background: #1a2a48; color: #e0e0e0; border-color: #2a3a5a; }
   .setting-revert:disabled { opacity: 0.25; cursor: not-allowed; }
+
+  /* Sensitive-field masking (feedback item #10). Apprise URLs embed
+     bearer tokens (pover://USER_KEY@APP_KEY, ntfy://...auth/, etc.).
+     Plain-text rendering in the Settings panel leaks them on every
+     screen-share or screenshot. Masked-by-default with a Reveal toggle
+     matches the Environment tab's pattern. -webkit-text-security covers
+     multiline textareas (Chromium/Safari/Edge); type="password" works
+     for single-line text inputs. */
+  .setting-input.sensitive input[type="text"][data-sensitive-state="hidden"],
+  .setting-input.sensitive textarea[data-sensitive-state="hidden"] {
+    -webkit-text-security: disc;
+    text-security: disc;
+    font-family: 'Menlo', 'Consolas', monospace;
+  }
+  .setting-reveal { background: transparent; border: 1px solid #233454; border-radius: 4px; padding: 5px 10px; color: #8aa0c2; cursor: pointer; font-size: 11px; white-space: nowrap; margin-left: 4px; }
+  .setting-reveal:hover { background: #1a2a48; color: #e0e0e0; border-color: #2a3a5a; }
+
+  /* Cross-tab dirty count (feedback item #11) — badge on each sidebar
+     rail-btn shows how many fields are dirty inside that section, so a
+     user navigating across sections can see at a glance which other
+     tabs have pending changes. Visible regardless of which tab is
+     currently active. */
+  .settings-rail .rail-btn { position: relative; }
+  .rail-dirty-badge { display: inline-block; min-width: 18px; padding: 1px 6px; margin-left: 8px; background: #f0c040; color: #1c2c4a; border-radius: 9px; font-size: 10px; font-weight: 700; line-height: 1.4; text-align: center; }
 
   /* Composite day/hour/minute interval input — narrow number boxes inline with
      unit labels and a live human-readable summary. */
@@ -2856,6 +3014,7 @@ const PANEL_HTML = `<!DOCTYPE html>
       <button class="tab" data-tab="environment" onclick="switchTab('environment')">Environment</button>
     </nav>
     <div class="header-actions">
+      <a class="update-pill" id="updatePill" style="display:none" target="_blank" rel="noopener" onclick="return openSiteUrl(this)" title="Click to see the release notes">Update available</a>
       <button class="btn btn-check-all sessions-only" onclick="checkAll()" id="btnCheckAll">Check All Sessions</button>
       <button class="btn btn-show-browser sessions-only" onclick="toggleBrowserView()" id="btnShowBrowser" title="Open the live browser view via noVNC — useful for diagnosing card-click failures or peeking at what a script is doing.">Show browser</button>
       <button class="btn btn-popout-browser sessions-only" onclick="popoutBrowser()" id="btnPopoutBrowser" title="Open the noVNC view in a new tab for full-screen viewing.">Pop out ↗</button>
@@ -3603,6 +3762,10 @@ let currentSettingsSection = 'scheduler';
 // Per-field help-popover + per-service accordion state. Kept across repaints.
 const openHelp = new Set();
 const openServices = new Set();
+// Per-field "show real value" toggle for sensitive fields (Apprise URL
+// etc.). Default closed — value renders masked via -webkit-text-security
+// or type="password" until the user clicks Reveal.
+const revealedSensitive = new Set();
 
 function selectSettingsSection(name) {
   currentSettingsSection = name;
@@ -3614,6 +3777,11 @@ function selectSettingsSection(name) {
 
 function toggleFieldHelp(path) {
   if (openHelp.has(path)) openHelp.delete(path); else openHelp.add(path);
+  paintSettings();
+}
+
+function toggleRevealSensitive(path) {
+  if (revealedSensitive.has(path)) revealedSensitive.delete(path); else revealedSensitive.add(path);
   paintSettings();
 }
 
@@ -3739,6 +3907,9 @@ function fieldRow(path, label, extra) {
     '</div>';
   }
 
+  const sensitive = !!f.sensitive;
+  const revealed = sensitive && revealedSensitive.has(path);
+  const sensState = revealed ? 'shown' : 'hidden';
   let inputHtml;
   if (extra.options) {
     const options = extra.options.map(o => '<option value="' + o.value + '"' + (String(value) === String(o.value) ? ' selected' : '') + '>' + escapeHtml(o.label) + '</option>').join('');
@@ -3754,14 +3925,25 @@ function fieldRow(path, label, extra) {
       : inputEl;
     inputHtml = inputCore + suffix;
   } else if (extra.multiline) {
-    inputHtml = '<textarea oninput="setSettingValue(\\'' + path + '\\', this.value)">' + escapeHtml(value || '') + '</textarea>';
+    const sensAttr = sensitive ? ' data-sensitive-state="' + sensState + '"' : '';
+    inputHtml = '<textarea' + sensAttr + ' oninput="setSettingValue(\\'' + path + '\\', this.value)">' + escapeHtml(value || '') + '</textarea>';
   } else {
-    inputHtml = '<input type="text" value="' + escapeHtml(value || '') + '" oninput="setSettingValue(\\'' + path + '\\', this.value)">';
+    const sensAttr = sensitive ? ' data-sensitive-state="' + sensState + '"' : '';
+    inputHtml = '<input type="text"' + sensAttr + ' value="' + escapeHtml(value || '') + '" oninput="setSettingValue(\\'' + path + '\\', this.value)">';
   }
+  // Sensitive fields get a Reveal/Hide toggle inside the input column so
+  // the button stays grouped with the masked control rather than sliding
+  // into the trailing Revert column. The masking is visual only — the
+  // value is still in the DOM (it has to be, the user might edit it) —
+  // protection is against shoulder-surfing / screenshots / screen-share.
+  if (sensitive) {
+    inputHtml += '<button type="button" class="setting-reveal" onclick="toggleRevealSensitive(\\'' + path + '\\')">' + (revealed ? 'Hide' : 'Reveal') + '</button>';
+  }
+  const inputClass = sensitive ? 'setting-input sensitive' : 'setting-input';
 
   return '<div class="setting" data-path="' + path + '">' +
     '<div class="setting-label">' + labelHtml + '</div>' +
-    '<div class="setting-input">' + inputHtml + '</div>' +
+    '<div class="' + inputClass + '">' + inputHtml + '</div>' +
     revertBtn +
     popover +
   '</div>';
@@ -4078,6 +4260,19 @@ function paintSettings() {
       );
   }
 
+  // Slot the dot/revert legend underneath whichever pane-title the
+  // section rendered (Scheduler / Notifications / Services / Advanced).
+  // First closing div after settings-pane-title is the title's close
+  // tag — inject right after it. Regex built via RegExp constructor so
+  // the backslashes in [\s\S] survive the outer PANEL_HTML template-
+  // literal evaluation (a literal /[\s\S]/ would have its escapes eaten
+  // and match only [sS] chars in the browser).
+  const legend = '<div class="settings-pane-legend">' +
+    '<span class="setting-dot"></span> = field is overridden from default. Click <b>Revert</b> next to a field to restore.' +
+    '</div>';
+  const titleEndRe = new RegExp('(<div class="settings-pane-title"[\\\\s\\\\S]*?</div>)');
+  html = html.replace(titleEndRe, '$1' + legend);
+
   view.innerHTML = html;
   updateSettingsFooter();
 }
@@ -4208,10 +4403,36 @@ function updateSettingsFooter() {
   const n = Object.keys(settingsDirty).length;
   if (n === 0) {
     footer.style.display = 'none'; // idle → footer disappears entirely
-    return;
+  } else {
+    footer.style.display = 'flex';
+    counter.textContent = n + ' unsaved change' + (n === 1 ? '' : 's');
   }
-  footer.style.display = 'flex';
-  counter.textContent = n + ' unsaved change' + (n === 1 ? '' : 's');
+  // Per-section dirty counts surfaced as a badge on each sidebar rail
+  // button (feedback item #11). Bucket dirty paths to sections via path
+  // prefix; panel.X paths live on the Notifications page so they count there.
+  const sectionCounts = { scheduler: 0, notifications: 0, services: 0, advanced: 0 };
+  for (const path of Object.keys(settingsDirty)) {
+    if (path.startsWith('scheduler.')) sectionCounts.scheduler++;
+    else if (path.startsWith('notifications.') || path.startsWith('panel.')) sectionCounts.notifications++;
+    else if (path.startsWith('services.')) sectionCounts.services++;
+    else if (path.startsWith('advanced.')) sectionCounts.advanced++;
+  }
+  document.querySelectorAll('.settings-rail .rail-btn').forEach(b => {
+    const section = b.dataset.section;
+    const c = sectionCounts[section] || 0;
+    const existing = b.querySelector('.rail-dirty-badge');
+    if (c > 0) {
+      if (existing) existing.textContent = String(c);
+      else {
+        const badge = document.createElement('span');
+        badge.className = 'rail-dirty-badge';
+        badge.textContent = String(c);
+        b.appendChild(badge);
+      }
+    } else if (existing) {
+      existing.remove();
+    }
+  });
 }
 
 function discardSettings() {
@@ -5271,6 +5492,21 @@ function render() {
         '<span class="cb-cta">Open browser →</span>';
     } else {
       captchaBanner.style.display = 'none';
+    }
+  }
+
+  // Update-available pill in the header (issue #39). state.updateAvailable
+  // is null when checks are disabled, GitHub returned no newer release,
+  // or the poll hasn't completed yet — pill stays hidden in those cases.
+  const updatePill = document.getElementById('updatePill');
+  if (updatePill) {
+    if (state.updateAvailable && state.updateAvailable.latest) {
+      const ua = state.updateAvailable;
+      updatePill.style.display = 'inline-flex';
+      updatePill.textContent = 'v' + (ua.current || '?') + ' → ' + ua.latest + ' available';
+      updatePill.href = ua.releaseUrl || 'https://github.com/feldorn/free-games-claimer/releases';
+    } else {
+      updatePill.style.display = 'none';
     }
   }
 
@@ -7046,6 +7282,14 @@ server.listen(PANEL_PORT, async () => {
   }
 
   console.log(`[${datetime()}] Open the control panel URL in your browser.`);
+  // Update-check loop (issue #39). Polls GitHub releases every 6h; sets
+  // updateCheckCache so /api/state can surface a header pill when a
+  // newer image is published. Disabled by env UPDATE_CHECK=0.
+  if (UPDATE_CHECK_DISABLED) {
+    console.log(`[${datetime()}] Update check: disabled (UPDATE_CHECK=0).`);
+  } else {
+    startUpdateCheckLoop();
+  }
   console.log(`[${datetime()}] Auto-checking all sessions...`);
   const active = activeServices();
   // Walk active sites in alphabetical name order — matches the Sessions
