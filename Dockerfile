@@ -74,6 +74,15 @@ RUN apt-get update \
     # to /vnc_auto.html still resolve through the symlink to the working
     # vnc.html, so no separate redirect is needed.
     && printf '%s\n' '<!doctype html><meta http-equiv="refresh" content="0;url=vnc.html?autoconnect=true&resize=scale">' > /usr/share/novnc/index.html \
+    # Patch noVNC's vnc.html to silence a Chrome console warning about
+    # the deprecated apple-mobile-web-app-capable meta. The modern
+    # browser-neutral equivalent is `mobile-web-app-capable`. Keep the
+    # apple tag in place (iOS Safari still honors it) and just inject
+    # the modern one right after it. Idempotent — only writes when
+    # the modern tag isn't already present, so a rebuild on a future
+    # noVNC version that already ships it is a no-op.
+    && (grep -q 'name="mobile-web-app-capable"' /usr/share/novnc/vnc.html \
+        || sed -i 's|<meta name="apple-mobile-web-app-capable" content="yes">|&\n    <meta name="mobile-web-app-capable" content="yes">|' /usr/share/novnc/vnc.html) \
     && pip install apprise --break-system-packages --no-cache-dir
 
 WORKDIR /fgc

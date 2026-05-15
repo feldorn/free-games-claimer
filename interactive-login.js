@@ -3302,14 +3302,15 @@ async function switchTab(tab) {
   document.querySelectorAll('.tab-nav .tab').forEach(t => {
     t.classList.toggle('active', t.dataset.tab === tab);
   });
-  // Stash the active tab in the URL hash so it survives a navigation
-  // away and back — covers the iframe-bust case from the Discoveries
-  // tab (click external link → bust replaces window.top → user hits
-  // browser back → reload picks the tab back up from the hash instead
-  // of falling through to the default 'sessions'). Uses replaceState
-  // so tab switches don't pollute browser history with one entry per
-  // click — only the most-recent tab state lives in the current URL.
-  try { history.replaceState(null, '', '#tab=' + tab); } catch {}
+  // Persist active tab so it survives the iframe-bust → external page
+  // → browser back cycle. Originally tried URL hash, but when the panel
+  // runs inside an iframe (dashboard like Homepage / Organizr), the
+  // hash sits on the *iframe's* URL and the iframe-bust navigates the
+  // *top* window — browser back returns to the dashboard URL with no
+  // hash to read. localStorage is per-origin and survives the
+  // navigation cycle in both iframed and top-level setups. The panel's
+  // own origin always sees its own localStorage on next load.
+  try { localStorage.setItem('fgc:lastTab', tab); } catch {}
   if (tab === 'logs') startLogsTabPoll();
   else stopLogsTabPoll();
   if (tab === 'schedule') renderScheduleTab();
@@ -3319,20 +3320,18 @@ async function switchTab(tab) {
   if (tab === 'discoveries') renderDiscoveriesTab();
 }
 
-// Restore the active tab from the URL hash on initial load + on browser
-// back/forward. Valid tab whitelist guards against junk in the URL. No
-// effect if hash is missing or points at an unknown tab — body keeps
-// its default data-tab="sessions" from the HTML.
+// Restore the active tab from localStorage on initial load. Valid-tab
+// whitelist guards against stale or junk values written by an older
+// build. Falls through to body's default data-tab="sessions" when no
+// stored value or unrecognized.
 const VALID_TABS = ['sessions', 'stats', 'schedule', 'discoveries', 'logs', 'settings', 'environment'];
-function _initTabFromHash() {
-  const m = /^#tab=([a-z-]+)/i.exec(location.hash || '');
-  if (!m) return;
-  const tab = m[1];
-  if (!VALID_TABS.includes(tab)) return;
+function _initTabFromStorage() {
+  let tab;
+  try { tab = localStorage.getItem('fgc:lastTab'); } catch { return; }
+  if (!tab || !VALID_TABS.includes(tab)) return;
   if (document.body.dataset.tab === tab) return; // already on it
   switchTab(tab);
 }
-window.addEventListener('popstate', _initTabFromHash);
 
 // Native browser dialog for tab close / reload while drafts exist.
 // Browser shows a generic localized message; can't customise the text.
@@ -6419,11 +6418,11 @@ document.addEventListener('visibilitychange', () => {
     startPolling();
   }
 });
-// Sync active tab from URL hash on initial load (before first paint —
-// the hash, if present, takes precedence over the body's default
-// data-tab="sessions"). Covers browser-back from an iframe-busted
-// external link returning the user to the tab they came from.
-_initTabFromHash();
+// Restore active tab from localStorage before first paint — covers
+// browser-back from an iframe-busted external link returning the user
+// to the tab they came from, regardless of whether the panel is at
+// top-level or embedded in a dashboard iframe.
+_initTabFromStorage();
 if (document.visibilityState !== 'hidden') startPolling();
 </script>
 </body>
@@ -7318,6 +7317,7 @@ server.listen(PANEL_PORT, async () => {
   } else {
     startUpdateCheckLoop();
   }
+
   console.log(`[${datetime()}] Auto-checking all sessions...`);
   const active = activeServices();
   // Walk active sites in alphabetical name order — matches the Sessions
