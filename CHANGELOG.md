@@ -4,6 +4,21 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.7.2
+
+**Discoveries roll-up — performance + tab persistence + README callout.** Three small fixes from a single round of live testing.
+
+- **Active tab survives iframe-bust + back.** Clicking a game on the Discoveries tab navigates the top window away; the browser-back button then reloads the panel from scratch. Previously the panel landed back on Sessions because the active-tab state was DOM-only. Initial fix (2.7.1.x intermediate) stashed the tab in the URL hash, but that didn't survive when the panel runs inside a dashboard iframe (Organizr / Homepage / etc.) — the iframe-bust navigates the top window away from the dashboard, browser-back returns to the dashboard URL with no visibility into the panel's hash. Switched to `localStorage` (per-origin, survives navigation cycles in both top-level and iframed contexts). The panel now reliably returns to the tab you came from.
+- **Discoveries endpoint cached server-side.** `/api/discoveries` was re-fetching GamerPower + r/FreeGameFindings on every call (~800ms cold). On panel reload where localStorage restored the user to Discoveries, that synchronous fetch blocked first paint and made the page feel sluggish. Added a 5-minute in-memory cache; hit cost drops to <1ms. The Refresh button passes `?force=1` to bypass; mark/unmark POSTs also invalidate the cache so user actions take effect immediately.
+- **README intro + Claimers-table callout for aggregator discovery.** The free-game-discovery story improved meaningfully in 2.6.x with the GamerPower + FGF integration, but the README still described the storefronts as if their own first-party feeds were the only source. Added one sentence to the intro and a one-paragraph callout under the Claimers table pointing readers at the live Discoveries view in `docs/PANEL.md`.
+
+Also bundled into this version, originally pushed as small follow-up commits on top of 2.7.1:
+
+- **Minimal noVNC `package.json` shim** baked into the Dockerfile so the connection no longer 404s on `/novnc/package.json` (noVNC's `ui.js` fetches it for the version label).
+- **noVNC `mobile-web-app-capable` meta** added at build time in the Dockerfile alongside the existing `apple-mobile-web-app-capable` tag (the apple-only form is deprecated in Chrome).
+
+---
+
 ## What's new in 2.7.1
 
 **Settings UX overhaul, doc split, and update-check banner.** Three related polish items addressing usability and discoverability.

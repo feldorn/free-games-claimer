@@ -6,6 +6,8 @@
 
 A self-hosted scheduler that claims free games and rewards across multiple storefronts on its own. Logs in once via your browser session, then keeps watch — daily checks, captcha-aware pause-and-notify when a human is needed, in-app stats showing what got claimed, what's pending, and how your Microsoft Rewards points are trending.
 
+Discovery isn't limited to each store's own free-game feed — the panel cross-references community aggregators ([gamerpower.com](https://www.gamerpower.com/) and [r/FreeGameFindings](https://www.reddit.com/r/FreeGameFindings/)) and picks up launch-day indie promos and storefront-side mystery drops that the first-party feeds miss.
+
 Originally derived from [vogler/free-games-claimer](https://github.com/vogler/free-games-claimer) (dev branch). The control panel, in-app settings UI, claim-history stats, scheduler with hot-reload, AliExpress reintegration, captcha pause + manual-solve handoff, the Steam discovery migration, the Microsoft Rewards collector, and the Ubisoft / Humble / Fanatical / Lenovo watchers are all additions in this fork. Per-release changes are tracked in [CHANGELOG.md](CHANGELOG.md); [MODIFICATIONS.md](MODIFICATIONS.md) holds a frozen v2.4 snapshot of the diff vs. upstream for historical context.
 
 Services are grouped by what they actually do.
@@ -18,6 +20,8 @@ Services are grouped by what they actually do.
 | <img alt="logo epic-games" src="https://github.com/user-attachments/assets/82e9e9bf-b6ac-4f20-91db-36d2c8429cb6" width="24" align="middle" /> [Epic Games Store](https://www.epicgames.com/store/free-games) | Weekly free-game claim |
 | <img alt="logo gog" src="https://github.com/user-attachments/assets/49040b50-ee14-4439-8e3c-e93cafd7c3a5" width="24" align="middle" /> [GOG](https://www.gog.com) | Homepage giveaways + catalog watch for tag-flagged free items |
 | <img alt="logo steam" src="https://store.steampowered.com/favicon.ico" width="24" align="middle" /> [Steam](https://store.steampowered.com) | Free-to-keep promotions only (not F2P or free weekends) |
+
+> **Discovery via community aggregators.** Epic and Steam claim eligible games surfaced by [gamerpower.com](https://www.gamerpower.com/) or [r/FreeGameFindings](https://www.reddit.com/r/FreeGameFindings/) that don't show up in the storefront's own feed. GOG entries from the same aggregators surface as notify-only items so you can claim them through the panel's noVNC view. See the [Discoveries tab](docs/PANEL.md#discoveries-tab) for the live list with AUTO / NOTIFY / CLAIMED / SKIP / MANUAL badges.
 
 **Point / coin collectors** — daily-cadence reward grinding:
 
