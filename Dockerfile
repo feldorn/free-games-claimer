@@ -83,6 +83,13 @@ RUN apt-get update \
     # noVNC version that already ships it is a no-op.
     && (grep -q 'name="mobile-web-app-capable"' /usr/share/novnc/vnc.html \
         || sed -i 's|<meta name="apple-mobile-web-app-capable" content="yes">|&\n    <meta name="mobile-web-app-capable" content="yes">|' /usr/share/novnc/vnc.html) \
+    # Ship a minimal package.json so noVNC's ui.js can fetch it for the
+    # in-page version label. The Ubuntu Noble novnc 1.3.0-2 package
+    # doesn't include one, so a request to /novnc/package.json 404s on
+    # every connect — harmless but noisy in the browser console. Real
+    # version comes from `dpkg -l novnc`; the JSON below just satisfies
+    # the fetch with a recognizable string.
+    && printf '%s\n' '{"name":"novnc","version":"1.3.0-feldorn-shim","description":"Minimal package.json shim — silences a 404 in noVNC ui.js. Real version: dpkg -l novnc."}' > /usr/share/novnc/package.json \
     && pip install apprise --break-system-packages --no-cache-dir
 
 WORKDIR /fgc
