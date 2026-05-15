@@ -344,6 +344,14 @@ let schedulerStateDb = null;
 // unbounded). Loaded lazily in the /api/discoveries endpoint.
 let discoveriesStateDb = null;
 
+// In-memory cache of the /api/discoveries response body. Aggregator
+// fetches (GamerPower + Reddit) total ~800ms — too slow to fire on
+// every panel render. With this cache, repeat visits within the TTL
+// window return in <5ms; the user only pays the aggregator latency
+// once per TTL or when they hit Refresh (force=1 bypasses cache).
+const DISC_CACHE_TTL_MS = 5 * 60 * 1000;
+let discResponseCache = null; // { body, builtAt (ms) }
+
 // Update check (issue #39). Periodic poll of GitHub releases to detect
 // when a newer image is published; surfaces in the panel header as a
 // small pill linking to the changelog. Manual pull / restart still
@@ -3432,7 +3440,10 @@ async function renderDiscoveriesTab(forceRefresh) {
   body.innerHTML = '<div class="disc-empty">Loading aggregator data…</div>';
   meta.textContent = '';
   try {
-    const r = await fetch(BASE_PATH + '/api/discoveries');
+    // Refresh button passes force=1 to bypass the 5-min server cache;
+    // normal tab-restore loads use the cache for snappy renders.
+    const url = BASE_PATH + '/api/discoveries' + (forceRefresh ? '?force=1' : '');
+    const r = await fetch(url);
     if (!r.ok) throw new Error('HTTP ' + r.status);
     discCache = await r.json();
     discApplyAndRender();
@@ -6673,7 +6684,18 @@ const server = http.createServer(async (req, res) => {
     // etc.). Live fetch on each request; both APIs are public + fast.
     // Errors per source degrade gracefully — one source down doesn't
     // hide the other.
-    if (req.method === 'GET' && req.url === '/api/discoveries') {
+    if (req.method === 'GET' && req.url.startsWith('/api/discoveries') && (req.url === '/api/discoveries' || req.url.startsWith('/api/discoveries?'))) {
+      // Cache short-circuit. Aggregator fetches (~800ms) are the slow
+      // path; on a fresh panel reload where localStorage restored the
+      // user to the Discoveries tab, this fetch fires synchronously
+      // before first paint. Cache for 5 min so the second visit costs
+      // <5ms. The Refresh button passes ?force=1 to bypass.
+      const u = new URL(req.url, `http://${req.headers.host}`);
+      const force = u.searchParams.get('force') === '1';
+      if (!force && discResponseCache && (Date.now() - discResponseCache.builtAt) < DISC_CACHE_TTL_MS) {
+        sendJson(res, discResponseCache.body);
+        return;
+      }
       // Lazy-init the user-state DB. Schema: { items: { <key>: { status, title, at } } }
       if (!discoveriesStateDb) discoveriesStateDb = await jsonDb('discoveries-state.json', { items: {} });
       if (!discoveriesStateDb.data || typeof discoveriesStateDb.data !== 'object') discoveriesStateDb.data = { items: {} };
@@ -6996,13 +7018,18 @@ const server = http.createServer(async (req, res) => {
         catch (e) { console.warn(`[${datetime()}] discoveries-state prune write failed: ${e.message}`); }
       }
 
-      sendJson(res, {
+      const responseBody = {
         fetchedAt: new Date().toISOString(),
         sources: {
           gamerpower: { items: gpItems, error: gpError, total: gpItems.length },
           freegamefindings: { items: fgfItems, error: fgfError, total: fgfItems.length },
         },
-      });
+      };
+      // Stash for the cache short-circuit at the top of this handler.
+      // Subsequent reads within DISC_CACHE_TTL_MS skip the aggregator
+      // round-trip and the DB-fold and ship this body straight back.
+      discResponseCache = { body: responseBody, builtAt: Date.now() };
+      sendJson(res, responseBody);
       return;
     }
 
@@ -7029,6 +7056,11 @@ const server = http.createServer(async (req, res) => {
           at: new Date().toISOString(),
         };
         await discoveriesStateDb.write();
+        // Invalidate the cached /api/discoveries response so the next
+        // poll reflects the user-state change immediately. Without
+        // this, the optimistic client-side update would be overwritten
+        // by the stale cached body on next refresh.
+        discResponseCache = null;
         sendJson(res, { success: true });
       } catch (e) {
         sendJson(res, { success: false, error: e.message }, 500);
@@ -7054,6 +7086,7 @@ const server = http.createServer(async (req, res) => {
         if (discoveriesStateDb.data.items[key]) {
           delete discoveriesStateDb.data.items[key];
           await discoveriesStateDb.write();
+          discResponseCache = null; // see mark endpoint for rationale
         }
         sendJson(res, { success: true });
       } catch (e) {
