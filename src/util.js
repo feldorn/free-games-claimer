@@ -1,7 +1,7 @@
 // https://stackoverflow.com/questions/46745014/alternative-for-dirname-in-node-js-when-using-es6-modules
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, unlinkSync, lstatSync } from 'node:fs';
 // not the same since these will give the absolute paths for this file instead of for the file using them
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -50,6 +50,42 @@ export const getOrCreateFingerprint = (profileDir, generate) => {
     console.warn(`[fingerprint] could not persist to ${fpFile}: ${e.message.split('\n')[0]}`);
   }
   return { fingerprint: fresh.fingerprint, headers: fresh.headers, _persisted: false };
+};
+
+// Clean stale Chromium profile-lock files from a persistent user-data
+// dir before launchPersistentContext. Chromium writes SingletonLock,
+// SingletonCookie, and SingletonSocket files when it starts; on a clean
+// shutdown it removes them. But ungraceful exits (OOM, force-kill, host
+// reboot) leave them behind, and the next launch fails with:
+//   The profile appears to be in use by another Chromium process (PID)
+//   on another computer (HOSTNAME). Chromium has locked the profile
+//   so that it doesn't get corrupted.
+//
+// The "another computer" part is the kicker in Docker — every container
+// recreation gets a new auto-assigned hostname, so the stored hostname
+// in SingletonCookie is from the previous container and trips the
+// foreign-host check. Once present, the lock never clears on its own.
+//
+// We can safely remove these files because the app's runtime mutex
+// (browserBusy in interactive-login.js) prevents two Chromium processes
+// from racing on the same profile dir. Called from launchPersistentContext
+// sites before launch, and from the panel's startup as a clean-room
+// sweep across all known profile dirs. (Fix per feldorn#37, 2026-05-15
+// — Lifeng77X's AliExpress profile-lock report.)
+export const cleanProfileLocks = (profileDir) => {
+  if (!profileDir || !existsSync(profileDir)) return [];
+  const lockNames = ['SingletonLock', 'SingletonCookie', 'SingletonSocket'];
+  const removed = [];
+  for (const name of lockNames) {
+    const p = path.join(profileDir, name);
+    try {
+      const st = lstatSync(p, { throwIfNoEntry: false });
+      if (!st) continue;
+      unlinkSync(p);
+      removed.push(name);
+    } catch { /* best effort — if it's gone or unremovable, next launch will surface a clearer error */ }
+  }
+  return removed;
 };
 
 // Race context.close() with a timeout. Some sites (e.g. Epic Store) keep service workers and

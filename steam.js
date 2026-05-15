@@ -1,6 +1,6 @@
 import { chromium } from 'patchright';
 import { writeFileSync } from 'node:fs';
-import { resolve, jsonDb, datetime, filenamify, prompt, notify, html_game_list, handleSIGINT, log, dataDir } from './src/util.js';
+import { resolve, jsonDb, datetime, filenamify, prompt, notify, html_game_list, handleSIGINT, log, dataDir, cleanProfileLocks } from './src/util.js';
 import { cfg } from './src/config.js';
 import { siteVersion } from './src/sites.js';
 import { fetchGamerPowerGiveaways, filterFor as filterGpFor, resolveGamerPowerHref } from './src/gamerpower.js';
@@ -45,6 +45,7 @@ log.status('Min price', `$${cfg.steam_min_price}`);
 
 const db = await jsonDb('steam.json', {});
 
+cleanProfileLocks(cfg.dir.browser);
 const context = await chromium.launchPersistentContext(cfg.dir.browser, {
   headless: cfg.headless,
   viewport: { width: cfg.width, height: cfg.height },

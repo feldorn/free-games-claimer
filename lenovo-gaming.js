@@ -25,7 +25,7 @@
 
 import { chromium } from 'patchright';
 import { writeFileSync, readFileSync, existsSync } from 'node:fs';
-import { datetime, notify, log, dataDir, handleSIGINT } from './src/util.js';
+import { datetime, notify, log, dataDir, handleSIGINT, cleanProfileLocks } from './src/util.js';
 import { cfg } from './src/config.js';
 import { siteVersion } from './src/sites.js';
 
@@ -92,6 +92,7 @@ function statusFromTitle(title) {
 
 let context, page;
 try {
+  cleanProfileLocks(cfg.dir.browser + '-lenovo');
   context = await chromium.launchPersistentContext(cfg.dir.browser + '-lenovo', {
     headless: false,
     viewport: { width: cfg.width, height: cfg.height },

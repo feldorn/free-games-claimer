@@ -2,7 +2,7 @@ import { chromium } from 'patchright';
 import { authenticator } from 'otplib';
 import path from 'path';
 import { existsSync, writeFileSync } from 'fs';
-import { resolve, jsonDb, datetime, filenamify, prompt, confirm, notify, html_game_list, handleSIGINT, closeContextSafely, log } from './src/util.js';
+import { resolve, jsonDb, datetime, filenamify, prompt, confirm, notify, html_game_list, handleSIGINT, closeContextSafely, log, cleanProfileLocks } from './src/util.js';
 import { cfg } from './src/config.js';
 import { siteVersion } from './src/sites.js';
 import { getMobileGames } from './src/epic-games-mobile.js';
@@ -41,6 +41,7 @@ const db = await jsonDb('epic-games.json', {});
 if (cfg.time) console.time('startup');
 
 // https://playwright.dev/docs/auth#multi-factor-authentication
+cleanProfileLocks(cfg.dir.browser);
 const context = await chromium.launchPersistentContext(cfg.dir.browser, {
   // channel: 'chrome', // recommended, but `npx patchright install chrome` clashes with system Chrome - https://github.com/Kaliiiiiiiiii-Vinyzu/patchright-nodejs#best-practice----use-chrome-without-fingerprint-injection
   headless: false, // don't use cfg.headless headless here since SHOW=0 will lead to captcha

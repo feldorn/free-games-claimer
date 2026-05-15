@@ -1,7 +1,7 @@
 import { chromium, devices } from 'patchright';
 import { authenticator } from 'otplib';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
-import { delay, datetime, prompt, notify, log, dataDir, jsonDb } from './src/util.js';
+import { delay, datetime, prompt, notify, log, dataDir, jsonDb, cleanProfileLocks } from './src/util.js';
 import { cfg } from './src/config.js';
 import { siteVersion } from './src/sites.js';
 
@@ -276,6 +276,7 @@ async function createContext(isMobile) {
     height: cfg.height + Math.floor(Math.random() * 41) - 20, // ±20px
   };
 
+  cleanProfileLocks(browserDir);
   const context = await chromium.launchPersistentContext(browserDir, {
     headless: false,
     viewport,

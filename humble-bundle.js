@@ -1,6 +1,6 @@
 import { writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { chromium } from 'patchright';
-import { datetime, notify, log, dataDir, handleSIGINT } from './src/util.js';
+import { datetime, notify, log, dataDir, handleSIGINT, cleanProfileLocks } from './src/util.js';
 import { cfg } from './src/config.js';
 import { siteVersion } from './src/sites.js';
 
@@ -58,6 +58,7 @@ function saveState(state) {
 let context, page;
 let captured = []; // accumulates products from any matching API responses
 try {
+  cleanProfileLocks(cfg.dir.browser);
   context = await chromium.launchPersistentContext(cfg.dir.browser, {
     // Match the project pattern (other site scripts use headed chromium
     // because the container only ships the full chrome binary, not the

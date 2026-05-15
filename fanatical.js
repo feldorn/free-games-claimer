@@ -1,6 +1,6 @@
 import { writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { chromium } from 'patchright';
-import { datetime, notify, log, dataDir, handleSIGINT } from './src/util.js';
+import { datetime, notify, log, dataDir, handleSIGINT, cleanProfileLocks } from './src/util.js';
 import { cfg } from './src/config.js';
 import { siteVersion } from './src/sites.js';
 
@@ -52,6 +52,7 @@ function saveState(state) {
 let context, page;
 let captured = [];
 try {
+  cleanProfileLocks(cfg.dir.browser);
   context = await chromium.launchPersistentContext(cfg.dir.browser, {
     // Headed chromium — the container only ships full chrome, not the
     // separate chrome-headless-shell. Page renders into the unused VNC

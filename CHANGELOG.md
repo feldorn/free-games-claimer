@@ -4,6 +4,24 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.6.9
+
+**Fix stale Chromium profile locks after container restart ([#37](https://github.com/feldorn/free-games-claimer/issues/37)).** Lifeng77X reported AliExpress refusing to launch with:
+
+> The profile appears to be in use by another Chromium process (PID) on another computer (HOSTNAME). Chromium has locked the profile so that it doesn't get corrupted.
+
+Root cause is a Docker + persistent-volume + Chromium interaction. Chromium writes `SingletonLock` / `SingletonCookie` / `SingletonSocket` files in the user-data-dir on every launch and removes them on clean shutdown. Ungraceful exits (container kill, host reboot, OOM) leave the files behind. The kicker: `SingletonCookie` stores the *hostname* that launched Chromium, and Docker assigns a *new* auto-generated hostname every container recreation. So the leftover lock from a previous container looks like "another computer", and Chromium refuses to use the profile. Once present, the lock never clears on its own.
+
+Fix: every `launchPersistentContext` call site now runs `cleanProfileLocks(dir)` first, which removes the three known lock files. Belt-and-suspenders: the panel also sweeps all known profile dirs at startup, so a fresh container boot recovers instantly. The app's existing runtime mutex (`browserBusy`) already prevents two Chromium processes from racing on the same profile dir, so deleting the locks is safe.
+
+If you hit this on an existing deployment before pulling 2.6.9 you can also remove the files manually:
+```bash
+docker exec <container> sh -c 'rm -f /fgc/data/browser*/Singleton*'
+docker restart <container>
+```
+
+---
+
 ## What's new in 2.6.8
 
 **Fix multi-URL `NOTIFY` ([#35](https://github.com/feldorn/free-games-claimer/issues/35)).** When `NOTIFY` was configured as a multi-line YAML block (one URL per line — the standard pattern for multiple notifier endpoints), the helper passed the entire string as one positional argv to apprise. Older apprise releases parsed the embedded newlines forgivingly; apprise ≥ 1.10 treats the concatenated string as a single URL and rejects the second protocol — Telegram's colon-heavy URL shape (`tgram://bot_token:chat_id/`) trips on this first, so it looked like "Telegram is broken" while Discord on the first line still went through. Fix: split `cfg.notify` on whitespace before assembling argv, so each URL becomes its own positional argument and apprise sees them independently. Existing single-URL deployments (the common case) keep working identically.

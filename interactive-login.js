@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 const __panelDirname = path.dirname(fileURLToPath(import.meta.url));
 import { chromium } from 'patchright';
-import { datetime, notify, jsonDb, normalizeTitle } from './src/util.js';
+import { datetime, notify, jsonDb, normalizeTitle, cleanProfileLocks } from './src/util.js';
 import { cfg } from './src/config.js';
 import { describeConfig, patchConfig, describeEnv, getSchedulerConfig, CONFIG_FILE_PATH } from './src/app-config.js';
 import { SITES as SITE_REGISTRY, getLoginSitesById, getClaimScriptOrder, getLinkedActiveMap, getClaimDbFiles, getServiceRows } from './src/sites.js';
@@ -109,6 +109,7 @@ async function launchSite(siteId) {
 
   console.log(`[${datetime()}] Launching browser for ${site.name}...`);
 
+  cleanProfileLocks(site.browserDir);
   const context = await chromium.launchPersistentContext(site.browserDir, {
     headless: false,
     viewport: { width: cfg.width, height: cfg.height },
@@ -175,6 +176,7 @@ async function checkSiteStatus(siteId) {
 
   let context;
   try {
+    cleanProfileLocks(site.browserDir);
     context = await chromium.launchPersistentContext(site.browserDir, {
       headless: false,
       viewport: { width: cfg.width, height: cfg.height },
@@ -283,6 +285,7 @@ async function importSiteCookies(siteId, rawCookies) {
   console.log(`[${datetime()}] Importing ${normalized.length} cookie(s) into ${site.name} profile (${matches.length} match host ${targetHost})`);
   let context;
   try {
+    cleanProfileLocks(site.browserDir);
     context = await chromium.launchPersistentContext(site.browserDir, {
       headless: false,
       viewport: { width: cfg.width, height: cfg.height },
@@ -628,6 +631,7 @@ async function startBatchRedeem() {
   if (!pending.length) throw new Error('No pending GOG codes to redeem.');
 
   console.log(`[${datetime()}] Starting batch redeem for ${pending.length} GOG code(s)...`);
+  cleanProfileLocks(cfg.dir.browser);
   const context = await chromium.launchPersistentContext(cfg.dir.browser, {
     headless: false,
     viewport: { width: cfg.width, height: cfg.height },
@@ -949,6 +953,7 @@ async function startSteamRedeem() {
   if (!pending.length) throw new Error('No pending Steam keys to redeem.');
 
   console.log(`[${datetime()}] Starting Steam batch redeem for ${pending.length} key(s)...`);
+  cleanProfileLocks(cfg.dir.browser);
   const context = await chromium.launchPersistentContext(cfg.dir.browser, {
     headless: false,
     viewport: { width: cfg.width, height: cfg.height },
@@ -6479,6 +6484,34 @@ server.listen(PANEL_PORT, async () => {
   catch (e) { console.error(`[${datetime()}] failed to load scheduler-state.json: ${e.message}`); }
 
   console.log(`[${datetime()}] Free Games Claimer ${APP_VERSION ? 'v' + APP_VERSION + ' ' : ''}— panel + scheduler`);
+
+  // Stale Chromium profile-lock sweep. Container restarts get a fresh
+  // hostname assigned by Docker; any persistent profile dir written by
+  // a previous container will have SingletonCookie referencing the old
+  // hostname, which Chromium rejects on the next launch with "profile
+  // is in use by another computer". Cleaning the lock files at panel
+  // boot — before any script launches — guarantees a clean state. The
+  // claim-script launch paths also call cleanProfileLocks defensively
+  // for mid-session crashes. (Fix per feldorn#37 — Lifeng77X's
+  // AliExpress profile-lock report.)
+  try {
+    const sweepDirs = [
+      cfg.dir.browser,
+      cfg.dir.browser + '-aliexpress',
+      cfg.dir.browser + '-mobile',
+      cfg.dir.browser + '-lenovo',
+    ];
+    let totalRemoved = 0;
+    for (const d of sweepDirs) {
+      const removed = cleanProfileLocks(d);
+      if (removed.length) {
+        console.log(`[${datetime()}] Cleared stale Chromium locks in ${d}: ${removed.join(', ')}`);
+        totalRemoved += removed.length;
+      }
+    }
+    if (!totalRemoved && cfg.debug) console.log(`[${datetime()}] Profile-lock sweep: no stale locks found.`);
+  } catch (e) { console.warn(`[${datetime()}] Profile-lock sweep failed: ${e.message}`); }
+
   console.log(`[${datetime()}] Control panel: http://localhost:${PANEL_PORT}${BASE_PATH}`);
   if (cfg.public_url) console.log(`[${datetime()}] Public URL:    ${PUBLIC_URL}`);
   console.log(`[${datetime()}] noVNC viewer:  ${NOVNC_URL || `http://localhost:${NOVNC_PORT}${BASE_PATH ? ` (proxied at ${BASE_PATH}/novnc/)` : ''}`}`);

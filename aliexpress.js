@@ -3,7 +3,7 @@
 // If you run it standalone on the CLI, it always executes; the activation
 // gate lives in interactive-login.js.
 import { chromium } from 'patchright';
-import { datetime, filenamify, prompt, handleSIGINT, jsonDb, awaitUserCaptchaSolve, getOrCreateFingerprint, log, notify } from './src/util.js';
+import { datetime, filenamify, prompt, handleSIGINT, jsonDb, awaitUserCaptchaSolve, getOrCreateFingerprint, log, notify, cleanProfileLocks } from './src/util.js';
 import { cfg } from './src/config.js';
 import { siteVersion } from './src/sites.js';
 import { FingerprintInjector } from 'fingerprint-injector';
@@ -33,6 +33,7 @@ const { fingerprint, headers, _persisted } = getOrCreateFingerprint(profileDir, 
 );
 log.status('Fingerprint', _persisted ? 'loaded from cache' : 'fresh (saved for next run)');
 
+cleanProfileLocks(profileDir);
 const context = await chromium.launchPersistentContext(profileDir, {
   headless: cfg.headless,
   locale: 'en-US',
