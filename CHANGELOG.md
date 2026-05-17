@@ -4,6 +4,16 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.7.5
+
+**Fix notification deep-links 404'ing on query strings.** User tapped a captcha push and got a download prompt instead of the panel. Root cause: the panel's root handler matched the URL with strict equality (`req.url === '/'`), so any deep-link with a query (`?focus=captcha`, `?login=gog`, `?batch=gog`) made `req.url === '/?focus=captcha'` fall through to the implicit 404. The 404 response carried no `Content-Type` header, so the browser treated it as a generic file and offered to save it.
+
+Every notification deep-link we've shipped uses one of these query shapes — captcha alerts, stale-session login prompts, batch-redeem reminders — so every one of them has been silently 404'ing for anyone tapping them. Fix splits the query off `req.url` before the equality check; works identically for direct access and SWAG-proxied access.
+
+Plus a small follow-on from earlier today (already on `main` since [f6c1ed8](https://github.com/feldorn/free-games-claimer/commit/f6c1ed8)): **dedupe Stats-tab Recent Claims and KPI counts** by `(service, normalized-title)` so platform-variant Epic entries (iOS / Android / locale-stamped slugs) don't double-count. User saw Arranger and Teacup each twice in the Recent Claims list — that's gone now, and the `gamesThisWeek / gamesThisMonth / gamesAllTime` KPI counts reflect unique titles.
+
+---
+
 ## What's new in 2.7.4
 
 **Fix apprise priority — pass via URL query param, not the nonexistent `--priority` CLI flag ([#42](https://github.com/feldorn/free-games-claimer/issues/42)).** When the Lenovo notify-priority + captcha-priority features landed in 2.5.8 / 2.7.0, our `notify()` helper appended `--priority <level>` as an apprise CLI flag. **That flag doesn't exist** — apprise's CLI has never had a generic priority option. Priority is per-notifier and configured via URL query string. The bug was silent until apprise actually rejected the arg: JxPv2 hit it on apprise v1.10.0 with `Error: No such option: --priority` whenever a captcha notify fired (Lenovo notifies were probably failing too, just less visibly because Lenovo wakes are infrequent).
