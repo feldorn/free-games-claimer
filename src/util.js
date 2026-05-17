@@ -201,7 +201,15 @@ export const notify = (html, opts = {}) => {
     // colon-heavy so they fail visibly first). Fix per feldorn#35
     // (KairuByte, 2026-05-14). Apprise URLs don't contain whitespace,
     // so the split is safe.
-    let notifyUrls = String(cfg.notify || '').split(/\s+/).filter(Boolean);
+    // Split on newlines and commas only — NOT bare whitespace. Whitespace
+    // appears inside legitimate URLs (passwords with spaces in
+    // mailto://user:pass with spaces@host, for example — caught
+    // 2026-05-17 in feldorn#44). Newlines and commas are the conventional
+    // separators in apprise config (YAML `|` blocks produce newlines,
+    // comma-separated lists are an apprise CLI idiom), and neither is a
+    // valid URL character, so splitting on them is unambiguous. Trim
+    // each piece so YAML-block indentation doesn't survive into argv.
+    let notifyUrls = String(cfg.notify || '').split(/[\n,]+/).map(s => s.trim()).filter(Boolean);
     // Per-call priority. Apprise expresses priority as a per-notifier
     // URL query parameter (`?priority=high`), NOT a CLI flag — apprise
     // v1.10.0 has no `--priority` option at all (caught 2026-05-16 in

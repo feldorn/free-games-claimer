@@ -4,6 +4,14 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.7.6
+
+**Fix NOTIFY split corrupting single URLs with whitespace ([#44](https://github.com/feldorn/free-games-claimer/issues/44)).** TwoPlayer's `mailto://user:PASSWORD WITH SPACES@gmail.com` URL got shredded into three garbage argv entries because the 2.6.8 fix for the multi-URL Telegram bug split `cfg.notify` on `/\s+/` — too aggressive. Spaces appear inside legitimate URLs (especially mailto passwords); newlines and commas don't.
+
+Switched the split to `/[\n,]+/` with per-piece trim. Both still cover the original YAML-block multi-URL case (newlines) and the apprise comma-list idiom, but single-URL configs with spaces inside the URL now pass through intact. Verified on all three input shapes.
+
+---
+
 ## What's new in 2.7.5
 
 **Fix notification deep-links 404'ing on query strings.** User tapped a captcha push and got a download prompt instead of the panel. Root cause: the panel's root handler matched the URL with strict equality (`req.url === '/'`), so any deep-link with a query (`?focus=captcha`, `?login=gog`, `?batch=gog`) made `req.url === '/?focus=captcha'` fall through to the implicit 404. The 404 response carried no `Content-Type` header, so the browser treated it as a generic file and offered to save it.
