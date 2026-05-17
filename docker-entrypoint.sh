@@ -92,6 +92,23 @@ websockify -D --web "/usr/share/novnc/" "$NOVNC_PORT" "localhost:$VNC_PORT" 2>/d
 echo "  VNC:   port ${VNC_PORT} (${pwt}), ${WIDTH}x${HEIGHT}"
 echo "  noVNC: http://localhost:${NOVNC_PORT}/?autoconnect=true"
 
+# Block until TurboVNC's X server socket is live before starting the
+# panel. vncserver above is non-blocking — without this wait, the
+# panel boots and the auto-session-check launches Chromium against
+# DISPLAY=:1 before the X server has finished initialising, which
+# blows up with "Looks like you launched a headed browser without
+# having a XServer running" and leaves every site marked failed
+# until manual recovery. Particularly common under systemd / quadlet
+# autostart on host reboot where the container races other services.
+# Issues #40 (CharlieRiesner) + #41 (Sahibishere) — 2026-05-16.
+for i in $(seq 1 60); do
+  [ -S /tmp/.X11-unix/X1 ] && break
+  sleep 0.5
+done
+if [ ! -S /tmp/.X11-unix/X1 ]; then
+  echo "  WARN: TurboVNC X11 socket didn't appear within 30s — panel will start anyway, but expect 'no XServer' errors from claim scripts. Check /fgc/data/TurboVNC.log for the cause."
+fi
+
 # The panel process owns claim scheduling, session-lock coordination, and the
 # HTTP/noVNC surface. It reads LOOP / MS_SCHEDULE_HOURS / MS_SCHEDULE_START / CLAIM_CMD
 # and runs the claim scripts internally. LOGIN_MODE is a deprecated no-op — the

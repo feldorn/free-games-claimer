@@ -4,6 +4,16 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.7.3
+
+**Wait for TurboVNC X server before starting the panel ([#40](https://github.com/feldorn/free-games-claimer/issues/40), [#41](https://github.com/feldorn/free-games-claimer/issues/41)).** Two reports of `browserType.launchPersistentContext: Target page, context or browser has been closed` accompanied by Playwright's `Looks like you launched a headed browser without having a XServer running` message. Root cause: `/opt/TurboVNC/bin/vncserver` is non-blocking — it forks the X server and returns immediately. The panel was then exec'd before the X socket was actually live, and any auto-session-check (or RUN_ON_STARTUP claim chain) that fired in the next second or two raced the X-server initialisation and crashed.
+
+Particularly common under systemd quadlet autostart on host reboot — the container races other services for I/O and the panel's first Chromium launch lands before TurboVNC has finished setting up `/tmp/.X11-unix/X1`. Both reporters saw their setup stabilise on its own after a manual restart, which is the classic shape of a startup race.
+
+Fix: `docker-entrypoint.sh` now blocks for up to 30 seconds after invoking `vncserver`, polling for the X socket at `/tmp/.X11-unix/X1`. Once the socket appears (typically <2 seconds), the panel exec proceeds. If the socket never appears, a clear warning is printed pointing at `/fgc/data/TurboVNC.log` for diagnosis.
+
+---
+
 ## What's new in 2.7.2
 
 **Discoveries roll-up — performance + tab persistence + README callout.** Three small fixes from a single round of live testing.
