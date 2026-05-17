@@ -2154,7 +2154,7 @@ function localDateKey(d) {
 }
 
 async function readAllClaims() {
-  const out = [];
+  const raw = [];
   for (const [service, file] of Object.entries(CLAIM_DB_FILES)) {
     let db;
     try { db = await jsonDb(file, {}); }
@@ -2169,11 +2169,27 @@ async function readAllClaims() {
         if (!status.startsWith('claimed')) continue;
         const at = parseLocalDateTime(entry.time);
         if (!at) continue;
-        out.push({ service, user, gameId, title: entry.title || gameId, url: entry.url || null, at, status });
+        raw.push({ service, user, gameId, title: entry.title || gameId, url: entry.url || null, at, status });
       }
     }
   }
-  return out;
+  // Dedupe platform variants. Epic surfaces some games under multiple
+  // URL slugs (iOS / Android / locale-stamped variants), each persisted
+  // as its own DB row — without deduping, both the recent-claims list
+  // and the KPI counts (gamesThisWeek / gamesAllTime / per-service)
+  // double-count the same game. Key on (service, normalized title) so
+  // cross-service collisions (e.g. same title free on Epic AND Steam)
+  // stay distinct. Keep the most-recent record per key — preserves the
+  // latest claim time for recency-sort and matches the user's mental
+  // model of "the last time I claimed this game." Reported on
+  // 2026-05-17 — Arranger / Teacup appearing twice in Recent Claims.
+  const byKey = new Map();
+  for (const c of raw) {
+    const key = c.service + '::' + normalizeTitle(c.title || c.gameId || '');
+    const cur = byKey.get(key);
+    if (!cur || c.at > cur.at) byKey.set(key, c);
+  }
+  return Array.from(byKey.values());
 }
 
 // Aggregate MS Rewards point history captured by microsoft.js. Each run
