@@ -4,6 +4,18 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.7.4
+
+**Fix apprise priority — pass via URL query param, not the nonexistent `--priority` CLI flag ([#42](https://github.com/feldorn/free-games-claimer/issues/42)).** When the Lenovo notify-priority + captcha-priority features landed in 2.5.8 / 2.7.0, our `notify()` helper appended `--priority <level>` as an apprise CLI flag. **That flag doesn't exist** — apprise's CLI has never had a generic priority option. Priority is per-notifier and configured via URL query string. The bug was silent until apprise actually rejected the arg: JxPv2 hit it on apprise v1.10.0 with `Error: No such option: --priority` whenever a captcha notify fired (Lenovo notifies were probably failing too, just less visibly because Lenovo wakes are infrequent).
+
+Notifies that used the default `normal` priority worked fine — the flag was only emitted for non-normal calls, which is why **Send test** and per-run summary notifications worked while captcha alerts failed.
+
+Fix: when `opts.priority` is non-normal, append `?priority=<value>` to each NOTIFY URL before passing them as positional argv to apprise. URL-encoded; correctly uses `&` when the URL already has a query string. Apprise translates the generic level (low/moderate/normal/high/emergency) to whatever the notifier supports — Pushover honors high/emergency literally, ntfy maps to 1-5, Telegram silent flag, Discord ignores.
+
+No user action needed — existing deployments stay correct without config changes. Captcha and Lenovo alerts will fire with the correct priority on the next image pull.
+
+---
+
 ## What's new in 2.7.3
 
 **Wait for TurboVNC X server before starting the panel ([#40](https://github.com/feldorn/free-games-claimer/issues/40), [#41](https://github.com/feldorn/free-games-claimer/issues/41)).** Two reports of `browserType.launchPersistentContext: Target page, context or browser has been closed` accompanied by Playwright's `Looks like you launched a headed browser without having a XServer running` message. Root cause: `/opt/TurboVNC/bin/vncserver` is non-blocking — it forks the X server and returns immediately. The panel was then exec'd before the X socket was actually live, and any auto-session-check (or RUN_ON_STARTUP claim chain) that fired in the next second or two raced the X-server initialisation and crashed.
