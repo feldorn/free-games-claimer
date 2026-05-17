@@ -6491,8 +6491,15 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    // Match the root path regardless of query string. Used to be
+    // strict-equal req.url === '/', which 404'd on /?focus=captcha and
+    // /?login=gog deep-links from notification pushes (and the browser
+    // helpfully offered to download the empty 404 body since it had no
+    // Content-Type — caught 2026-05-17). Strip the query string off
+    // req.url for the path check.
+    const reqPath = req.url ? req.url.split('?')[0] : '';
     if (!isAuthenticated(req)) {
-      if (req.method === 'GET' && (req.url === '/' || req.url === '/index.html')) {
+      if (req.method === 'GET' && (reqPath === '/' || reqPath === '/index.html')) {
         res.writeHead(200, { 'Content-Type': 'text/html', 'Cache-Control': 'no-store' });
         res.end(LOGIN_HTML);
         return;
@@ -6501,7 +6508,7 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    if (req.method === 'GET' && (req.url === '/' || req.url === '/index.html')) {
+    if (req.method === 'GET' && (reqPath === '/' || reqPath === '/index.html')) {
       res.writeHead(200, { 'Content-Type': 'text/html', 'Cache-Control': 'no-store' });
       res.end(PANEL_HTML);
       return;
