@@ -79,15 +79,26 @@ try {
   // = no-purchase-required giveaway; higher tiers = free-with-spend.
   // We track the no-purchase tier only — the others would require
   // user interpretation that doesn't fit "we have new freebies".
+  // Three counters so the "captured 0" path can give a useful reason
+  // instead of always shouting "endpoint may need updating" — accurate
+  // when the endpoint genuinely changed, misleading when Fanatical is
+  // simply between giveaways (caught 2026-05-17). User now sees which
+  // failure mode hit and can react appropriately.
+  let apiResponses = 0;        // /api/all-promotions/* responses seen
+  let freeProductsSeen = 0;    // total entries in freeProducts arrays across responses
+  let noSpendPromos = 0;       // freeProducts entries with min_spend.USD == 0
   page.on('response', async (resp) => {
     try {
       if (!/\/api\/all-promotions\//i.test(resp.url())) return;
       if (!resp.ok()) return;
+      apiResponses++;
       const json = await resp.json();
       const free = Array.isArray(json?.freeProducts) ? json.freeProducts : [];
+      freeProductsSeen += free.length;
       for (const promo of free) {
         const minUsd = Number(promo?.min_spend?.USD);
         if (!Number.isFinite(minUsd) || minUsd > 0) continue;
+        noSpendPromos++;
         const promoProducts = Array.isArray(promo?.products) ? promo.products : [];
         for (const p of promoProducts) {
           const freegames = Array.isArray(p?.freegames) ? p.freegames : [];
@@ -110,7 +121,18 @@ try {
 
 log.status('API responses captured', captured.length);
 if (captured.length === 0) {
-  log.warn('Fanatical free-games page rendered no API products — endpoint may need updating');
+  // Differentiate the three failure modes so the user can tell at a
+  // glance whether to investigate (endpoint changed) or just wait
+  // (Fanatical between giveaways).
+  if (apiResponses === 0) {
+    log.warn('Fanatical /api/all-promotions endpoint not observed — page may have changed where it loads data from');
+  } else if (freeProductsSeen === 0) {
+    log.info('Fanatical API responded but no promotions are active right now — nothing to claim');
+  } else if (noSpendPromos === 0) {
+    log.info(`Fanatical has ${freeProductsSeen} promotion${freeProductsSeen === 1 ? '' : 's'} active but all require a minimum spend (no no-purchase freebies currently)`);
+  } else {
+    log.info('Fanatical has a no-spend promotion active but no games are attached to it yet');
+  }
   process.exit(0);
 }
 
