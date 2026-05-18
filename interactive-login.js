@@ -7286,6 +7286,29 @@ server.listen(PANEL_PORT, async () => {
   try { runHistoryDb = await jsonDb('runs.json', { runs: [] }); }
   catch (e) { console.error(`[${datetime()}] failed to load runs.json: ${e.message}`); }
 
+  // Hydrate in-memory `lastRun` from the persisted history so the
+  // Schedule tab's "LAST RUN" tile doesn't read "None yet" after a
+  // container restart. Picks the most recent record (history is
+  // append-only, ordered oldest-first) and reconstitutes the same
+  // shape the live run handlers produce. Without this, every boot
+  // amnesically lost the last-run signal even though /api/runs
+  // could happily list 50 prior runs. (User report 2026-05-17.)
+  try {
+    const runs = (runHistoryDb && runHistoryDb.data && runHistoryDb.data.runs) || [];
+    const latest = runs.length ? runs[runs.length - 1] : null;
+    if (latest) {
+      lastRun = {
+        at: latest.at,
+        atIso: latest.atIso || null,
+        source: latest.source || null,
+        exitCode: latest.exitCode != null ? latest.exitCode : null,
+        status: latest.status || (latest.exitCode === 0 ? 'success' : 'finished'),
+        durationSec: latest.durationSec != null ? latest.durationSec : null,
+        error: latest.error || undefined,
+      };
+    }
+  } catch (e) { console.warn(`[${datetime()}] failed to hydrate lastRun from history: ${e.message}`); }
+
   // Scheduler state load — issue #32. Holds the last main-chain
   // completion timestamp so computeMainWakeMs can use it as an anchor
   // for bare-LOOP mode (no START_TIME). Without this persistence, every
