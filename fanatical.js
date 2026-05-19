@@ -51,6 +51,16 @@ function saveState(state) {
 
 let context, page;
 let captured = [];
+// Three counters so the "captured 0" path can give a useful reason
+// instead of always shouting "endpoint may need updating" — accurate
+// when the endpoint genuinely changed, misleading when Fanatical is
+// simply between giveaways. Declared at module scope so the post-try
+// diagnostic block can read them — `let` is block-scoped and the
+// earlier patch declared them inside the try, hence the ReferenceError
+// on real runs (fixed 2026-05-19).
+let apiResponses = 0;        // /api/all-promotions/* responses seen
+let freeProductsSeen = 0;    // total entries in freeProducts arrays
+let noSpendPromos = 0;       // entries with min_spend.USD == 0
 try {
   cleanProfileLocks(cfg.dir.browser);
   context = await chromium.launchPersistentContext(cfg.dir.browser, {
@@ -79,14 +89,8 @@ try {
   // = no-purchase-required giveaway; higher tiers = free-with-spend.
   // We track the no-purchase tier only — the others would require
   // user interpretation that doesn't fit "we have new freebies".
-  // Three counters so the "captured 0" path can give a useful reason
-  // instead of always shouting "endpoint may need updating" — accurate
-  // when the endpoint genuinely changed, misleading when Fanatical is
-  // simply between giveaways (caught 2026-05-17). User now sees which
-  // failure mode hit and can react appropriately.
-  let apiResponses = 0;        // /api/all-promotions/* responses seen
-  let freeProductsSeen = 0;    // total entries in freeProducts arrays across responses
-  let noSpendPromos = 0;       // freeProducts entries with min_spend.USD == 0
+  // Counter vars live at module scope (declared above the try block)
+  // so the post-try diagnostic in captured===0 can read them.
   page.on('response', async (resp) => {
     try {
       if (!/\/api\/all-promotions\//i.test(resp.url())) return;
