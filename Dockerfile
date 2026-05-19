@@ -28,6 +28,13 @@ RUN apt-get update \
       tini \
       nodejs \
       dos2unix \
+      # x11-utils for xdpyinfo — used in docker-entrypoint.sh to actually
+      # probe X readiness before the panel starts. Without it we have
+      # to fall back to socket-file polling, which can return ready
+      # before X is actually answering connections (TurboVNC writes
+      # the socket early in init). xdpyinfo connecting cleanly is the
+      # canonical "X is up" signal — see issue feldorn#41.
+      x11-utils \
       # gosu enables clean privilege-drop in docker-entrypoint.sh when
       # PUID/PGID are set (opt-in non-root mode). When those are unset, gosu
       # is unused and the container runs as root exactly like before.

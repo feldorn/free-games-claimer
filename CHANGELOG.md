@@ -4,6 +4,18 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.7.7
+
+**X-server readiness probe now actually probes X ([#41](https://github.com/feldorn/free-games-claimer/issues/41) follow-up).** The 2.7.3 fix polled for the X11 socket file at `/tmp/.X11-unix/X1` and called it ready when the file appeared. Turns out TurboVNC writes that socket *early* in init — sometimes before X is actually answering connections — so the wait could pass too soon. Sahibishere reported the same `Missing X server or $DISPLAY` errors still hitting on 2.7.6, with the failures happening 30+ minutes after boot. Upgraded the probe:
+
+- Added `x11-utils` to the Dockerfile so `xdpyinfo` is available.
+- Entrypoint now waits using `xdpyinfo -display :1` — that makes an actual X11 protocol connection and only succeeds when X is genuinely ready. Falls back to the old socket-file check on older images that don't have `xdpyinfo` yet (graceful upgrade path).
+- When the 30-second wait expires without success, the entrypoint now dumps the last 30 lines of `/fgc/data/TurboVNC.log` and points at common causes (stale `/tmp/.X1-lock`, PUID mismatch on `/home/fgc/.vnc/`, insufficient `/dev/shm`, vncserver crash). Boot-time failure diagnosis no longer requires `docker exec` into the container.
+
+Pull `ghcr.io/feldorn/free-games-claimer:latest` (or pin `v2.7.7`). If you still hit the error after the pull, the boot log will now tell you why.
+
+---
+
 ## What's new in 2.7.6
 
 **Fix NOTIFY split corrupting single URLs with whitespace ([#44](https://github.com/feldorn/free-games-claimer/issues/44)).** TwoPlayer's `mailto://user:PASSWORD WITH SPACES@gmail.com` URL got shredded into three garbage argv entries because the 2.6.8 fix for the multi-URL Telegram bug split `cfg.notify` on `/\s+/` — too aggressive. Spaces appear inside legitimate URLs (especially mailto passwords); newlines and commas don't.

@@ -92,21 +92,42 @@ websockify -D --web "/usr/share/novnc/" "$NOVNC_PORT" "localhost:$VNC_PORT" 2>/d
 echo "  VNC:   port ${VNC_PORT} (${pwt}), ${WIDTH}x${HEIGHT}"
 echo "  noVNC: http://localhost:${NOVNC_PORT}/?autoconnect=true"
 
-# Block until TurboVNC's X server socket is live before starting the
-# panel. vncserver above is non-blocking — without this wait, the
-# panel boots and the auto-session-check launches Chromium against
-# DISPLAY=:1 before the X server has finished initialising, which
-# blows up with "Looks like you launched a headed browser without
-# having a XServer running" and leaves every site marked failed
-# until manual recovery. Particularly common under systemd / quadlet
-# autostart on host reboot where the container races other services.
-# Issues #40 (CharlieRiesner) + #41 (Sahibishere) — 2026-05-16.
-for i in $(seq 1 60); do
-  [ -S /tmp/.X11-unix/X1 ] && break
-  sleep 0.5
-done
-if [ ! -S /tmp/.X11-unix/X1 ]; then
-  echo "  WARN: TurboVNC X11 socket didn't appear within 30s — panel will start anyway, but expect 'no XServer' errors from claim scripts. Check /fgc/data/TurboVNC.log for the cause."
+# Wait for X server to actually answer connections before starting the
+# panel. Previously polled only for the socket file at /tmp/.X11-unix/X1,
+# which TurboVNC writes early in init — passes our wait before X is
+# actually serving requests. Sahibishere reported (issue #41 follow-up
+# on 2.7.6) that the error still happens 30 min after boot, suggesting
+# the boot-time socket-passes-but-X-not-ready race wasn't the only thing
+# going on. Switched to xdpyinfo which makes a real X11 protocol
+# connection — only succeeds when X is genuinely ready. Issues #40 +
+# #41 — 2026-05-16 / 2026-05-18.
+echo "  Waiting for X server on $DISPLAY..."
+X_READY=0
+# Prefer xdpyinfo (actual X11 protocol probe — only succeeds when X
+# answers). Falls back to socket-file polling when xdpyinfo isn't in
+# the image (graceful upgrade path — earlier images shipped without
+# x11-utils; users will get xdpyinfo on next pull).
+if command -v xdpyinfo >/dev/null 2>&1; then
+  for i in $(seq 1 60); do
+    if xdpyinfo -display "$DISPLAY" >/dev/null 2>&1; then
+      X_READY=1
+      echo "  X server ready on $DISPLAY (xdpyinfo probe succeeded after ${i} tries)."
+      break
+    fi
+    sleep 0.5
+  done
+else
+  echo "  (xdpyinfo not installed in this image — falling back to socket-file check; pull the latest image for a proper probe)"
+  for i in $(seq 1 60); do
+    [ -S /tmp/.X11-unix/X1 ] && { X_READY=1; echo "  X11 socket appeared on $DISPLAY (after ${i} probes — note: socket can appear before X answers; xdpyinfo would be more reliable)."; break; }
+    sleep 0.5
+  done
+fi
+if [ "$X_READY" = "0" ]; then
+  echo "  WARN: X server on $DISPLAY didn't become ready within 30s — panel will start anyway, but claim scripts will fail with 'Missing X server' until X comes up. Common causes: stale /tmp/.X1-lock, PUID mismatch on /home/fgc/.vnc/, insufficient /dev/shm in the container (try --shm-size=512m), or vncserver crashed."
+  echo "  --- last 30 lines of /fgc/data/TurboVNC.log ---"
+  tail -30 /fgc/data/TurboVNC.log 2>/dev/null || echo "  (log file not present)"
+  echo "  --- end TurboVNC.log ---"
 fi
 
 # The panel process owns claim scheduling, session-lock coordination, and the
