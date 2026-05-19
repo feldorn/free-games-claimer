@@ -92,7 +92,30 @@ const auth = async url => {
       alreadyLoggedIn = which === 'loggedIn' || which === 'collectedToday';
       break;
     }
-    if (attempt === MAX_RELOADS) throw new Error('AliExpress page never finished loading (login button / logged-in marker never appeared)');
+    if (attempt === MAX_RELOADS) {
+      // Diagnostic dump on failure — none of the three sentinel selectors
+      // resolved within the 15s window across all retries. AliExpress's
+      // coin page surface drifts (#45 — user reports the page renders
+      // logged-in but our markers never fire). Snapshot the top headings
+      // and buttons so future triage doesn't need a live noVNC session.
+      try {
+        const snapshot = await page.evaluate(() => {
+          const grab = (sel, max = 8) => Array.from(document.querySelectorAll(sel)).slice(0, max).map(el => (el.textContent || '').trim().slice(0, 80)).filter(Boolean);
+          return {
+            url: location.href,
+            title: document.title,
+            h1: grab('h1'),
+            h2: grab('h2'),
+            h3: grab('h3'),
+            buttons: grab('button'),
+            anchorsWithLog: grab('a[href*="login" i], a[href*="signin" i]'),
+          };
+        });
+        console.error('AliExpress page diagnostic dump (none of {Log in button, "day streak" h3, "Earn more coins" button} matched):');
+        console.error(JSON.stringify(snapshot, null, 2));
+      } catch (e) { console.error(`(diagnostic dump failed: ${e.message})`); }
+      throw new Error('AliExpress page never finished loading (login button / logged-in marker never appeared) — see diagnostic dump above');
+    }
   }
   if (!alreadyLoggedIn) {
     console.error('Not logged in! Will wait for 120s for you to login in the browser or terminal...');
