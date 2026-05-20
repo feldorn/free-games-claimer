@@ -4,6 +4,16 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.1
+
+**Discoveries manual-claims now count toward Stats.** When you mark a game as manually-claimed on the Discoveries tab (✓ button), it now shows up on the Stats tab — KPIs (this week / this month / all-time), Recent Claims, the 30-day chart, and the per-service table all include manual claims alongside auto-claims. New "discovery-only" storefronts (IndieGala, itch.io, STOVE, Mobile, Console, VR, Other) get their own row in the per-service table when you've manually-claimed at least one item from that source — empty rows aren't added for users who don't use Discoveries.
+
+Manual claims for storefronts that also have an auto-claim script (Epic, Steam, GOG, Prime, Ubisoft) roll into that script's existing row — the per-game dedup (by `service` + normalized title) keeps the most-recent record, so marking an item manually that the auto-claimer later picks up doesn't double-count it.
+
+Reported in the 2.8.0 dev cycle: "in discovery, if i mark a game as collected, it's not showing in stats."
+
+---
+
 ## What's new in 2.8.0
 
 **Error reporting — opt-out telemetry that helps the project ship faster, without ever sending anything you didn't approve.** Three pieces ship together:

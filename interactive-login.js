@@ -2349,6 +2349,44 @@ async function readAllClaims() {
       }
     }
   }
+  // Manual claims from the Discoveries tab. Each entry's key is
+  // `${collectorKey}::${matchKey(title)}` where collectorKey lines up
+  // with our service ids for the storefronts we auto-claim (epic-games,
+  // steam, gog, prime-gaming, ubisoft) and is a discovery-only label
+  // for the rest (indiegala, itch-io, stove, mobile, console, vr, other).
+  // Synthesizing claim records here means KPIs, Recent Claims, the daily
+  // chart, and the per-service table all pick them up via the same
+  // readAllClaims() path — no duplicate plumbing.
+  try {
+    const discDb = await jsonDb('discoveries-state.json', { items: {} });
+    const items = discDb.data && discDb.data.items;
+    if (items && typeof items === 'object') {
+      for (const [key, entry] of Object.entries(items)) {
+        if (!entry || entry.status !== 'manually-claimed') continue;
+        // `at` is ISO; parseLocalDateTime expects "YYYY-MM-DD HH:MM:SS"
+        // shape, so fall back to native Date parsing for ISO strings.
+        let at = parseLocalDateTime(entry.at);
+        if (!at) { const d = new Date(entry.at); if (!isNaN(d.getTime())) at = d; }
+        if (!at) continue;
+        const collectorKey = (String(key).split('::')[0] || 'other').trim() || 'other';
+        // Strip GamerPower's "(Storefront) Giveaway" suffix so Recent
+        // Claims displays "Carlos the Taco" instead of
+        // "Carlos the Taco (IndieGala) Giveaway".
+        const title = String(entry.title || key)
+          .replace(/\s*\([^)]+\)\s*Giveaway\s*$/i, '')
+          .trim() || String(entry.title || key);
+        raw.push({
+          service: collectorKey,
+          user: 'manual',
+          gameId: key,
+          title,
+          url: null,
+          at,
+          status: 'claimed-manual',
+        });
+      }
+    }
+  } catch { /* discoveries-state.json missing or unparsable — skip */ }
   // Dedupe platform variants. Epic surfaces some games under multiple
   // URL slugs (iOS / Android / locale-stamped variants), each persisted
   // as its own DB row — without deduping, both the recent-claims list
@@ -2447,7 +2485,7 @@ async function getStatsSummary() {
     lastClaim: latest ? {
       at: datetime(latest.at),
       service: latest.service,
-      serviceName: (SITES[latest.service] && SITES[latest.service].name) || latest.service,
+      serviceName: (SITES[latest.service] && SITES[latest.service].name) || DISCOVERY_DISPLAY_NAMES[latest.service] || latest.service,
       title: latest.title,
       url: latest.url,
     } : null,
@@ -2474,8 +2512,15 @@ async function getStatsByService() {
   const weekAgo = now - 7 * 24 * 60 * 60 * 1000;
   const monthAgo = now - 30 * 24 * 60 * 60 * 1000;
   for (const c of claims) {
-    const row = rows[c.service];
-    if (!row || row.unit !== 'games') continue;
+    let row = rows[c.service];
+    if (!row) {
+      // Discovery-only storefront (indiegala, itch-io, stove, mobile,
+      // console, vr, other) — no claim DB exists, so add a synthetic
+      // row only when there's actually a manual claim to attribute.
+      row = { id: c.service, unit: 'games', thisWeek: 0, thisMonth: 0, allTime: 0, lastClaimAt: null, discoveryOnly: true };
+      rows[c.service] = row;
+    }
+    if (row.unit !== 'games') continue;
     row.allTime++;
     if (c.at.getTime() >= weekAgo) row.thisWeek++;
     if (c.at.getTime() >= monthAgo) row.thisMonth++;
@@ -2484,9 +2529,23 @@ async function getStatsByService() {
   }
   return Object.values(rows).map(r => ({
     ...r,
-    name: (SITES[r.id] && SITES[r.id].name) || r.id,
+    name: (SITES[r.id] && SITES[r.id].name) || DISCOVERY_DISPLAY_NAMES[r.id] || r.id,
   }));
 }
+
+// Pretty names for the discovery-only storefronts that appear in the
+// per-service table when a user manually-claims via the Discoveries tab.
+// Kept here rather than src/sites.js because these aren't full sites — no
+// login flow, no claim script — just buckets for stats attribution.
+const DISCOVERY_DISPLAY_NAMES = {
+  'indiegala': 'IndieGala (manual)',
+  'itch-io':   'itch.io (manual)',
+  'stove':     'STOVE (manual)',
+  'mobile':    'Mobile (manual)',
+  'console':   'Console (manual)',
+  'vr':        'VR (manual)',
+  'other':     'Other (manual)',
+};
 
 async function getStatsDaily(days = 30) {
   const claims = await readAllClaims();
@@ -2505,7 +2564,7 @@ async function getStatsDaily(days = 30) {
     byDate[key].count++;
     byDate[key].items.push({
       service: c.service,
-      serviceName: (SITES[c.service] && SITES[c.service].name) || c.service,
+      serviceName: (SITES[c.service] && SITES[c.service].name) || DISCOVERY_DISPLAY_NAMES[c.service] || c.service,
       title: c.title,
     });
   }
@@ -2518,7 +2577,7 @@ async function getActivity(limit = 10) {
   return claims.slice(0, limit).map(c => ({
     at: datetime(c.at),
     service: c.service,
-    serviceName: (SITES[c.service] && SITES[c.service].name) || c.service,
+    serviceName: (SITES[c.service] && SITES[c.service].name) || DISCOVERY_DISPLAY_NAMES[c.service] || c.service,
     title: c.title,
     url: c.url,
     status: c.status,
