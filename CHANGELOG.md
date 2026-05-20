@@ -4,6 +4,23 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.3
+
+**Today's MS Rewards slot no longer gets skipped when the container restarts mid-window ([#47](https://github.com/feldorn/free-games-claimer/issues/47)).** Two related bugs in the decoupled MS scheduler conspired to drop today's run:
+
+- **Fresh-boot picker.** When the panel booted inside the MS window with no prior state file, `pickMsTargetFor` chose a uniform-random offset across the *full* `[msStart, msStart+msHours]` window — including hours already past. The very next check ("pending + target ≤ now") then marked the slot missed and rolled to tomorrow. With an 8–12 window and a 10am first boot, ~50% of users were silently losing today's MS run.
+- **Restart inside the window.** If a container update (watchtower, image pull, host reboot) happened between the picked target and run completion, the persisted state was still `pending` and `target ≤ now` on next boot. The same one-shot "mark missed" path triggered.
+
+Fix:
+- `pickMsTargetFor` now constrains the random offset to the *remaining* window when picking for today mid-window. The full window is still fair game for tomorrow's pick.
+- Boot-time `computeMsWakeMs` now distinguishes three sub-cases when it finds a pending+past target: (1) `last-runs.json` shows MS already ran successfully today between target and now → mark fired and move on; (2) still inside today's MS window → repick a fresh target in the remaining window (60s minimum delay, randomized for anti-detection variance); (3) past window end → mark missed as before.
+
+The "missed runs need manual recovery" principle is preserved for true wake-drift (`feedback_missed_runs_manual_recovery.md`) — this fix only auto-recovers when we can plausibly still fit in today's window.
+
+5/5 sandbox sub-cases pass, plus 100/100 fresh-boot-mid-window picks land in the remaining window (was ~50%).
+
+---
+
 ## What's new in 2.8.2
 
 **Two follow-ups to 2.8.1.**

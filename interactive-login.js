@@ -1615,7 +1615,26 @@ function pickMsTargetFor(dateKey, c) {
   const [y, m, d] = dateKey.split('-').map(Number);
   const target = new Date(y, m - 1, d);
   const startHour = c.msStart;
-  const offsetMinutes = Math.floor(Math.random() * c.msHours * 60);
+  // When picking for today and we're already inside the window, constrain
+  // the random offset to the *remaining* window — otherwise a uniform pick
+  // can land in the past on first boot mid-window, and the immediate
+  // pending+past check marks it missed before it ever ran (issue #47).
+  // For a future day, the full window is fair game as before.
+  const now = Date.now();
+  const windowStart = new Date(y, m - 1, d, startHour, 0, 0, 0).getTime();
+  const windowEnd = windowStart + c.msHours * 3600 * 1000;
+  let minOffsetMin = 0;
+  let maxOffsetMin = c.msHours * 60;
+  if (dateKey === todayKey() && now > windowStart && now < windowEnd) {
+    // 60s floor so the very first wake isn't a no-op tight-loop.
+    minOffsetMin = Math.ceil((now - windowStart) / 60000) + 1;
+    // If the floor sits at or past the ceiling, leave it equal — the
+    // boot-time recovery in computeMsWakeMs will still reschedule the
+    // remaining-window pick (sub-case 2) or mark missed (sub-case 3).
+    if (minOffsetMin >= maxOffsetMin) minOffsetMin = maxOffsetMin - 1;
+  }
+  const span = Math.max(1, maxOffsetMin - minOffsetMin);
+  const offsetMinutes = minOffsetMin + Math.floor(Math.random() * span);
   target.setHours(startHour, offsetMinutes, 0, 0);
   return { date: dateKey, target: target.toISOString(), status: 'pending' };
 }
@@ -1766,9 +1785,47 @@ function computeMsWakeMs() {
       continue;
     }
     if (st.status === 'pending' && target <= now) {
-      // Picked time has already passed (container restart inside window
-      // after the pick, or saved file with old target). Mark missed —
-      // user can manually fire via the per-card Run button.
+      // Picked time is in the past. Three sub-cases handled in order:
+      //
+      //   1. A successful MS run happened between target and now —
+      //      run completed before the restart, status just wasn't
+      //      persisted. Promote to fired (no re-fire) and move on.
+      //
+      //   2. We're still inside today's MS window. Most common cause
+      //      is a fresh container boot inside the window where
+      //      pickMsTargetFor randomly chose an offset that's already
+      //      past, OR a watchtower restart that consumed the pick.
+      //      Repick a fresh target in the remaining window so today's
+      //      slot still fires (60s minimum delay so we don't tight-loop;
+      //      randomized so anti-detection variance is preserved).
+      //      Distinct from "auto-fire late" (memory: missed-runs-need-
+      //      manual-recovery) — that was about wake drift, not boot.
+      //
+      //   3. Past today's window end. Mark missed as before; user can
+      //      manually fire via the per-card Run button.
+      const [y, mo, d] = String(st.date).split('-').map(Number);
+      const windowStartMs = new Date(y, (mo || 1) - 1, d || 1, c.msStart, 0, 0, 0).getTime();
+      const windowEndMs = windowStartMs + c.msHours * 3600 * 1000;
+      // Sub-case 1: did MS already run successfully today after target?
+      const lastMsIso = lastRunSuccess && lastRunSuccess.microsoft;
+      if (lastMsIso) {
+        const lastMs = new Date(lastMsIso).getTime();
+        if (Number.isFinite(lastMs) && lastMs >= target && lastMs <= now) {
+          st.status = 'fired';
+          writeMsScheduleToday(st);
+          continue;
+        }
+      }
+      // Sub-case 2: still inside today's window — repick remaining slot.
+      const remainingMs = windowEndMs - now;
+      if (remainingMs >= 90 * 1000) {
+        const maxDelay = Math.max(60 * 1000, remainingMs - 30 * 1000);
+        const delayMs = 60 * 1000 + Math.floor(Math.random() * (maxDelay - 60 * 1000));
+        st.target = new Date(now + delayMs).toISOString();
+        writeMsScheduleToday(st);
+        continue;
+      }
+      // Sub-case 3: window has passed.
       st.status = 'missed';
       writeMsScheduleToday(st);
       continue;
