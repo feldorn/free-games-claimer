@@ -2566,10 +2566,11 @@ const PANEL_HTML = `<!DOCTYPE html>
      with three actions (Share, Don't Share, Never Share). Visually
      distinct from the captcha-banner (red, urgent) and headless-banner
      (amber, persistent). Diagnostics is informational — slate-blue. */
-  .diag-banner { background: #1a2540; border: 1px solid #4a6fa0; color: #c8d4eb; padding: 10px 14px; border-radius: 6px; margin: 6px 0; display: flex; align-items: center; gap: 12px; }
-  .diag-banner .db-icon { font-size: 18px; flex-shrink: 0; opacity: 0.85; }
+  .diag-banner { background: #3a2a14; border: 1px solid #a07840; color: #f0d4a0; padding: 10px 14px; border-radius: 6px; margin: 6px 0; display: flex; align-items: center; gap: 12px; }
+  .diag-banner .db-icon { font-size: 18px; flex-shrink: 0; opacity: 0.95; }
   .diag-banner .db-text { flex: 1; font-size: 13px; line-height: 1.4; }
-  .diag-banner .db-text small { color: #8aa0c2; font-size: 11px; display: block; margin-top: 2px; font-family: 'Menlo', 'Consolas', monospace; }
+  .diag-banner .db-text b { color: #ffe0b0; }
+  .diag-banner .db-text small { color: #d4b878; font-size: 11px; display: block; margin-top: 2px; font-family: 'Menlo', 'Consolas', monospace; }
   .diag-banner .db-actions { display: flex; gap: 6px; flex-shrink: 0; }
   .diag-banner button { padding: 5px 11px; font-size: 11px; font-weight: 600; border-radius: 4px; cursor: pointer; border: 1px solid; white-space: nowrap; font-family: inherit; }
   .diag-banner button.db-share   { background: #1f3d2f; color: #6fd49a; border-color: #2c5a45; }
