@@ -4,6 +4,20 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.0
+
+**Error reporting — opt-out telemetry that helps the project ship faster, without ever sending anything you didn't approve.** Three pieces ship together:
+
+- **Detection.** Every run's stdout/stderr is scanned for crashes (`ReferenceError`, `TypeError`, `Error:`, Playwright `browserType.*` / `page.*` / `locator.*`, apprise `Command failed:`, and the `Exception:` wrapper our claim scripts use). Each error is fingerprinted (SHA-1 of script + class + normalized message) so the same crash hitting on every run counts up instead of stacking duplicates. State persists at `data/diagnostics-state.json`.
+- **Banner.** When an unresolved error is detected, a warm-amber banner appears at the top of the panel with three buttons: **Share** (opens a pre-filled GitHub issue in a new tab — you review and edit the body before submitting), **Don't Share** (dismiss just this one), **Never Share** (turn off the feature entirely; a Settings → Notifications checkbox flips it back on). Decisions are sticky per-error.
+- **Diagnostics tab.** Full history of detected errors with a fourth `Resolved` state for tracking whether an upstream issue got fixed. Per-row actions adapt to the row's state: Share / Dismiss / Mark resolved / Delete. Toolbar has a global enable/disable toggle and Clear history.
+
+Detection coverage was cross-validated against every GitHub issue with log output (15 bug reports): 12 of 12 regex-shaped bugs would have been caught, plus the controlled live-run test (deliberate `throw` in `fanatical.js` triggered via `/api/run-service`) end-to-end populated the banner and DB correctly. Six issues are behavioral / silent-failure bugs (e.g. "Epic missed 2 free games") that no stack-trace regex can catch — out of scope for this feature.
+
+**Privacy posture:** nothing leaves your host without an explicit Share click. The Share button opens GitHub's `issues/new` with a pre-filled title and body; you see the body before submitting and can redact whatever you want. Set `DIAGNOSTICS_BANNER=0` to hard-disable at boot independent of any DB state.
+
+---
+
 ## What's new in 2.7.7
 
 **X-server readiness probe now actually probes X ([#41](https://github.com/feldorn/free-games-claimer/issues/41) follow-up).** The 2.7.3 fix polled for the X11 socket file at `/tmp/.X11-unix/X1` and called it ready when the file appeared. Turns out TurboVNC writes that socket *early* in init — sometimes before X is actually answering connections — so the wait could pass too soon. Sahibishere reported the same `Missing X server or $DISPLAY` errors still hitting on 2.7.6, with the failures happening 30+ minutes after boot. Upgraded the probe:
