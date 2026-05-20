@@ -434,7 +434,12 @@ async function fetchLatestRelease() {
     if (!versioned.length) return null;
     versioned.sort((a, b) => isNewerVersion(a.name, b.name) ? -1 : 1);
     const top = versioned[0];
-    return { tag: top.name, url: `https://github.com/feldorn/free-games-claimer/releases/tag/${encodeURIComponent(top.name)}` };
+    // Link directly to the CHANGELOG section so users see *what's in*
+    // the new release, not just the bare tag commit. GitHub's anchor
+    // formula for "## What's new in 2.8.1" is `#whats-new-in-281`
+    // (lowercase, apostrophes/dots stripped, spaces to hyphens).
+    const ver = String(top.name).replace(/^v/, '').replace(/\./g, '');
+    return { tag: top.name, url: `https://github.com/feldorn/free-games-claimer/blob/main/CHANGELOG.md#whats-new-in-${ver}` };
   } catch (e) {
     console.warn(`[${datetime()}] update check: /tags fetch failed — ${e.message}`);
     return null;
@@ -2380,7 +2385,7 @@ async function readAllClaims() {
           user: 'manual',
           gameId: key,
           title,
-          url: null,
+          url: (typeof entry.url === 'string' && entry.url) ? entry.url : null,
           at,
           status: 'claimed-manual',
         });
@@ -3051,9 +3056,11 @@ const PANEL_HTML = `<!DOCTYPE html>
   .stats-activity .act .svc { color: #4ecca3; font-weight: 500; }
   .stats-activity .act .title { color: #e0e0e0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .stats-activity .act .title a,
-  .stats-activity .act .title a:hover,
   .stats-activity .act .title a:visited,
   .stats-activity .act .title a:active { color: inherit; text-decoration: none; }
+  .stats-activity .act .title a:hover { color: #4ecca3; text-decoration: underline; }
+  .stats-activity .act .title.no-link { color: #a0b4d4; font-style: italic; }
+  .stats-activity .act .title.no-link::after { content: ' · no link'; color: #5e7193; font-size: 11px; font-style: normal; }
   .stats-empty { color: #8aa0c2; font-style: italic; padding: 20px; text-align: center; background: #16233c; border-radius: 6px; }
 
   .sched-row { display: flex; gap: 24px; margin-bottom: 22px; align-items: baseline; }
@@ -3957,7 +3964,7 @@ function discRenderItem(it) {
       '<button class="disc-action-btn" title="Undo — restore this item to its automatic state" data-disc-act="unmark" data-key="' + keyAttr + '">↺</button>';
   } else {
     actions =
-      '<button class="disc-action-btn ok" title="Mark as manually-claimed by you" data-disc-act="mark" data-key="' + keyAttr + '" data-status="manually-claimed" data-title="' + titleAttr + '">✓</button>' +
+      '<button class="disc-action-btn ok" title="Mark as manually-claimed by you" data-disc-act="mark" data-key="' + keyAttr + '" data-status="manually-claimed" data-title="' + titleAttr + '" data-url="' + escapeHtml(it.url || '') + '">✓</button>' +
       '<button class="disc-action-btn danger" title="Ignore — dismiss this row" data-disc-act="mark" data-key="' + keyAttr + '" data-status="ignored" data-title="' + titleAttr + '">🚫</button>';
   }
   const dimmed = it.userState ? ' user-marked' : '';
@@ -3986,7 +3993,7 @@ document.addEventListener('click', (ev) => {
   if (btn) {
     const act = btn.dataset.discAct;
     if (act === 'mark') {
-      discMarkItem(btn.dataset.key, btn.dataset.status, btn.dataset.title || '');
+      discMarkItem(btn.dataset.key, btn.dataset.status, btn.dataset.title || '', btn.dataset.url || '');
     } else if (act === 'unmark') {
       discUnmarkItem(btn.dataset.key);
     }
@@ -4300,7 +4307,7 @@ async function shareDiagnosticsEntry(fingerprint) {
 // POST /api/discoveries/mark — flips the item's userState. Optimistic
 // update: mutate the local cache so the next render reflects the
 // change without a refetch, then call the server. On error, revert.
-async function discMarkItem(key, status, title) {
+async function discMarkItem(key, status, title, url) {
   if (!discCache || !key) return;
   // Apply local mutation to every cache entry sharing this key.
   const prev = discApplyUserStateLocally(key, status, title);
@@ -4309,7 +4316,7 @@ async function discMarkItem(key, status, title) {
     const r = await fetch(BASE_PATH + '/api/discoveries/mark', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ key, status, title: title || '' }),
+      body: JSON.stringify({ key, status, title: title || '', url: url || '' }),
     });
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const j = await r.json();
@@ -5373,10 +5380,14 @@ async function renderStatsTab() {
         const titleHtml = a.url
           ? '<a href="' + encodeURI(a.url) + '" onclick="return openSiteUrl(this)" target="_blank">' + escapeHtml(a.title) + '</a>'
           : escapeHtml(a.title);
+        const titleClass = a.url ? 'title' : 'title no-link';
+        const titleAttr = a.url
+          ? ''
+          : ' title="No store link recorded for this claim. Manual claims marked before v2.8.2 don\\'t have URLs; future ones will."';
         return '<div class="act">' +
           '<span class="at" title="' + escapeHtml(a.at) + '">' + escapeHtml(formatTimestamp(a.at, 'relative')) + '</span>' +
           '<span class="svc">' + escapeHtml(a.serviceName) + '</span>' +
-          '<span class="title">' + titleHtml + '</span>' +
+          '<span class="' + titleClass + '"' + titleAttr + '>' + titleHtml + '</span>' +
           '</div>';
       }).join('');
     }
@@ -7726,7 +7737,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && req.url === '/api/discoveries/mark') {
       try {
         const body = await parseBody(req);
-        const { key, status, title } = body || {};
+        const { key, status, title, url } = body || {};
         if (typeof key !== 'string' || !key) {
           sendJson(res, { success: false, error: 'missing key' }, 400);
           return;
@@ -7741,6 +7752,7 @@ const server = http.createServer(async (req, res) => {
         discoveriesStateDb.data.items[key] = {
           status,
           title: typeof title === 'string' ? title : undefined,
+          url: typeof url === 'string' && url ? url : undefined,
           at: new Date().toISOString(),
         };
         await discoveriesStateDb.write();

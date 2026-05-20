@@ -4,6 +4,16 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.2
+
+**Two follow-ups to 2.8.1.**
+
+**Manual claims now persist the store URL.** When you mark an item on the Discoveries tab, the source URL (Steam page, itch.io page, GamerPower entry, …) is saved alongside the title and timestamp. Recent Claims rows then become clickable links the same way auto-claimed entries always have been. Existing manual claims from before this version don't have a URL stored — they now render in italic with a "· no link" hint so you can tell at a glance which rows are clickable vs not. Mark them again from the Discoveries tab to attach a URL.
+
+**Update-available link goes to the CHANGELOG.** The "Update available" pill previously pointed at GitHub's bare `/releases/tag/vX.Y.Z` page, which just shows the tagged commit with no notes. It now jumps directly to the matching `## What's new in X.Y.Z` section in `CHANGELOG.md` so you can read what's in the new version before pulling.
+
+---
+
 ## What's new in 2.8.1
 
 **Discoveries manual-claims now count toward Stats.** When you mark a game as manually-claimed on the Discoveries tab (✓ button), it now shows up on the Stats tab — KPIs (this week / this month / all-time), Recent Claims, the 30-day chart, and the per-service table all include manual claims alongside auto-claims. New "discovery-only" storefronts (IndieGala, itch.io, STOVE, Mobile, Console, VR, Other) get their own row in the per-service table when you've manually-claimed at least one item from that source — empty rows aren't added for users who don't use Discoveries.
