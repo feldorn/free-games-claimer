@@ -558,29 +558,45 @@ function _recordDiagnosticError(script, errorClass, message, stackLines) {
 }
 // Patterns: each entry produces (errorClass, message) pairs from a buffer.
 // stdout/stderr chunks pass through these — first match wins per line.
+// Lines are pre-stripped of ANSI codes and leading log markers
+// ("  ✗ ", "  ! ", " ✓ ") so the patterns can stay anchored.
 const DIAG_PATTERNS = [
-  // Standard JS exception classes (the most actionable signal)
-  /^(?<cls>ReferenceError|TypeError|SyntaxError|RangeError|EvalError|URIError):\s+(?<msg>.+)$/,
+  // Standard JS exception classes (the most actionable signal). Includes
+  // bare `Error:` to catch the very common `throw new Error('...')`
+  // shape that wasn't covered before — codebase has ~10 of those.
+  /^(?<cls>ReferenceError|TypeError|SyntaxError|RangeError|EvalError|URIError|Error):\s+(?<msg>.+)$/,
   // Node's child_process error wrapper (apprise CLI failures, etc.)
   /^error:\s+(?<msg>Command failed:.*)$/,
-  // Playwright / patchright protocol errors — common across the codebase
+  // Playwright / patchright protocol errors — common across the codebase.
   /^(?<cls>browserType\.\w+|page\.\w+|locator\.\w+):\s+(?<msg>.+)$/,
+  // log.fail(`Exception: ${error.message || error}`) pattern used in
+  // every claim script's top-level catch. After marker stripping, the
+  // line reads "Exception: <message>" where <message> often contains
+  // an inner Playwright/Node error — capture the whole thing as msg.
+  /^Exception:\s+(?<msg>.+)$/,
 ];
+const ANSI_RE = /\x1b\[[0-9;]*m/g;
+const LEADING_MARKERS_RE = /^\s*[✓✗!✅❌]\s+/;
 function _scanForErrors(buffer) {
   if (DIAGNOSTICS_BANNER_DISABLED_ENV) return;
   // Update the current section tracker from ─── headers.
   const sectionRe = /^─{3,}\s+(.+?)\s+(?:\(v[^)]+\))?\s*─{3,}\s*$/;
-  const lines = String(buffer || '').split('\n');
+  const rawLines = String(buffer || '').split('\n');
+  // Pre-clean each line: strip ANSI escape codes (chalk wraps the
+  // status markers even when stdout isn't a TTY in some configs), then
+  // strip the leading log marker so pattern anchors hold.
+  const lines = rawLines.map(l => l.replace(ANSI_RE, ''));
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const sec = sectionRe.exec(line);
+    const raw = lines[i];
+    const sec = sectionRe.exec(raw);
     if (sec) { _currentSection = sec[1].trim(); continue; }
+    const line = raw.replace(LEADING_MARKERS_RE, '');
     for (const pat of DIAG_PATTERNS) {
       const m = pat.exec(line);
       if (!m) continue;
       const cls = (m.groups && m.groups.cls) || 'Error';
       const msg = (m.groups && m.groups.msg) || '';
-      // Capture the next 10 lines as stack context.
+      // Capture the next 10 lines (cleaned) as stack context.
       const stack = lines.slice(i, i + 11).map(l => l.replace(/^\s*\d+:\d+:\d+\s+/, ''));
       _recordDiagnosticError(_currentSection || 'unknown', cls, msg, stack);
       break;
