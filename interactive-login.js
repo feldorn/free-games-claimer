@@ -475,6 +475,119 @@ let runStartedAt = null;
 // [CAPTCHA-END] or run process exit. Drives the captcha banner + the
 // ?focus=captcha deep link target. { service, label, since } when active.
 let captchaPending = null;
+
+// --- Diagnostics / error reporting (phase 1 — detection + DB) -------------
+// Stream-side detection of crashes and uncaught exceptions from spawned
+// claim scripts. The stdout/stderr handlers below scan each chunk for
+// known error signatures; on a match we fingerprint the error and store
+// it in data/diagnostics-state.json with dedup + occurrence counts.
+//
+// Phase 2 surfaces these via a header banner with three actions: Share
+// (opens prefilled GitHub issues/new URL), Don't Share (per-fingerprint
+// dismissal — same error never re-prompts), Never Share (global opt-out,
+// flips diagnostics.enabled=false). Phase 3 ships a Diagnostics tab with
+// full history. Env DIAGNOSTICS_BANNER=0 disables before any UI shows.
+//
+// Default = enabled. Per user discussion 2026-05-19: first error IS the
+// prompt; the banner's Never Share button is the discoverable opt-out
+// path. Existing-deploys see banner on next pull when they hit any
+// error — first banner explains the feature.
+const DIAGNOSTICS_BANNER_DISABLED_ENV = (() => {
+  const v = String(process.env.DIAGNOSTICS_BANNER || '').toLowerCase().trim();
+  return v === '0' || v === 'false' || v === 'no' || v === 'off';
+})();
+let diagnosticsDb = null;
+// Tracks the most-recent ─── Section ─── header seen so subsequent
+// error matches are attributed to the right script.
+let _currentSection = null;
+// Token-bucket guard: when an error pattern matches multiple lines of
+// one stack (uncommon but possible), avoid recording duplicate hits
+// for the same fingerprint within a 5-second window.
+const _recentFingerprintHits = new Map();
+async function loadDiagnosticsDb() {
+  if (diagnosticsDb) return;
+  try { diagnosticsDb = await jsonDb('diagnostics-state.json', { enabled: true, version: 1, errors: {} }); }
+  catch { diagnosticsDb = { data: { enabled: true, version: 1, errors: {} }, write: async () => {} }; }
+  if (!diagnosticsDb.data) diagnosticsDb.data = { enabled: true, version: 1, errors: {} };
+  if (typeof diagnosticsDb.data.enabled !== 'boolean') diagnosticsDb.data.enabled = true;
+  if (!diagnosticsDb.data.errors) diagnosticsDb.data.errors = {};
+}
+function _fingerprintError(script, errorClass, message) {
+  // Strip volatile bits — line:col refs, hex/numeric IDs, ISO timestamps
+  // — so the SAME bug across runs and minor edits hashes to one entry
+  // instead of fragmenting per-occurrence.
+  const norm = String(message || '')
+    .replace(/:\d+:\d+\b/g, '')                              // file:LINE:COL → file:
+    .replace(/\b0x[0-9a-f]+\b/gi, '0x…')                     // hex addresses
+    .replace(/\b\d{4}-\d{2}-\d{2}T[\d:.Z+-]+\b/g, '<ts>')    // ISO timestamps
+    .replace(/\b\d{10,}\b/g, '<num>')                        // long numbers (epoch ms, IDs)
+    .trim();
+  return crypto.createHash('sha1').update(`${script}::${errorClass}::${norm}`).digest('hex').slice(0, 16);
+}
+function _recordDiagnosticError(script, errorClass, message, stackLines) {
+  if (!diagnosticsDb || !diagnosticsDb.data) return; // not loaded yet
+  if (!diagnosticsDb.data.enabled) return;            // user opted out via Never Share
+  const fp = _fingerprintError(script, errorClass, message);
+  const now = Date.now();
+  const recent = _recentFingerprintHits.get(fp);
+  if (recent && (now - recent) < 5000) return;       // within 5s of last hit → skip
+  _recentFingerprintHits.set(fp, now);
+  const nowIso = new Date(now).toISOString();
+  const errors = diagnosticsDb.data.errors;
+  if (!errors[fp]) {
+    errors[fp] = {
+      script: script || 'unknown',
+      errorClass: errorClass || 'Error',
+      message: String(message || '').slice(0, 500),
+      stack: Array.isArray(stackLines) ? stackLines.slice(0, 12).join('\n').slice(0, 2000) : '',
+      firstSeen: nowIso,
+      lastSeen: nowIso,
+      count: 1,
+      decided: null,
+    };
+  } else {
+    errors[fp].lastSeen = nowIso;
+    errors[fp].count = (errors[fp].count || 0) + 1;
+    // Refresh stack if we have a richer one — captures the latest occurrence.
+    if (Array.isArray(stackLines) && stackLines.length) {
+      errors[fp].stack = stackLines.slice(0, 12).join('\n').slice(0, 2000);
+    }
+  }
+  // Best-effort persist; failures here don't block the run.
+  diagnosticsDb.write().catch(e => console.warn(`[${datetime()}] diagnostics-state write failed: ${e.message}`));
+}
+// Patterns: each entry produces (errorClass, message) pairs from a buffer.
+// stdout/stderr chunks pass through these — first match wins per line.
+const DIAG_PATTERNS = [
+  // Standard JS exception classes (the most actionable signal)
+  /^(?<cls>ReferenceError|TypeError|SyntaxError|RangeError|EvalError|URIError):\s+(?<msg>.+)$/,
+  // Node's child_process error wrapper (apprise CLI failures, etc.)
+  /^error:\s+(?<msg>Command failed:.*)$/,
+  // Playwright / patchright protocol errors — common across the codebase
+  /^(?<cls>browserType\.\w+|page\.\w+|locator\.\w+):\s+(?<msg>.+)$/,
+];
+function _scanForErrors(buffer) {
+  if (DIAGNOSTICS_BANNER_DISABLED_ENV) return;
+  // Update the current section tracker from ─── headers.
+  const sectionRe = /^─{3,}\s+(.+?)\s+(?:\(v[^)]+\))?\s*─{3,}\s*$/;
+  const lines = String(buffer || '').split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const sec = sectionRe.exec(line);
+    if (sec) { _currentSection = sec[1].trim(); continue; }
+    for (const pat of DIAG_PATTERNS) {
+      const m = pat.exec(line);
+      if (!m) continue;
+      const cls = (m.groups && m.groups.cls) || 'Error';
+      const msg = (m.groups && m.groups.msg) || '';
+      // Capture the next 10 lines as stack context.
+      const stack = lines.slice(i, i + 11).map(l => l.replace(/^\s*\d+:\d+:\d+\s+/, ''));
+      _recordDiagnosticError(_currentSection || 'unknown', cls, msg, stack);
+      break;
+    }
+  }
+}
+// --- end diagnostics phase 1 ----------------------------------------------
 let startupAutoCheck = null; // { current, total, siteName } while auto-check is walking sites
 
 // gog.js runs first so its Prime-Gaming-code reconcile (library + redeem-endpoint
@@ -1230,6 +1343,11 @@ function runAllScripts({ source = 'panel', sites = null, extraEnv = null } = {})
     child.stdout.on('data', data => {
       process.stdout.write(data); // keep `docker logs` useful
       const text = data.toString();
+      // Diagnostics detection — pattern-match for crashes/uncaught
+      // exceptions and dedupe-record them to data/diagnostics-state.json.
+      // Banner UI in phase 2 reads from there. No-op when env disables
+      // the feature or the DB hasn't loaded yet.
+      _scanForErrors(text);
       // Captcha markers from src/util.js#awaitUserCaptchaSolve. Parsed here
       // (not in the per-line forEach below) so multi-line buffers still match.
       const startMatch = text.match(/\[CAPTCHA-START\] service=(\S+)\s+label=(.*?)(?:\r?\n|$)/);
@@ -1279,7 +1397,12 @@ function runAllScripts({ source = 'panel', sites = null, extraEnv = null } = {})
 
     child.stderr.on('data', data => {
       process.stderr.write(data);
-      const lines = data.toString().split('\n').filter(l => l.length);
+      const text = data.toString();
+      // Diagnostics: uncaught exceptions land on stderr (node:internal/
+      // modules/run_main:NN preamble), so scan stderr too. Same dedup +
+      // fingerprint path as stdout — pattern set isn't stream-specific.
+      _scanForErrors(text);
+      const lines = text.split('\n').filter(l => l.length);
       lines.forEach(l => {
         runLog.push({ type: 'stderr', text: l, time: datetime() });
         if (runLog.length > 500) runLog.shift();
@@ -2089,11 +2212,48 @@ async function getState() {
     lastRun,
     captchaPending,
     runOnStartup: cfg.run_on_startup || 0,
+    appVersion: APP_VERSION || '',
     // Update-check pill — present only when a newer release is published
     // (issue #39). Null if checks disabled or no newer version found.
     updateAvailable: (updateCheckCache && updateCheckCache.behind)
       ? { current: updateCheckCache.current, latest: updateCheckCache.latest, releaseUrl: updateCheckCache.releaseUrl }
       : null,
+    // Diagnostics banner state (phase 2). Surfaces the most-recent
+    // undecided error fingerprint so the panel can show the
+    // Share / Don't Share / Never Share banner. enabled=false means
+    // the user clicked Never Share — banner stays hidden regardless
+    // of any pending fingerprints (Settings tab can re-enable).
+    diagnostics: (() => {
+      if (!diagnosticsDb || !diagnosticsDb.data) return { enabled: true, pending: null };
+      const enabled = diagnosticsDb.data.enabled !== false;
+      if (!enabled) return { enabled: false, pending: null };
+      const errs = diagnosticsDb.data.errors || {};
+      // Find the most recently seen undecided fingerprint.
+      let latest = null;
+      for (const [fp, e] of Object.entries(errs)) {
+        if (e.decided) continue;
+        if (!latest || (e.lastSeen || '') > (latest.lastSeen || '')) {
+          latest = { fingerprint: fp, ...e };
+        }
+      }
+      if (!latest) return { enabled: true, pending: null };
+      // Trim payload — client doesn't need full stack here, just enough
+      // for the banner label. Full stack goes in the prefilled GitHub
+      // URL constructed client-side.
+      return {
+        enabled: true,
+        pending: {
+          fingerprint: latest.fingerprint,
+          script: latest.script,
+          errorClass: latest.errorClass,
+          message: latest.message,
+          stack: latest.stack,
+          count: latest.count,
+          firstSeen: latest.firstSeen,
+          lastSeen: latest.lastSeen,
+        },
+      };
+    })(),
     externalLinkMode: (() => {
       // Read via describeConfig() so the Settings tab can hot-update
       // this without needing a panel restart (same pattern as the other
@@ -2402,6 +2562,22 @@ const PANEL_HTML = `<!DOCTYPE html>
   .headless-banner { background: #2a2418; border: 1px solid #e8a857; color: #e8a857; padding: 10px 14px; border-radius: 6px; margin: 6px 0; display: flex; align-items: center; gap: 12px; }
   .headless-banner .hb-icon { font-size: 18px; flex-shrink: 0; }
   .headless-banner .hb-text { flex: 1; font-weight: 500; line-height: 1.35; }
+  /* Diagnostics / error-report banner — surfaces an undecided crash
+     with three actions (Share, Don't Share, Never Share). Visually
+     distinct from the captcha-banner (red, urgent) and headless-banner
+     (amber, persistent). Diagnostics is informational — slate-blue. */
+  .diag-banner { background: #1a2540; border: 1px solid #4a6fa0; color: #c8d4eb; padding: 10px 14px; border-radius: 6px; margin: 6px 0; display: flex; align-items: center; gap: 12px; }
+  .diag-banner .db-icon { font-size: 18px; flex-shrink: 0; opacity: 0.85; }
+  .diag-banner .db-text { flex: 1; font-size: 13px; line-height: 1.4; }
+  .diag-banner .db-text small { color: #8aa0c2; font-size: 11px; display: block; margin-top: 2px; font-family: 'Menlo', 'Consolas', monospace; }
+  .diag-banner .db-actions { display: flex; gap: 6px; flex-shrink: 0; }
+  .diag-banner button { padding: 5px 11px; font-size: 11px; font-weight: 600; border-radius: 4px; cursor: pointer; border: 1px solid; white-space: nowrap; font-family: inherit; }
+  .diag-banner button.db-share   { background: #1f3d2f; color: #6fd49a; border-color: #2c5a45; }
+  .diag-banner button.db-share:hover   { background: #2c5a45; color: #aeefcd; }
+  .diag-banner button.db-skip    { background: #1c2c4a; color: #a0b4d4; border-color: #2c4068; }
+  .diag-banner button.db-skip:hover    { background: #2c4068; color: #e0e0e0; }
+  .diag-banner button.db-never   { background: #2a2540; color: #b3a0e0; border-color: #463a6a; }
+  .diag-banner button.db-never:hover   { background: #463a6a; color: #d8c5ff; }
   .headless-banner .hb-text small { display: block; font-weight: 400; opacity: 0.85; margin-top: 2px; }
   .header-top { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
   .header h1 { font-size: 18px; color: #e94560; white-space: nowrap; }
@@ -3047,6 +3223,7 @@ const PANEL_HTML = `<!DOCTYPE html>
   </div>
   <div class="captcha-banner" id="captchaBanner" style="display:none" onclick="focusCaptcha()" title="Open the browser to solve the pending captcha"></div>
   <div class="headless-banner" id="headlessBanner" style="display:none"></div>
+  <div class="diag-banner" id="diagBanner" style="display:none"></div>
   <div class="steps sessions-only" id="steps"></div>
   <div class="status-strip sessions-only" id="statusStrip" onclick="toggleSessionsCollapsed()" title="Click to collapse session details"></div>
   <div class="site-cards sessions-only" id="siteCards"></div>
@@ -3690,8 +3867,98 @@ document.addEventListener('click', (ev) => {
   const tab = ev.target.closest('[data-disc-tab]');
   if (tab) {
     discSwitchSubtab(tab.dataset.discTab);
+    return;
+  }
+  // Diagnostics banner buttons (phase 2). data-diag-act ∈ {share, dismiss, never}
+  // — three sticky-decision actions. Share also opens the prefilled GitHub
+  // issues/new URL in a new tab; refreshState afterwards so the banner
+  // either advances to the next undecided fingerprint or hides.
+  const diagBtn = ev.target.closest('[data-diag-act]');
+  if (diagBtn) {
+    const act = diagBtn.dataset.diagAct;
+    const fp = diagBtn.dataset.diagFp;
+    if (act === 'share') diagBannerShare(fp);
+    else if (act === 'dismiss') diagBannerDecide(fp, 'dismissed');
+    else if (act === 'never') diagBannerNever();
+    return;
   }
 });
+
+// --- Diagnostics banner client handlers (phase 2) ----------------------
+// Each decision is sticky: after Share or Don't Share, the fingerprint
+// never re-prompts. After Never Share, the banner is suppressed entirely
+// until the Settings toggle re-enables.
+async function diagBannerDecide(fingerprint, decision) {
+  if (!fingerprint) return;
+  try {
+    const r = await fetch(BASE_PATH + '/api/diagnostics/decide', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fingerprint, decision }),
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    // Hide banner immediately; next refreshState will surface the next
+    // undecided one (if any) or keep it hidden.
+    const b = document.getElementById('diagBanner');
+    if (b) b.style.display = 'none';
+    refreshState();
+  } catch (e) {
+    showToast('Failed to update error decision: ' + e.message, 'error');
+  }
+}
+async function diagBannerShare(fingerprint) {
+  if (!state || !state.diagnostics || !state.diagnostics.pending) return;
+  const p = state.diagnostics.pending;
+  if (p.fingerprint !== fingerprint) return; // mid-flight render mismatch
+  // Build pre-filled GitHub issue URL. The user reviews + edits the body
+  // on GitHub before submitting — we never auto-submit. Title is short
+  // and machine-readable; body has the full context plus a note asking
+  // them to redact anything they don't want public.
+  const title = '[diagnostics] ' + (p.errorClass || 'Error') + ' in ' + (p.script || 'unknown') + ': ' + (p.message || '').slice(0, 80);
+  // Literal backticks would close the outer PANEL_HTML template literal at Node eval — use fromCharCode.
+  const TICK = String.fromCharCode(96);
+  const FENCE = TICK + TICK + TICK;
+  const bodyLines = [
+    '<!-- Auto-generated from the panel\\'s error-report banner. Review and edit anything you don\\'t want public before submitting. -->',
+    '',
+    '**Script:** ' + TICK + (p.script || 'unknown') + TICK,
+    '**Error:** ' + TICK + (p.errorClass || 'Error') + TICK,
+    '**Message:** ' + TICK + (p.message || '') + TICK,
+    '**Count:** ' + (p.count || 1) + ' (first seen ' + (p.firstSeen || '?') + ', last seen ' + (p.lastSeen || '?') + ')',
+    '**App version:** ' + (state.appVersion || 'unknown'),
+    '',
+    '<details><summary>Stack / context</summary>',
+    '',
+    FENCE,
+    (p.stack || '').slice(0, 4000),
+    FENCE,
+    '',
+    '</details>',
+    '',
+    '<!-- Add any additional context here, e.g. what you were doing when this happened, recent changes, etc. -->',
+  ];
+  const body = bodyLines.join('\\n');
+  const url = 'https://github.com/feldorn/free-games-claimer/issues/new?title=' +
+    encodeURIComponent(title) + '&body=' + encodeURIComponent(body);
+  window.open(url, '_blank', 'noopener');
+  // Mark as shared regardless of whether the user actually submits on
+  // GitHub — the per-fingerprint decision means we trust them not to
+  // be re-nagged. They can re-share from the Diagnostics tab if they
+  // realised they hadn't actually submitted.
+  await diagBannerDecide(fingerprint, 'shared');
+}
+async function diagBannerNever() {
+  if (!confirm('Turn off the error-report banner? You can re-enable from Settings → Notifications.')) return;
+  try {
+    const r = await fetch(BASE_PATH + '/api/diagnostics/disable', { method: 'POST' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const b = document.getElementById('diagBanner');
+    if (b) b.style.display = 'none';
+    refreshState();
+  } catch (e) {
+    showToast('Failed to disable banner: ' + e.message, 'error');
+  }
+}
 
 // POST /api/discoveries/mark — flips the item's userState. Optimistic
 // update: mutate the local cache so the next render reflects the
@@ -5583,6 +5850,34 @@ function render() {
     }
   }
 
+  // Diagnostics banner — appears when there's an undecided error
+  // fingerprint AND the user hasn't clicked Never Share. Three actions:
+  // Share opens the prefilled GitHub URL + marks decided; Don't Share
+  // marks dismissed (per-fingerprint, never re-prompts for this one);
+  // Never Share flips the global enabled=false (silences ALL future
+  // banners, Settings tab can re-enable).
+  const diagBanner = document.getElementById('diagBanner');
+  if (diagBanner) {
+    const diag = state.diagnostics;
+    if (diag && diag.enabled && diag.pending) {
+      const p = diag.pending;
+      diagBanner.style.display = 'flex';
+      const summary = (p.errorClass || 'Error') + ': ' + (p.message || '').slice(0, 120);
+      diagBanner.innerHTML =
+        '<span class="db-icon">⚙</span>' +
+        '<span class="db-text">Encountered an error in <b>' + escapeHtml(p.script || 'unknown') + '</b>. Share to help improve the project?' +
+          '<small>' + escapeHtml(summary) + '</small>' +
+        '</span>' +
+        '<div class="db-actions">' +
+          '<button class="db-share" data-diag-fp="' + escapeHtml(p.fingerprint) + '" data-diag-act="share" title="Open a pre-filled GitHub issue in a new tab — you can review and edit the body before submitting">Share</button>' +
+          '<button class="db-skip"  data-diag-fp="' + escapeHtml(p.fingerprint) + '" data-diag-act="dismiss" title="Dismiss just this error — same error won\\'t re-prompt">Don\\'t Share</button>' +
+          '<button class="db-never" data-diag-act="never" title="Turn off the error-report banner entirely. Settings → Notifications can re-enable.">Never Share</button>' +
+        '</div>';
+    } else {
+      diagBanner.style.display = 'none';
+    }
+  }
+
   // Split sites into active (main grid) and inactive (drawer below).
   // Sort each group alphabetically by name so the visual order is stable
   // and predictable across all card groupings on the Sessions tab.
@@ -7120,6 +7415,72 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    // --- Diagnostics endpoints (phase 2) ----------------------------------
+    // POST /api/diagnostics/decide — body { fingerprint, decision }
+    // decision ∈ {'shared','dismissed'}. Per-fingerprint sticky choice;
+    // future occurrences of the same fingerprint won't re-prompt the
+    // banner. Idempotent — re-deciding with the same value is a no-op.
+    if (req.method === 'POST' && req.url === '/api/diagnostics/decide') {
+      try {
+        await loadDiagnosticsDb();
+        const body = await parseBody(req);
+        const { fingerprint, decision } = body || {};
+        if (typeof fingerprint !== 'string' || !fingerprint) {
+          sendJson(res, { success: false, error: 'missing fingerprint' }, 400);
+          return;
+        }
+        if (decision !== 'shared' && decision !== 'dismissed') {
+          sendJson(res, { success: false, error: 'decision must be "shared" or "dismissed"' }, 400);
+          return;
+        }
+        const entry = diagnosticsDb.data.errors[fingerprint];
+        if (!entry) {
+          sendJson(res, { success: false, error: 'unknown fingerprint' }, 404);
+          return;
+        }
+        entry.decided = decision;
+        entry.decidedAt = new Date().toISOString();
+        await diagnosticsDb.write();
+        sendJson(res, { success: true });
+      } catch (e) {
+        sendJson(res, { success: false, error: e.message }, 500);
+      }
+      return;
+    }
+
+    // POST /api/diagnostics/disable — flip the global enabled flag off
+    // (the Never Share button). Banner never appears again until the
+    // user re-enables via Settings → Notifications. Existing fingerprint
+    // history is preserved — re-enable shows them in the Diagnostics tab.
+    if (req.method === 'POST' && req.url === '/api/diagnostics/disable') {
+      try {
+        await loadDiagnosticsDb();
+        diagnosticsDb.data.enabled = false;
+        diagnosticsDb.data.disabledAt = new Date().toISOString();
+        await diagnosticsDb.write();
+        sendJson(res, { success: true });
+      } catch (e) {
+        sendJson(res, { success: false, error: e.message }, 500);
+      }
+      return;
+    }
+
+    // POST /api/diagnostics/enable — re-enable the banner. Used by the
+    // Settings toggle in phase 3 to recover from an accidental Never Share.
+    if (req.method === 'POST' && req.url === '/api/diagnostics/enable') {
+      try {
+        await loadDiagnosticsDb();
+        diagnosticsDb.data.enabled = true;
+        delete diagnosticsDb.data.disabledAt;
+        await diagnosticsDb.write();
+        sendJson(res, { success: true });
+      } catch (e) {
+        sendJson(res, { success: false, error: e.message }, 500);
+      }
+      return;
+    }
+    // ---------------------------------------------------------------------
+
     if (req.method === 'POST' && req.url === '/api/stop-run') {
       if (runProcess) {
         // Signal the *process group* so SIGTERM reaches bash, the node
@@ -7317,6 +7678,14 @@ server.listen(PANEL_PORT, async () => {
   // sleep-from-now fallback in computeMainWakeMs handles that case.
   try { schedulerStateDb = await jsonDb('scheduler-state.json', {}); }
   catch (e) { console.error(`[${datetime()}] failed to load scheduler-state.json: ${e.message}`); }
+
+  // Diagnostics / error-reporting DB load. Holds enabled flag (false
+  // after user clicks Never Share) + per-fingerprint error records
+  // with counts and decided state. Panel boot needs this loaded
+  // BEFORE the first script can spawn, so scan handlers don't drop
+  // hits during the auto-session-check warm-up.
+  try { await loadDiagnosticsDb(); }
+  catch (e) { console.error(`[${datetime()}] failed to load diagnostics-state.json: ${e.message}`); }
 
   console.log(`[${datetime()}] Free Games Claimer ${APP_VERSION ? 'v' + APP_VERSION + ' ' : ''}— panel + scheduler`);
 
