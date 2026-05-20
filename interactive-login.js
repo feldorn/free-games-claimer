@@ -2578,6 +2578,40 @@ const PANEL_HTML = `<!DOCTYPE html>
   .diag-banner button.db-skip:hover    { background: #2c4068; color: #e0e0e0; }
   .diag-banner button.db-never   { background: #2a2540; color: #b3a0e0; border-color: #463a6a; }
   .diag-banner button.db-never:hover   { background: #463a6a; color: #d8c5ff; }
+  body[data-tab="diagnostics"] .tab-panel[data-panel="diagnostics"] { display: block; overflow-y: auto; padding: 24px 32px; }
+  .diag-head { display: flex; align-items: center; gap: 16px; margin-bottom: 14px; flex-wrap: wrap; }
+  .diag-head h3 { font-size: 18px; color: #e0e0e0; }
+  .diag-head .diag-sub { font-size: 12px; color: #a0b4d4; max-width: 720px; line-height: 1.5; }
+  .diag-status { padding: 4px 12px; border-radius: 12px; font-size: 11px; font-weight: 600; letter-spacing: 0.02em; }
+  .diag-status.on  { background: #1f3d2f; color: #6fd49a; border: 1px solid #2c5a45; }
+  .diag-status.off { background: #3a2540; color: #d8a0e0; border: 1px solid #5a3a6a; }
+  .diag-table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 13px; }
+  .diag-table th { text-align: left; padding: 8px 10px; background: #1a2540; color: #a0b4d4; font-weight: 600; font-size: 11px; letter-spacing: 0.05em; text-transform: uppercase; border-bottom: 1px solid #2c4068; }
+  .diag-table td { padding: 10px; border-bottom: 1px solid #1c2c4a; vertical-align: top; color: #c8d4eb; }
+  .diag-table tr:hover td { background: #161f33; }
+  .diag-table .col-script { font-family: 'Menlo', 'Consolas', monospace; font-size: 12px; color: #a0d4eb; white-space: nowrap; }
+  .diag-table .col-class  { font-family: 'Menlo', 'Consolas', monospace; font-size: 12px; color: #eba0a0; white-space: nowrap; }
+  .diag-table .col-msg    { font-family: 'Menlo', 'Consolas', monospace; font-size: 12px; max-width: 480px; word-break: break-word; }
+  .diag-table .col-count  { text-align: center; color: #ddd; }
+  .diag-table .col-when   { font-size: 11px; color: #8aa0c2; white-space: nowrap; }
+  .diag-table .col-dec    { font-size: 11px; font-weight: 600; }
+  .diag-table .col-dec.shared    { color: #6fd49a; }
+  .diag-table .col-dec.dismissed { color: #a0b4d4; }
+  .diag-table .col-dec.pending   { color: #ffb84d; }
+  .diag-table .col-actions { white-space: nowrap; }
+  .diag-table .col-actions button { padding: 4px 8px; font-size: 11px; margin-right: 4px; border-radius: 3px; cursor: pointer; border: 1px solid; font-family: inherit; }
+  .diag-table .col-actions button.dt-share  { background: #1f3d2f; color: #6fd49a; border-color: #2c5a45; }
+  .diag-table .col-actions button.dt-skip   { background: #1c2c4a; color: #a0b4d4; border-color: #2c4068; }
+  .diag-table .col-actions button.dt-del    { background: #3a1c1c; color: #eba0a0; border-color: #5a2c2c; }
+  .diag-empty { padding: 32px; text-align: center; color: #8aa0c2; font-size: 13px; border: 1px dashed #2c4068; border-radius: 6px; margin-top: 16px; }
+  .diag-stack { white-space: pre-wrap; font-family: 'Menlo', 'Consolas', monospace; font-size: 11px; color: #8aa0c2; background: #0e1626; padding: 8px 10px; border-radius: 4px; margin-top: 6px; max-height: 200px; overflow-y: auto; display: none; }
+  .diag-stack.shown { display: block; }
+  .diag-table .toggle-stack { background: none; border: none; color: #6fa0d4; cursor: pointer; font-size: 11px; padding: 0; margin-top: 4px; text-decoration: underline; }
+  .diag-toolbar { margin-top: 12px; display: flex; gap: 8px; }
+  .diag-toolbar button { padding: 6px 14px; font-size: 12px; border-radius: 4px; cursor: pointer; border: 1px solid; font-family: inherit; }
+  .diag-toolbar button.dt-toggle.on  { background: #1f3d2f; color: #6fd49a; border-color: #2c5a45; }
+  .diag-toolbar button.dt-toggle.off { background: #3a2540; color: #d8a0e0; border-color: #5a3a6a; }
+  .diag-toolbar button.dt-clear { background: #3a1c1c; color: #eba0a0; border-color: #5a2c2c; }
   .headless-banner .hb-text small { display: block; font-weight: 400; opacity: 0.85; margin-top: 2px; }
   .header-top { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
   .header h1 { font-size: 18px; color: #e94560; white-space: nowrap; }
@@ -3210,6 +3244,7 @@ const PANEL_HTML = `<!DOCTYPE html>
       <button class="tab" data-tab="schedule" onclick="switchTab('schedule')">Schedule</button>
       <button class="tab" data-tab="discoveries" onclick="switchTab('discoveries')" title="Free-game listings from gamerpower.com and r/FreeGameFindings — click any link to claim manually">Discoveries</button>
       <button class="tab" data-tab="logs" onclick="switchTab('logs')">Logs</button>
+      <button class="tab" data-tab="diagnostics" onclick="switchTab('diagnostics')" title="Errors detected during runs. Decide per-error whether to share with the project.">Diagnostics</button>
       <button class="tab" data-tab="settings" onclick="switchTab('settings')">Settings</button>
       <button class="tab" data-tab="environment" onclick="switchTab('environment')">Environment</button>
     </nav>
@@ -3329,6 +3364,20 @@ const PANEL_HTML = `<!DOCTYPE html>
       <button class="btn btn-check-all" id="btnRevealCreds" onclick="toggleRevealEnv()">Reveal credentials</button>
     </div>
     <div class="env-view-body" id="envView">Loading…</div>
+  </div>
+  <div class="tab-panel" data-panel="diagnostics">
+    <div class="diag-head">
+      <div>
+        <h3>Diagnostics</h3>
+        <div class="diag-sub">Errors detected during runs (ReferenceError, TypeError, apprise/Playwright failures, …). Each error is fingerprinted so duplicates are counted, not re-stored. Nothing leaves your host without an explicit <b>Share</b> click — Share opens a pre-filled GitHub issue you can review and edit before submitting.</div>
+      </div>
+      <span class="diag-status" id="diagStatus">…</span>
+    </div>
+    <div class="diag-toolbar">
+      <button id="btnDiagToggle" class="dt-toggle" onclick="toggleDiagnosticsEnabled()">…</button>
+      <button class="dt-clear" onclick="clearDiagnosticsHistory()" title="Permanently remove all logged errors. Useful after a release that fixed known issues.">Clear history</button>
+    </div>
+    <div id="diagBody">Loading…</div>
   </div>
 </div>
 <div class="project-links">
@@ -3521,13 +3570,14 @@ async function switchTab(tab) {
   if (tab === 'settings') renderSettingsTab();
   if (tab === 'environment') renderEnvironmentTab();
   if (tab === 'discoveries') renderDiscoveriesTab();
+  if (tab === 'diagnostics') renderDiagnosticsTab();
 }
 
 // Restore the active tab from localStorage on initial load. Valid-tab
 // whitelist guards against stale or junk values written by an older
 // build. Falls through to body's default data-tab="sessions" when no
 // stored value or unrecognized.
-const VALID_TABS = ['sessions', 'stats', 'schedule', 'discoveries', 'logs', 'settings', 'environment'];
+const VALID_TABS = ['sessions', 'stats', 'schedule', 'discoveries', 'logs', 'diagnostics', 'settings', 'environment'];
 function _initTabFromStorage() {
   let tab;
   try { tab = localStorage.getItem('fgc:lastTab'); } catch { return; }
@@ -3882,6 +3932,34 @@ document.addEventListener('click', (ev) => {
     else if (act === 'never') diagBannerNever();
     return;
   }
+  // Diagnostics tab row actions (phase 3). data-diag-row-act ∈
+  // {share, dismiss, delete, stack}. Re-decide is allowed — a previously
+  // Dismissed error can be Shared later (and vice versa). Stack toggles
+  // the collapsed stack trace under the message cell.
+  const diagRowBtn = ev.target.closest('[data-diag-row-act]');
+  if (diagRowBtn) {
+    const act = diagRowBtn.dataset.diagRowAct;
+    const fp = diagRowBtn.dataset.diagFp;
+    if (act === 'share') shareDiagnosticsEntry(fp);
+    else if (act === 'dismiss') (async () => {
+      try {
+        const r = await fetch(BASE_PATH + '/api/diagnostics/decide', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fingerprint: fp, decision: 'dismissed' }),
+        });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        renderDiagnosticsTab();
+        refreshState();
+      } catch (e) { showToast('Failed: ' + e.message, 'error'); }
+    })();
+    else if (act === 'delete') deleteDiagnosticsEntry(fp);
+    else if (act === 'stack') {
+      const el = document.getElementById('diagStack_' + fp);
+      if (el) el.classList.toggle('shown');
+      diagRowBtn.textContent = el && el.classList.contains('shown') ? 'hide stack' : 'show stack';
+    }
+    return;
+  }
 });
 
 // --- Diagnostics banner client handlers (phase 2) ----------------------
@@ -3958,6 +4036,167 @@ async function diagBannerNever() {
   } catch (e) {
     showToast('Failed to disable banner: ' + e.message, 'error');
   }
+}
+
+// --- Diagnostics tab (phase 3) -----------------------------------------
+// Full error history with per-row re-decide + delete actions. Reads
+// /api/diagnostics/list and renders a table. The toolbar toggle drives
+// the same enable/disable endpoints the Never Share banner button uses.
+let diagListCache = null;
+async function renderDiagnosticsTab() {
+  const body = document.getElementById('diagBody');
+  const status = document.getElementById('diagStatus');
+  const toggleBtn = document.getElementById('btnDiagToggle');
+  if (!body) return;
+  try {
+    const r = await fetch(BASE_PATH + '/api/diagnostics/list');
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const j = await r.json();
+    diagListCache = j;
+    if (status) {
+      status.textContent = j.enabled ? 'Banner enabled' : 'Banner disabled';
+      status.className = 'diag-status ' + (j.enabled ? 'on' : 'off');
+    }
+    if (toggleBtn) {
+      toggleBtn.textContent = j.enabled ? 'Disable banner' : 'Enable banner';
+      toggleBtn.className = 'dt-toggle ' + (j.enabled ? 'on' : 'off');
+    }
+    const rows = j.errors || [];
+    if (!rows.length) {
+      body.innerHTML = '<div class="diag-empty">No errors logged yet. When a run hits an error (uncaught exception, apprise failure, Playwright protocol error), it shows up here and the three-button banner appears at the top of the panel.</div>';
+      return;
+    }
+    let html = '<table class="diag-table">' +
+      '<thead><tr>' +
+        '<th>Last seen</th>' +
+        '<th>Script</th>' +
+        '<th>Class</th>' +
+        '<th>Message</th>' +
+        '<th class="col-count">Count</th>' +
+        '<th>Decision</th>' +
+        '<th>Actions</th>' +
+      '</tr></thead><tbody>';
+    for (const e of rows) {
+      const decClass = e.decided === 'shared' ? 'shared' : e.decided === 'dismissed' ? 'dismissed' : 'pending';
+      const decLabel = e.decided === 'shared' ? 'Shared' : e.decided === 'dismissed' ? 'Dismissed' : 'Pending';
+      const shareBtn = e.decided !== 'shared'
+        ? '<button class="dt-share" data-diag-row-act="share" data-diag-fp="' + escapeHtml(e.fingerprint) + '">Share</button>'
+        : '';
+      const skipBtn = e.decided !== 'dismissed'
+        ? '<button class="dt-skip"  data-diag-row-act="dismiss" data-diag-fp="' + escapeHtml(e.fingerprint) + '">Dismiss</button>'
+        : '';
+      const delBtn = '<button class="dt-del" data-diag-row-act="delete" data-diag-fp="' + escapeHtml(e.fingerprint) + '" title="Permanently remove this error">Delete</button>';
+      const hasStack = e.stack && e.stack.length > 0;
+      html += '<tr>' +
+        '<td class="col-when">' + escapeHtml(_diagFormatWhen(e.lastSeen)) + '<br><span style="opacity:0.6">first ' + escapeHtml(_diagFormatWhen(e.firstSeen)) + '</span></td>' +
+        '<td class="col-script">' + escapeHtml(e.script) + '</td>' +
+        '<td class="col-class">' + escapeHtml(e.errorClass) + '</td>' +
+        '<td class="col-msg">' + escapeHtml(e.message) +
+          (hasStack ? '<br><button class="toggle-stack" data-diag-row-act="stack" data-diag-fp="' + escapeHtml(e.fingerprint) + '">show stack</button><pre class="diag-stack" id="diagStack_' + escapeHtml(e.fingerprint) + '">' + escapeHtml(e.stack) + '</pre>' : '') +
+        '</td>' +
+        '<td class="col-count">' + (e.count || 1) + '</td>' +
+        '<td class="col-dec ' + decClass + '">' + decLabel + '</td>' +
+        '<td class="col-actions">' + shareBtn + skipBtn + delBtn + '</td>' +
+        '</tr>';
+    }
+    html += '</tbody></table>';
+    body.innerHTML = html;
+  } catch (e) {
+    body.innerHTML = '<div class="diag-empty">Failed to load diagnostics: ' + escapeHtml(e.message) + '</div>';
+  }
+}
+
+function _diagFormatWhen(iso) {
+  if (!iso) return '?';
+  try {
+    const d = new Date(iso);
+    const now = new Date();
+    const sameDay = d.toDateString() === now.toDateString();
+    if (sameDay) return d.toLocaleTimeString();
+    return d.toLocaleString();
+  } catch { return iso; }
+}
+
+async function toggleDiagnosticsEnabled() {
+  if (!diagListCache) return;
+  const path = diagListCache.enabled ? '/api/diagnostics/disable' : '/api/diagnostics/enable';
+  try {
+    const r = await fetch(BASE_PATH + path, { method: 'POST' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    renderDiagnosticsTab();
+    refreshState();
+  } catch (e) {
+    showToast('Failed to toggle banner: ' + e.message, 'error');
+  }
+}
+
+async function clearDiagnosticsHistory() {
+  if (!confirm('Permanently delete all logged errors? The enable/disable setting is kept.')) return;
+  try {
+    const r = await fetch(BASE_PATH + '/api/diagnostics/clear', { method: 'POST' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    renderDiagnosticsTab();
+    refreshState();
+  } catch (e) {
+    showToast('Failed to clear: ' + e.message, 'error');
+  }
+}
+
+async function deleteDiagnosticsEntry(fingerprint) {
+  if (!fingerprint) return;
+  if (!confirm('Delete this error from the log?')) return;
+  try {
+    const r = await fetch(BASE_PATH + '/api/diagnostics/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fingerprint }),
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    renderDiagnosticsTab();
+    refreshState();
+  } catch (e) {
+    showToast('Failed to delete: ' + e.message, 'error');
+  }
+}
+
+async function shareDiagnosticsEntry(fingerprint) {
+  if (!diagListCache) return;
+  const p = (diagListCache.errors || []).find(r => r.fingerprint === fingerprint);
+  if (!p) return;
+  // Re-use the same prefilled body shape the banner uses.
+  const title = '[diagnostics] ' + (p.errorClass || 'Error') + ' in ' + (p.script || 'unknown') + ': ' + (p.message || '').slice(0, 80);
+  const TICK = String.fromCharCode(96);
+  const FENCE = TICK + TICK + TICK;
+  const bodyLines = [
+    '<!-- Auto-generated from the Diagnostics tab. Review and edit anything you don\\'t want public before submitting. -->',
+    '',
+    '**Script:** ' + TICK + (p.script || 'unknown') + TICK,
+    '**Error:** ' + TICK + (p.errorClass || 'Error') + TICK,
+    '**Message:** ' + TICK + (p.message || '') + TICK,
+    '**Count:** ' + (p.count || 1) + ' (first seen ' + (p.firstSeen || '?') + ', last seen ' + (p.lastSeen || '?') + ')',
+    '**App version:** ' + (state && state.appVersion ? state.appVersion : 'unknown'),
+    '',
+    '<details><summary>Stack / context</summary>',
+    '',
+    FENCE,
+    (p.stack || '').slice(0, 4000),
+    FENCE,
+    '',
+    '</details>',
+    '',
+    '<!-- Add any additional context here, e.g. what you were doing when this happened, recent changes, etc. -->',
+  ];
+  const body = bodyLines.join('\\n');
+  const url = 'https://github.com/feldorn/free-games-claimer/issues/new?title=' +
+    encodeURIComponent(title) + '&body=' + encodeURIComponent(body);
+  window.open(url, '_blank', 'noopener');
+  await fetch(BASE_PATH + '/api/diagnostics/decide', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fingerprint, decision: 'shared' }),
+  }).catch(() => {});
+  renderDiagnosticsTab();
+  refreshState();
 }
 
 // POST /api/discoveries/mark — flips the item's userState. Optimistic
@@ -4173,6 +4412,36 @@ function settingGroup(title, body) {
     '<div class="setting-group-head">' + escapeHtml(title) + '</div>' +
     body +
   '</div>';
+}
+
+// Inline "Error reporting" group inside Notifications. The toggle isn't a
+// cfg field — it lives in diagnostics-state.json and is driven by the same
+// /enable + /disable endpoints the Never Share banner button uses. Keeps
+// settings.save() out of the picture (no draft state, immediate apply).
+function renderDiagnosticsSettingsGroup() {
+  const enabled = state && state.diagnostics && state.diagnostics.enabled !== false;
+  return '<div class="setting-group">' +
+    '<div class="setting-group-head">Error reporting</div>' +
+    '<div class="setting-row" style="padding: 8px 12px; align-items: flex-start;">' +
+      '<label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">' +
+        '<input type="checkbox" ' + (enabled ? 'checked' : '') + ' onchange="toggleDiagnosticsFromSettings(this.checked)">' +
+        '<span style="font-weight: 600;">Show the error-report banner</span>' +
+      '</label>' +
+      '<div class="setting-hint" style="margin-top: 6px; color: #8aa0c2; font-size: 12px; line-height: 1.5;">When a run hits an error, a banner appears with three buttons: <b>Share</b> (opens a pre-filled GitHub issue you review before submitting), <b>Don\\'t Share</b> (dismiss just this error), <b>Never Share</b> (turn off the banner — this checkbox flips back on). Nothing is ever sent without an explicit Share click. See the <a href="#" onclick="switchTab(\\'diagnostics\\'); return false;">Diagnostics tab</a> for the full error history.</div>' +
+    '</div>' +
+  '</div>';
+}
+
+async function toggleDiagnosticsFromSettings(enabled) {
+  const path = enabled ? '/api/diagnostics/enable' : '/api/diagnostics/disable';
+  try {
+    const r = await fetch(BASE_PATH + path, { method: 'POST' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    refreshState();
+    showToast(enabled ? 'Error-report banner enabled' : 'Error-report banner disabled', 'success');
+  } catch (e) {
+    showToast('Failed: ' + e.message, 'error');
+  }
 }
 
 // Build the HTML for one settings row. Help + env-var name live inside a
@@ -4529,7 +4798,8 @@ function paintSettings() {
               { value: 'new-tab',  label: 'New tab — always open in a new tab (may fail if your dashboard iframe sandboxes them)' },
             ],
             hint: 'Controls how Discoveries-tab links, GitHub footer links, and site shortcuts open. Default Auto detects iframe embedding and adapts. Override if Auto doesn\\'t fit your setup — e.g. you\\'re running the panel inside an iframe but want same-tab navigation anyway.' })
-      );
+      ) +
+      renderDiagnosticsSettingsGroup();
   } else if (currentSettingsSection === 'services') {
     // Three-way split by row category (set by getServiceRows in
     // src/sites.js): 'game' (claims free games — writes a claim DB),
@@ -7472,6 +7742,67 @@ const server = http.createServer(async (req, res) => {
         await loadDiagnosticsDb();
         diagnosticsDb.data.enabled = true;
         delete diagnosticsDb.data.disabledAt;
+        await diagnosticsDb.write();
+        sendJson(res, { success: true });
+      } catch (e) {
+        sendJson(res, { success: false, error: e.message }, 500);
+      }
+      return;
+    }
+
+    // GET /api/diagnostics/list — full error history for the Diagnostics tab.
+    if (req.method === 'GET' && req.url === '/api/diagnostics/list') {
+      try {
+        await loadDiagnosticsDb();
+        const errors = diagnosticsDb.data.errors || {};
+        const rows = Object.entries(errors).map(([fingerprint, e]) => ({
+          fingerprint,
+          script: e.script || 'unknown',
+          errorClass: e.errorClass || 'Error',
+          message: e.message || '',
+          stack: e.stack || '',
+          count: e.count || 1,
+          firstSeen: e.firstSeen || '',
+          lastSeen: e.lastSeen || '',
+          decided: e.decided || null,
+          decidedAt: e.decidedAt || null,
+        })).sort((a, b) => String(b.lastSeen).localeCompare(String(a.lastSeen)));
+        sendJson(res, {
+          enabled: diagnosticsDb.data.enabled !== false,
+          disabledAt: diagnosticsDb.data.disabledAt || null,
+          errors: rows,
+        });
+      } catch (e) {
+        sendJson(res, { success: false, error: e.message }, 500);
+      }
+      return;
+    }
+
+    // POST /api/diagnostics/delete — body { fingerprint }. Drops a single
+    // error from history. Used by the row 🗑 button in the Diagnostics tab.
+    if (req.method === 'POST' && req.url === '/api/diagnostics/delete') {
+      try {
+        await loadDiagnosticsDb();
+        const { fingerprint } = await parseBody(req) || {};
+        if (typeof fingerprint !== 'string' || !fingerprint) {
+          sendJson(res, { success: false, error: 'missing fingerprint' }, 400);
+          return;
+        }
+        delete diagnosticsDb.data.errors[fingerprint];
+        await diagnosticsDb.write();
+        sendJson(res, { success: true });
+      } catch (e) {
+        sendJson(res, { success: false, error: e.message }, 500);
+      }
+      return;
+    }
+
+    // POST /api/diagnostics/clear — wipes all error history (keeps the
+    // enabled flag). Used after a release fixed known issues.
+    if (req.method === 'POST' && req.url === '/api/diagnostics/clear') {
+      try {
+        await loadDiagnosticsDb();
+        diagnosticsDb.data.errors = {};
         await diagnosticsDb.write();
         sendJson(res, { success: true });
       } catch (e) {
