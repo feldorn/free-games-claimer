@@ -2598,6 +2598,8 @@ const PANEL_HTML = `<!DOCTYPE html>
   .diag-table .col-dec.shared    { color: #6fd49a; }
   .diag-table .col-dec.dismissed { color: #a0b4d4; }
   .diag-table .col-dec.pending   { color: #ffb84d; }
+  .diag-table .col-dec.resolved  { color: #79c4ff; }
+  .diag-table .col-actions button.dt-resolve { background: #1c3a4a; color: #79c4ff; border-color: #2c5a6e; }
   .diag-table .col-actions { white-space: nowrap; }
   .diag-table .col-actions button { padding: 4px 8px; font-size: 11px; margin-right: 4px; border-radius: 3px; cursor: pointer; border: 1px solid; font-family: inherit; }
   .diag-table .col-actions button.dt-share  { background: #1f3d2f; color: #6fd49a; border-color: #2c5a45; }
@@ -3941,17 +3943,8 @@ document.addEventListener('click', (ev) => {
     const act = diagRowBtn.dataset.diagRowAct;
     const fp = diagRowBtn.dataset.diagFp;
     if (act === 'share') shareDiagnosticsEntry(fp);
-    else if (act === 'dismiss') (async () => {
-      try {
-        const r = await fetch(BASE_PATH + '/api/diagnostics/decide', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ fingerprint: fp, decision: 'dismissed' }),
-        });
-        if (!r.ok) throw new Error('HTTP ' + r.status);
-        renderDiagnosticsTab();
-        refreshState();
-      } catch (e) { showToast('Failed: ' + e.message, 'error'); }
-    })();
+    else if (act === 'dismiss') _setDiagDecision(fp, 'dismissed');
+    else if (act === 'resolve') _setDiagDecision(fp, 'resolved');
     else if (act === 'delete') deleteDiagnosticsEntry(fp);
     else if (act === 'stack') {
       const el = document.getElementById('diagStack_' + fp);
@@ -4077,15 +4070,28 @@ async function renderDiagnosticsTab() {
         '<th>Actions</th>' +
       '</tr></thead><tbody>';
     for (const e of rows) {
-      const decClass = e.decided === 'shared' ? 'shared' : e.decided === 'dismissed' ? 'dismissed' : 'pending';
-      const decLabel = e.decided === 'shared' ? 'Shared' : e.decided === 'dismissed' ? 'Dismissed' : 'Pending';
-      const shareBtn = e.decided !== 'shared'
-        ? '<button class="dt-share" data-diag-row-act="share" data-diag-fp="' + escapeHtml(e.fingerprint) + '">Share</button>'
-        : '';
-      const skipBtn = e.decided !== 'dismissed'
-        ? '<button class="dt-skip"  data-diag-row-act="dismiss" data-diag-fp="' + escapeHtml(e.fingerprint) + '">Dismiss</button>'
-        : '';
-      const delBtn = '<button class="dt-del" data-diag-row-act="delete" data-diag-fp="' + escapeHtml(e.fingerprint) + '" title="Permanently remove this error">Delete</button>';
+      const d = e.decided;
+      const decClass = d === 'shared' ? 'shared' : d === 'dismissed' ? 'dismissed' : d === 'resolved' ? 'resolved' : 'pending';
+      const decLabel = d === 'shared' ? 'Shared' : d === 'dismissed' ? 'Dismissed' : d === 'resolved' ? 'Resolved' : 'Pending';
+      // Action buttons per state:
+      //   pending   → Share, Dismiss, Delete
+      //   shared    → Mark resolved, Delete  (track whether the GitHub issue got fixed)
+      //   dismissed → Share, Delete         (allow changing mind without 'resolve' since nothing was filed)
+      //   resolved  → Delete                (terminal)
+      const fp = escapeHtml(e.fingerprint);
+      let actBtns = '';
+      if (d === null || d === undefined) {
+        actBtns =
+          '<button class="dt-share" data-diag-row-act="share"   data-diag-fp="' + fp + '">Share</button>' +
+          '<button class="dt-skip"  data-diag-row-act="dismiss" data-diag-fp="' + fp + '">Dismiss</button>';
+      } else if (d === 'shared') {
+        actBtns =
+          '<button class="dt-resolve" data-diag-row-act="resolve" data-diag-fp="' + fp + '" title="Mark this issue as fixed — useful after a release that resolved it.">Mark resolved</button>';
+      } else if (d === 'dismissed') {
+        actBtns =
+          '<button class="dt-share" data-diag-row-act="share" data-diag-fp="' + fp + '">Share</button>';
+      }
+      const delBtn = '<button class="dt-del" data-diag-row-act="delete" data-diag-fp="' + fp + '" title="Permanently remove this error">Delete</button>';
       const hasStack = e.stack && e.stack.length > 0;
       html += '<tr>' +
         '<td class="col-when">' + escapeHtml(_diagFormatWhen(e.lastSeen)) + '<br><span style="opacity:0.6">first ' + escapeHtml(_diagFormatWhen(e.firstSeen)) + '</span></td>' +
@@ -4096,7 +4102,7 @@ async function renderDiagnosticsTab() {
         '</td>' +
         '<td class="col-count">' + (e.count || 1) + '</td>' +
         '<td class="col-dec ' + decClass + '">' + decLabel + '</td>' +
-        '<td class="col-actions">' + shareBtn + skipBtn + delBtn + '</td>' +
+        '<td class="col-actions">' + actBtns + delBtn + '</td>' +
         '</tr>';
     }
     html += '</tbody></table>';
@@ -4139,6 +4145,22 @@ async function clearDiagnosticsHistory() {
     refreshState();
   } catch (e) {
     showToast('Failed to clear: ' + e.message, 'error');
+  }
+}
+
+async function _setDiagDecision(fingerprint, decision) {
+  if (!fingerprint) return;
+  try {
+    const r = await fetch(BASE_PATH + '/api/diagnostics/decide', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fingerprint, decision }),
+    });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    renderDiagnosticsTab();
+    refreshState();
+  } catch (e) {
+    showToast('Failed: ' + e.message, 'error');
   }
 }
 
@@ -7699,8 +7721,8 @@ const server = http.createServer(async (req, res) => {
           sendJson(res, { success: false, error: 'missing fingerprint' }, 400);
           return;
         }
-        if (decision !== 'shared' && decision !== 'dismissed') {
-          sendJson(res, { success: false, error: 'decision must be "shared" or "dismissed"' }, 400);
+        if (decision !== 'shared' && decision !== 'dismissed' && decision !== 'resolved') {
+          sendJson(res, { success: false, error: 'decision must be "shared", "dismissed", or "resolved"' }, 400);
           return;
         }
         const entry = diagnosticsDb.data.errors[fingerprint];
