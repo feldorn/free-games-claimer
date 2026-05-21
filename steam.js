@@ -1,6 +1,6 @@
 import { chromium } from 'patchright';
 import { writeFileSync } from 'node:fs';
-import { resolve, jsonDb, datetime, filenamify, prompt, notify, html_game_list, handleSIGINT, log, dataDir, cleanProfileLocks } from './src/util.js';
+import { resolve, jsonDb, datetime, filenamify, prompt, notify, html_game_list, handleSIGINT, log, dataDir, cleanProfileLocks, matchKey, stripGpTail, getDiscoveryUserMarkedKeys } from './src/util.js';
 import { cfg } from './src/config.js';
 import { siteVersion } from './src/sites.js';
 import { fetchGamerPowerGiveaways, filterFor as filterGpFor, resolveGamerPowerHref } from './src/gamerpower.js';
@@ -334,7 +334,13 @@ try {
     if (gpSteam.length) {
       log.status('GamerPower (Steam)', `${gpSteam.length} entry/entries`);
       const knownIds = new Set(freeGames.map(g => g.appId));
+      const userMarked = getDiscoveryUserMarkedKeys();
       for (const entry of gpSteam) {
+        const dedupKey = `steam::${matchKey(stripGpTail(entry.title))}`;
+        if (userMarked.has(dedupKey)) {
+          log.info(`GamerPower → ${entry.title}: already triaged via Discoveries tab, skipping`);
+          continue;
+        }
         const resolved = await resolveGamerPowerHref(context, entry.open_giveaway_url, 'steam');
         const appMatch = resolved && /store\.steampowered\.com\/app\/(\d+)/.exec(resolved);
         if (appMatch) {
@@ -368,21 +374,28 @@ try {
     if (fgfSteam.length) {
       log.status('FreeGameFindings (Steam)', `${fgfSteam.length} post(s)`);
       const knownIds = new Set(freeGames.map(g => g.appId));
+      const userMarked = getDiscoveryUserMarkedKeys();
       for (const post of fgfSteam) {
+        const cleanedTitle = fgfClean(post.title);
+        const dedupKey = `steam::${matchKey(cleanedTitle)}`;
+        if (userMarked.has(dedupKey)) {
+          log.info(`FGF → ${cleanedTitle}: already triaged via Discoveries tab, skipping`);
+          continue;
+        }
         const appMatch = /store\.steampowered\.com\/app\/(\d+)/.exec(post.url);
         if (!appMatch) {
-          log.warn(`FGF → ${fgfClean(post.title)}: not a /app/ URL — listing as manual action (${post.url})`);
-          notify_games.push({ title: `${fgfClean(post.title)} (via FGF)`, url: post.url, status: 'action', details: `<a href="${post.url}">Claim manually</a>` });
+          log.warn(`FGF → ${cleanedTitle}: not a /app/ URL — listing as manual action (${post.url})`);
+          notify_games.push({ title: `${cleanedTitle} (via FGF)`, url: post.url, status: 'action', details: `<a href="${post.url}">Claim manually</a>` });
           continue;
         }
         const appId = appMatch[1];
         if (knownIds.has(appId)) {
-          log.info(`FGF → ${fgfClean(post.title)}: appId ${appId} already in queue`);
+          log.info(`FGF → ${cleanedTitle}: appId ${appId} already in queue`);
           continue;
         }
         knownIds.add(appId);
-        log.info(`FGF → ${fgfClean(post.title)}: appId ${appId}`);
-        freeGames.push({ appId, name: fgfClean(post.title), url: post.url, endDate: null });
+        log.info(`FGF → ${cleanedTitle}: appId ${appId}`);
+        freeGames.push({ appId, name: cleanedTitle, url: post.url, endDate: null });
       }
     }
   } catch (e) {
@@ -414,7 +427,13 @@ try {
     if (details.alreadyOwned) {
       log.owned(title);
       db.data[user][appId].status ||= 'existed';
-      notify_games.push({ title, url: game.url, status: 'existed' });
+      // Suppress the "(existed)" notification line when the user has
+      // already triaged this title via the Discoveries tab — they know
+      // they own it; one notification per first-discovery is plenty.
+      const dedupKey = `steam::${matchKey(title)}`;
+      if (!getDiscoveryUserMarkedKeys().has(dedupKey)) {
+        notify_games.push({ title, url: game.url, status: 'existed' });
+      }
       continue;
     }
 

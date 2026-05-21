@@ -348,6 +348,45 @@ export const normalizeTitle = s => (s || '')
   .replace(/\s+/g, ' ')
   .trim();
 
+// Strip "<Edition>" / "<Edition> Edition" / "Edition" suffixes that vary
+// across stores but don't affect cross-store matching. Kept here so claim
+// scripts and the panel agree on the dedup-key shape.
+const stripEditionSuffix = s => s
+  .replace(/\s+(standard|deluxe|premium|complete|definitive|ultimate|gold|special|anniversary|enhanced|collectors|collector|directors cut|game of the year|goty)(\s+edition)?$/, '')
+  .replace(/\s+edition$/, '')
+  .trim();
+export const matchKey = s => stripEditionSuffix(normalizeTitle(s || ''));
+// Strip GamerPower's "(Storefront) Giveaway" tail so a title like
+// "Tower of Time (Steam) Key Giveaway" keys against "tower of time" —
+// same shape the per-store DBs see and that the panel uses for dedup.
+export const stripGpTail = t => String(t || '').replace(/\s*\([^)]+\)\s*Giveaway\b.*$/i, '').trim();
+
+// Load discoveries-state.json once per process and return a Set of dedup
+// keys (`${collectorKey}::${matchKey(cleanTitle)}`) for items the user has
+// marked as manually-claimed or ignored. Used by claim scripts to suppress
+// notify_games pushes for items the user already triaged via the panel's
+// Discoveries tab — without this, "you already own X" / "Claim X manually"
+// notifications would fire for every previously-marked entry.
+let _userMarkedKeysCache = null;
+export function getDiscoveryUserMarkedKeys() {
+  if (_userMarkedKeysCache) return _userMarkedKeysCache;
+  _userMarkedKeysCache = new Set();
+  try {
+    const file = dataDir('discoveries-state.json');
+    if (!existsSync(file)) return _userMarkedKeysCache;
+    const data = JSON.parse(readFileSync(file, 'utf8'));
+    const items = data && data.items;
+    if (!items || typeof items !== 'object') return _userMarkedKeysCache;
+    for (const k of Object.keys(items)) {
+      const v = items[k];
+      if (v && (v.status === 'manually-claimed' || v.status === 'ignored')) {
+        _userMarkedKeysCache.add(k);
+      }
+    }
+  } catch { /* missing or unparsable — empty set */ }
+  return _userMarkedKeysCache;
+}
+
 export const html_game_list = games => games.map(g => {
   if (g.status === 'action') return `<b><a href="${g.url}">${escapeHtml(g.title)}</a></b>`;
   let line = `- <a href="${g.url}">${escapeHtml(g.title)}</a> (${g.status})`;

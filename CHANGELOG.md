@@ -4,6 +4,16 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.4
+
+**Discoveries-tab marks now suppress duplicate notifications.** If you marked a game as manually-claimed or ignored on the Discoveries tab, subsequent Steam/GOG claim runs no longer emit notification lines for that same game when they re-discover it via GamerPower or FreeGameFindings. Previously a "Tower of Time (via GamerPower)" or "(existed)" line would still show up in the notify body, despite the user having already triaged it in the panel — exactly the spam case the Discoveries-tab marks were supposed to silence.
+
+What the fix does: each claim script loads `data/discoveries-state.json` at start, builds the same `${collector}::${matchKey(title)}` dedup-key set the panel uses, and skips notify-list pushes for any GamerPower / FGF / already-owned entry whose key matches. The shared helper lives in `src/util.js` (`matchKey`, `stripGpTail`, `getDiscoveryUserMarkedKeys`) so all scripts agree on the key shape.
+
+Edge case worth knowing: the GamerPower title-suffix stripper only matches the "(Storefront) Giveaway" shape — GP listings like "Tower of Time (Steam) **Key** Giveaway" keep the "Steam Key Giveaway" in their dedup key. A bare Steam product title ("Tower of Time") won't match that fuller key, so the very next Steam run might still emit one (existed) line. After that, the steam-games.json DB records `status='existed'` and future runs skip silently.
+
+---
+
 ## What's new in 2.8.3
 
 **Today's MS Rewards slot no longer gets skipped when the container restarts mid-window ([#47](https://github.com/feldorn/free-games-claimer/issues/47)).** Two related bugs in the decoupled MS scheduler conspired to drop today's run:

@@ -1,5 +1,5 @@
 import { chromium } from 'patchright';
-import { resolve, jsonDb, datetime, filenamify, prompt, confirm, notify, html_game_list, handleSIGINT, log, normalizeTitle, awaitUserCaptchaSolve, cleanProfileLocks } from './src/util.js';
+import { resolve, jsonDb, datetime, filenamify, prompt, confirm, notify, html_game_list, handleSIGINT, log, normalizeTitle, awaitUserCaptchaSolve, cleanProfileLocks, matchKey, stripGpTail, getDiscoveryUserMarkedKeys } from './src/util.js';
 import { cfg } from './src/config.js';
 import { siteVersion } from './src/sites.js';
 import { fetchGamerPowerGiveaways, filterFor as filterGpFor, resolveGamerPowerHref } from './src/gamerpower.js';
@@ -286,11 +286,16 @@ try {
       }
     }
     db.data[user][title].status ||= status;
-    const notify_entry = { title, url, status };
-    if (status !== 'claimed' && status !== 'existed') {
-      notify_entry.details = `Game: ${url}`;
+    // Suppress the "(existed)" notification line when the user has
+    // already triaged this title via the Discoveries tab.
+    const isUserTriagedExisted = status === 'existed' && getDiscoveryUserMarkedKeys().has(`gog::${matchKey(title)}`);
+    if (!isUserTriagedExisted) {
+      const notify_entry = { title, url, status };
+      if (status !== 'claimed' && status !== 'existed') {
+        notify_entry.details = `Game: ${url}`;
+      }
+      notify_games.push(notify_entry);
     }
-    notify_games.push(notify_entry);
 
     if (status == 'claimed' && !cfg.gog_newsletter) {
       log.info('Unsubscribing from newsletters');
@@ -407,7 +412,13 @@ try {
     const gpGog = filterGpFor(gpAll, 'gog');
     if (gpGog.length) {
       log.status('GamerPower (GOG)', `${gpGog.length} entry/entries`);
+      const userMarked = getDiscoveryUserMarkedKeys();
       for (const entry of gpGog) {
+        const dedupKey = `gog::${matchKey(stripGpTail(entry.title))}`;
+        if (userMarked.has(dedupKey)) {
+          log.info(`GamerPower → ${entry.title}: already triaged via Discoveries tab, skipping`);
+          continue;
+        }
         const resolved = await resolveGamerPowerHref(context, entry.open_giveaway_url, 'gog');
         const url = resolved || entry.open_giveaway_url;
         log.info(`GamerPower → ${entry.title}: ${url}`);
@@ -426,9 +437,16 @@ try {
     const fgfGog = filterFgfFor(fgfAll, 'gog');
     if (fgfGog.length) {
       log.status('FreeGameFindings (GOG)', `${fgfGog.length} post(s)`);
+      const userMarked = getDiscoveryUserMarkedKeys();
       for (const post of fgfGog) {
-        log.info(`FGF → ${fgfClean(post.title)}: ${post.url}`);
-        notify_games.push({ title: `${fgfClean(post.title)} (via FGF)`, url: post.url, status: 'action', details: `<a href="${post.url}">Claim manually</a>` });
+        const cleanedTitle = fgfClean(post.title);
+        const dedupKey = `gog::${matchKey(cleanedTitle)}`;
+        if (userMarked.has(dedupKey)) {
+          log.info(`FGF → ${cleanedTitle}: already triaged via Discoveries tab, skipping`);
+          continue;
+        }
+        log.info(`FGF → ${cleanedTitle}: ${post.url}`);
+        notify_games.push({ title: `${cleanedTitle} (via FGF)`, url: post.url, status: 'action', details: `<a href="${post.url}">Claim manually</a>` });
       }
     }
   } catch (e) {
