@@ -206,9 +206,20 @@ try {
     }
 
     // Skip detail-page fetch for ended/expired drops — the schedule is
-    // historical, not actionable. Same for drops we already have a
-    // scheduledAt for (avoid redundant re-fetches every cycle).
-    const needsDetail = status !== 'ended' && (!drop.scheduledAt || isNew || isRestocked && !drop.notifications.restocked.length);
+    // historical, not actionable. Otherwise refetch only when:
+    //   - we don't have a scheduledAt yet, OR
+    //   - the drop is newly discovered / restocked, OR
+    //   - this is a `coming-soon` drop whose stored scheduledAt is in
+    //     the past — Lenovo bumped the drop date (postponement) and
+    //     we'd otherwise display the stale "due now" countdown
+    //     forever (issue: user reported a "coming soon" drop showing
+    //     `Apr 15 · due now` when Lenovo had rescheduled to ~3 days out).
+    //     For `active` drops a past scheduledAt is correct (drop went
+    //     live and is still available) so we don't refetch those.
+    const scheduledAtStale = drop.scheduledAt
+      && status === 'coming-soon'
+      && new Date(drop.scheduledAt).getTime() < Date.now();
+    const needsDetail = status !== 'ended' && (!drop.scheduledAt || isNew || (isRestocked && !drop.notifications.restocked.length) || scheduledAtStale);
     if (needsDetail) {
       try {
         const detailPage = await context.newPage();

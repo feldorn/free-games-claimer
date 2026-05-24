@@ -4,6 +4,14 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.6
+
+**Lenovo Gaming "Coming Soon" drops no longer stick at a stale `due now` date when Lenovo reschedules.** A drop's date is pulled once from the embedded tickcounter.com countdown widget on the drop's detail page and then cached in `data/lenovo-gaming-watch.json`. Previously the scraper only re-fetched the detail page when the drop was newly discovered or when its `scheduledAt` was missing entirely — so if Lenovo bumped the date (e.g. April 15 postponed to May 27), our copy stayed on April 15 forever and the panel kept showing `Apr 15 · due now`.
+
+Fix: refetch the detail page whenever a `coming-soon` drop's stored `scheduledAt` is in the past. The condition is narrow (active drops with past `scheduledAt` are correctly "live now" — no refetch needed) and only fires per-drop, so it doesn't add meaningful overhead to a watch cycle. Verified end-to-end against a real Lenovo drop ("Heavy Rain pt. 2") that had drifted 5 weeks stale: one watch run picked up the new date.
+
+---
+
 ## What's new in 2.8.5
 
 **GOG notifications no longer list the same game twice ([#48](https://github.com/feldorn/free-games-claimer/issues/48)).** xeropresence reported the "Warhammer Skulls 2026 Digital Goodie Bag" appearing twice in a single GOG notification — once as `(existed)` from the library scan, again as `(via FGF)` from the FreeGameFindings supplementary discovery loop. Steam dedups by appId and Epic uses an "already in queue" check, but GOG's GP/FGF blocks didn't dedup against the library-scan entries already in `notify_games`.
