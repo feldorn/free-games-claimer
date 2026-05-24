@@ -4,6 +4,14 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.5
+
+**GOG notifications no longer list the same game twice ([#48](https://github.com/feldorn/free-games-claimer/issues/48)).** xeropresence reported the "Warhammer Skulls 2026 Digital Goodie Bag" appearing twice in a single GOG notification — once as `(existed)` from the library scan, again as `(via FGF)` from the FreeGameFindings supplementary discovery loop. Steam dedups by appId and Epic uses an "already in queue" check, but GOG's GP/FGF blocks didn't dedup against the library-scan entries already in `notify_games`.
+
+Fix: when GamerPower or FGF iterate their entries, they now check the normalized title against the set of titles the GOG library scan already pushed (regardless of status — claimed or existed) and skip pushing a duplicate. Cross-source dedup also works in both directions (GP-first then FGF, or vice versa). The "Tower of Time" mass-listing test case from 2.8.4's Discoveries-marked-games dedup still passes — the two checks are complementary.
+
+---
+
 ## What's new in 2.8.4
 
 **Discoveries-tab marks now suppress duplicate notifications.** If you marked a game as manually-claimed or ignored on the Discoveries tab, subsequent Steam/GOG claim runs no longer emit notification lines for that same game when they re-discover it via GamerPower or FreeGameFindings. Previously a "Tower of Time (via GamerPower)" or "(existed)" line would still show up in the notify body, despite the user having already triaged it in the panel — exactly the spam case the Discoveries-tab marks were supposed to silence.

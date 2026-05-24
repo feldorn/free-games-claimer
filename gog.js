@@ -413,10 +413,24 @@ try {
     if (gpGog.length) {
       log.status('GamerPower (GOG)', `${gpGog.length} entry/entries`);
       const userMarked = getDiscoveryUserMarkedKeys();
+      // GamerPower/FGF are supplementary discovery — they suggest games
+      // to claim manually. If the GOG library scan above already surfaced
+      // a game (claimed or already-owned), the manual-claim suggestion is
+      // duplicate noise. Dedup by normalized title against notify_games
+      // (issue #48, xeropresence: same Warhammer entry was listed twice,
+      // once as existed and once as via-FGF).
+      const surfacedTitles = () => new Set(
+        notify_games.map(g => matchKey(String(g.title || '').replace(/\s*\(via [^)]+\)\s*$/, '')))
+      );
       for (const entry of gpGog) {
-        const dedupKey = `gog::${matchKey(stripGpTail(entry.title))}`;
+        const cleanedTitle = stripGpTail(entry.title);
+        const dedupKey = `gog::${matchKey(cleanedTitle)}`;
         if (userMarked.has(dedupKey)) {
           log.info(`GamerPower → ${entry.title}: already triaged via Discoveries tab, skipping`);
+          continue;
+        }
+        if (surfacedTitles().has(matchKey(cleanedTitle))) {
+          log.info(`GamerPower → ${entry.title}: already in this run's library scan, skipping`);
           continue;
         }
         const resolved = await resolveGamerPowerHref(context, entry.open_giveaway_url, 'gog');
@@ -438,11 +452,20 @@ try {
     if (fgfGog.length) {
       log.status('FreeGameFindings (GOG)', `${fgfGog.length} post(s)`);
       const userMarked = getDiscoveryUserMarkedKeys();
+      // See the GamerPower block above — same #48 dedup against
+      // notify_games entries from the library scan and the GP loop.
+      const surfacedTitles = () => new Set(
+        notify_games.map(g => matchKey(String(g.title || '').replace(/\s*\(via [^)]+\)\s*$/, '')))
+      );
       for (const post of fgfGog) {
         const cleanedTitle = fgfClean(post.title);
         const dedupKey = `gog::${matchKey(cleanedTitle)}`;
         if (userMarked.has(dedupKey)) {
           log.info(`FGF → ${cleanedTitle}: already triaged via Discoveries tab, skipping`);
+          continue;
+        }
+        if (surfacedTitles().has(matchKey(cleanedTitle))) {
+          log.info(`FGF → ${cleanedTitle}: already in this run's library scan, skipping`);
           continue;
         }
         log.info(`FGF → ${cleanedTitle}: ${post.url}`);
