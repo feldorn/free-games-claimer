@@ -4,6 +4,15 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.9
+
+**Two follow-ups to 2.8.8's `PG_BASE_URL`:**
+
+- **Settings UI exposure.** The Luna base URL is now a regular Settings → Services → Prime Gaming field (next to "Redeem keys on external stores", etc.) — same as every other per-service setting. The `PG_BASE_URL` env var still works as a fallback when nothing is set in the UI; the resolution order is Settings > env > default, matching every other config field. Removed the redundant Environment-tab entry from 2.8.8 — it now appears in Settings only.
+- **`checkLogin()` regression fix.** `src/sites.js`'s prime-gaming `checkLogin()` still had a literal `'https://luna.amazon.com/claims'` from before 2.8.8's `PG_BASE_URL` refactor — meaning the session-status check would hit the US domain even when `PG_BASE_URL` was set. Now uses `this.loginUrl` so it follows the same configured base.
+
+---
+
 ## What's new in 2.8.8
 
 **Country-specific Amazon Luna domains now supported via `PG_BASE_URL` ([#52](https://github.com/feldorn/free-games-claimer/issues/52)).** atulrnt reported that Amazon BE redirects users to `luna.amazon.com.be` and the panel rejected cookies from that domain (host-mismatch in the cookie-import check) while `luna.amazon.com` was hard-coded in two places: `prime-gaming.js`'s `BASE_URL` and `SITES['prime-gaming'].loginUrl`.

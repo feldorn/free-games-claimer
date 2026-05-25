@@ -121,10 +121,16 @@ export const SITES = [
         unit: 'days',
         hint: 'Filters the per-run notification only — DB entries are preserved. Leave blank to show all pending entries regardless of age.',
         coerce: { kind: 'nullableNumber' } },
+      { key: 'baseUrl', env: 'PG_BASE_URL', type: 'string', default: 'https://luna.amazon.com',
+        label: 'Luna base URL',
+        hint: 'For non-US users: when Amazon redirects you to a country-specific Luna host (e.g. luna.amazon.com.be), set this so the cookie-import host check accepts cookies from that domain and the script navigates to the right host. Trailing slash is stripped.' },
     ],
     async checkLogin(page) {
       try {
-        await page.goto('https://luna.amazon.com/claims', { waitUntil: 'domcontentloaded', timeout: 20000 });
+        // Use the PG_BASE_URL-aware loginUrl so country-specific deploys
+        // (luna.amazon.com.be, etc.) check the right host. Hard-coded
+        // luna.amazon.com here was a 2.8.8 regression.
+        await page.goto(this.loginUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
         await page.waitForTimeout(3000);
         // Amazon redirects stale sessions to /ap/signin — check final URL first (real auth signal).
         if (/\/ap\/signin|\/sign[-_]?in/i.test(page.url())) return { loggedIn: false };
