@@ -2054,11 +2054,46 @@ async function msSchedulerLoop() {
     // status=fired is written by runAllScripts' close handler whenever a
     // run includes microsoft.js — that path also covers per-card Run, so
     // we don't need to mark fired here too.
-    await fireScheduledRun({
+    const fired = await fireScheduledRun({
       label: 'ms',
       sites: ['microsoft', 'microsoft-mobile'],
       extraEnv: { MS_SKIP_WINDOW: '1' },
     });
+    // If the attempt was blocked (interactive browser session held by
+    // another site, a claim run in progress, batch redeem running, …)
+    // fireScheduledRun returns false. Without an explicit backoff here,
+    // the next loop iteration calls computeMsWakeMs which sees a still-
+    // pending past target and runs sub-case 2 (repick remaining window).
+    // The remaining-window jitter shrinks as time passes, so retries get
+    // tighter and tighter until the window runs out and we mark missed.
+    // That's exactly what happened on 2026-05-25 when Epic's interactive
+    // browser session was held for the full MS window — 7 retries
+    // between 09:58 and 11:59, then rolled to tomorrow.
+    //
+    // Fix: when blocked, push the target forward by a fixed BLOCKED_BACKOFF
+    // (10 minutes) so a typical short-lived blocker can clear without
+    // burning multiple cycles. If the backed-off target would land past
+    // today's window end, mark missed and roll to tomorrow.
+    if (!fired) {
+      const BLOCKED_BACKOFF_MS = 10 * 60 * 1000;
+      const cNow = getSchedulerConfig();
+      const stNow = readMsScheduleToday();
+      if (stNow && stNow.status === 'pending') {
+        const [y, mo, d] = String(stNow.date).split('-').map(Number);
+        const windowStartMs = new Date(y, (mo || 1) - 1, d || 1, cNow.msStart, 0, 0, 0).getTime();
+        const windowEndMs = windowStartMs + cNow.msHours * 3600 * 1000;
+        const proposed = Date.now() + BLOCKED_BACKOFF_MS;
+        if (proposed < windowEndMs) {
+          stNow.target = new Date(proposed).toISOString();
+          writeMsScheduleToday(stNow);
+          console.log(`[${datetime()}] Scheduler (MS): blocked attempt — backed off ${BLOCKED_BACKOFF_MS / 60000} min, next try at ${datetime(new Date(proposed))}.`);
+        } else {
+          stNow.status = 'missed';
+          writeMsScheduleToday(stNow);
+          console.log(`[${datetime()}] Scheduler (MS): blocked attempt — backed-off retry would exceed today's window, marked missed.`);
+        }
+      }
+    }
   }
 }
 

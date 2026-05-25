@@ -4,6 +4,16 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.11
+
+**MS scheduler now backs off cleanly when blocked by another site's session.** Observed on 2026-05-25: the MS run was scheduled for 09:58 inside an 8:00–12:00 window, but Epic Games' interactive browser session was held for the entire morning (likely a "Show browser" tab left open). Every blocked attempt fell through to the v2.8.3 sub-case 2 (repick within remaining window) — which tightens as time passes — yielding 7 rapid retries between 09:58 and 11:59, then rolled to tomorrow when the remaining window dropped below the 90s floor.
+
+Fix: when `fireScheduledRun` returns `false` for a blocked attempt (another site's interactive browser, an in-progress run, batch redeem in flight, …), the MS scheduler pushes the target forward by a fixed **10-minute backoff** instead of recomputing via remaining-window jitter. If the backed-off target would land past today's window end, the slot is marked missed and rolls to tomorrow. The remaining-window-jitter path stays in use for its actual purpose — recovering a fresh container boot inside today's window or a target lost to a restart (v2.8.3, #47).
+
+Today's missed slot can't be recovered programmatically (the window passed by 2.5 hours by the time the fix shipped) — clicking **Run** on the Microsoft Rewards Sessions card runs MS now regardless of schedule. The fix protects future blocked attempts.
+
+---
+
 ## What's new in 2.8.10
 
 **Richer diagnostics submissions** (driven by [#50](https://github.com/feldorn/free-games-claimer/issues/50) — flipside101's `[diagnostics] Error in Prime Gaming: All promises were rejected` had a single-line stack with no signal about which selector race actually failed). Three changes work together so future reports auto-include the bits we'd otherwise have to ask the reporter for:
