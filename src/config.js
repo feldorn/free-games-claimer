@@ -82,6 +82,15 @@ export const cfg = {
   pg_email: process.env.PG_EMAIL || process.env.EMAIL,
   pg_password: process.env.PG_PASSWORD || process.env.PASSWORD,
   pg_otpkey: process.env.PG_OTPKEY,
+  // Country-specific Luna domain override. Amazon redirects EU users to
+  // luna.amazon.com.<cc> (e.g. luna.amazon.com.be for Belgium); cookies
+  // captured from those domains were being rejected by the cookie-import
+  // host check and BASE_URL/loginUrl pointed at the US-only host. Setting
+  // PG_BASE_URL=https://luna.amazon.com.be both lets the cookie host
+  // check accept your country-domain cookies and rewrites BASE_URL /
+  // loginUrl so the script navigates to the right host. Trim trailing
+  // slash to keep concatenation clean (#52).
+  pg_base_url: (process.env.PG_BASE_URL || 'https://luna.amazon.com').replace(/\/+$/, ''),
   // auth gog
   gog_email: process.env.GOG_EMAIL || process.env.EMAIL,
   gog_password: process.env.GOG_PASSWORD || process.env.PASSWORD,

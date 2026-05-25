@@ -4,6 +4,16 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.8
+
+**Country-specific Amazon Luna domains now supported via `PG_BASE_URL` ([#52](https://github.com/feldorn/free-games-claimer/issues/52)).** atulrnt reported that Amazon BE redirects users to `luna.amazon.com.be` and the panel rejected cookies from that domain (host-mismatch in the cookie-import check) while `luna.amazon.com` was hard-coded in two places: `prime-gaming.js`'s `BASE_URL` and `SITES['prime-gaming'].loginUrl`.
+
+Set `PG_BASE_URL=https://luna.amazon.com.be` (or whatever country-specific host Amazon redirected you to) and both paths follow: the cookie-import host check accepts cookies from that domain, the per-card "Open browser" button navigates there, and `prime-gaming.js` constructs all claim URLs against that base. The `SITES.loginUrl` is now a getter so the env-var resolves at access time — no module-level snapshot.
+
+Default remains `https://luna.amazon.com` so existing deploys see no behavior change. Trailing slash is trimmed at config-read time. The variable also shows up under Environment → Prime Gaming with usage notes.
+
+---
+
 ## What's new in 2.8.7
 
 **Boot-time X server hang on container restarts ([#41](https://github.com/feldorn/free-games-claimer/issues/41), [#51](https://github.com/feldorn/free-games-claimer/issues/51)).** Sahibishere's TurboVNC log finally showed the smoking gun: `_XSERVTransmkdir: Cannot create /tmp/.X11-unix with root ownership`, followed by `Killing Xvnc process ID 24 / Xvnc seems to be deadlocked`, and only ~2 minutes later does a second Xvnc successfully start. WaBiiZ's diagnostics-banner-submitted issue (#51) was the same root cause — Steam's `browserType.launchPersistentContext: Target page, context or browser has been closed`, with `Looks like you launched a headed browser without having a XServer running` in the stack — the panel had spawned a claim run inside that 2-minute hang window.

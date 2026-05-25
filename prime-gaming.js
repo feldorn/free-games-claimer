@@ -7,7 +7,11 @@ import { siteVersion } from './src/sites.js';
 const screenshot = (...a) => resolve(cfg.dir.screenshots, 'prime-gaming', ...a);
 
 // const URL_LOGIN = 'https://www.amazon.de/ap/signin'; // wrong. needs some session args to be valid?
-const BASE_URL = 'https://luna.amazon.com';
+// Defaults to US Luna; override via PG_BASE_URL (e.g.
+// https://luna.amazon.com.be) when Amazon redirects you to a country-
+// specific host. cfg.pg_base_url strips any trailing slash at parse
+// time so this concatenation stays clean. See issue #52.
+const BASE_URL = cfg.pg_base_url;
 const URL_CLAIM = `${BASE_URL}/claims/home`;
 
 log.section(`Prime Gaming (v${siteVersion('prime-gaming')})`);

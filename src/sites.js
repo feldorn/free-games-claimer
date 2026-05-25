@@ -92,7 +92,11 @@ export const SITES = [
     subtitle: null,
     script: 'prime-gaming.js',
     claimOrder: 2,
-    loginUrl: 'https://luna.amazon.com/claims',
+    // Getter so PG_BASE_URL takes effect at access time. Reads on each
+    // cookie-import (interactive-login.js#deriveTargetHost) and each
+    // panel-opened browser-login — both happen long after module load,
+    // so this resolves to the live cfg value without a restart.
+    get loginUrl() { return `${cfg.pg_base_url}/claims`; },
     get browserDir() { return cfg.dir.browser; },
     contextOptions: null,
     defaultActive: true,

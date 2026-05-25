@@ -312,6 +312,8 @@ export const ENV_DISPLAY = [
   { env: 'PG_EMAIL',       category: 'credentials', group: 'Prime Gaming',     label: 'Email' },
   { env: 'PG_PASSWORD',    category: 'credentials', group: 'Prime Gaming',     label: 'Password' },
   { env: 'PG_OTPKEY',      category: 'credentials', group: 'Prime Gaming',     label: 'OTP key' },
+  { env: 'PG_BASE_URL',    category: 'service',     group: 'Prime Gaming',     label: 'Luna base URL',
+    note: 'Country-specific Amazon Luna host. Default https://luna.amazon.com. Set to e.g. https://luna.amazon.com.be when Amazon redirects you to a country-specific subdomain (cookies from that domain are then accepted by the host check and the script navigates to the right host). Trailing slash is stripped automatically.' },
   { env: 'GOG_EMAIL',      category: 'credentials', group: 'GOG',              label: 'Email' },
   { env: 'GOG_PASSWORD',   category: 'credentials', group: 'GOG',              label: 'Password' },
   { env: 'STEAM_EMAIL',    category: 'credentials', group: 'Steam',            label: 'Email' },
