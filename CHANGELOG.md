@@ -4,6 +4,20 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.10
+
+**Richer diagnostics submissions** (driven by [#50](https://github.com/feldorn/free-games-claimer/issues/50) — flipside101's `[diagnostics] Error in Prime Gaming: All promises were rejected` had a single-line stack with no signal about which selector race actually failed). Three changes work together so future reports auto-include the bits we'd otherwise have to ask the reporter for:
+
+- **Source-side: new `log.exception(err)` helper.** Replaces the `log.fail(\`Exception: ${error.message || error}\`)` boilerplate in every claim script's top-level catch (prime-gaming, epic-games, gog, steam, lenovo-gaming). For `AggregateError` (the shape `Promise.any` rejects with), it also emits `cause[i]: …` lines with the first 2 lines of each inner failure — so a Playwright `Promise.any(['Sign in', 'logged-in marker'])` race that fails now records the timeout error AND the specific selector that didn't match, instead of just the generic "All promises were rejected" message.
+
+- **Capture-side: leading context.** The diagnostics scanner now grabs **6 lines before** the match in addition to **14 lines after** (was 0 + 10), and bumps the per-entry stack cap from 2 KB to 4 KB. The matched line is prefixed with `>> ` so a reader can find it inside the captured block. Section header, prior status lines, and `log.warn` breadcrumbs that preceded the crash are now in the captured stack — usually more useful for triage than 10 lines of Node-internal frames.
+
+- **Fingerprint distinction across `Promise.any` sites.** Previously, two different `Promise.any` failures in the same script (e.g. Prime Gaming's login-state race vs its claim-button race) both collapsed to the fingerprint `(prime-gaming, Error, "All promises were rejected")` — a user shares one and future hits on the *other* site go silent. The fingerprint now also incorporates the first cause line + its selector continuation, so the two sites get distinct fingerprints while same-site repeats (with only line:col differences) still dedup.
+
+Sandbox-tested: 8/8 `log.exception` output cases, 5/5 capture-window assertions, 5/5 fingerprint-distinction cases.
+
+---
+
 ## What's new in 2.8.9
 
 **Two follow-ups to 2.8.8's `PG_BASE_URL`:**

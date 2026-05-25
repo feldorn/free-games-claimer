@@ -424,6 +424,33 @@ export const log = {
   fail: (msg) => {
     console.log(`  ${chalk.red('✗')} ${msg}`);
   },
+  // Top-level catch helper. Renders the same `✗ Exception: <message>`
+  // line every claim script's catch block used to write, plus — when
+  // the thrown thing is an AggregateError (the shape Promise.any
+  // rejects with) — one `cause[i]: <inner>` line per inner failure.
+  // Without this the diagnostics submission for a Promise.any failure
+  // collapses to just "All promises were rejected" with no signal
+  // about which selector race actually broke (see #50: flipside101's
+  // Prime Gaming login-state Promise.any rejected with no context).
+  exception: (err) => {
+    const message = err && (err.message || String(err)) || String(err);
+    console.log(`  ${chalk.red('✗')} Exception: ${message}`);
+    const causes = err && Array.isArray(err.errors) ? err.errors : null;
+    if (causes && causes.length) {
+      causes.forEach((c, i) => {
+        const cmsg = c && (c.message || String(c)) || String(c);
+        // First 2 lines: Playwright errors render with `locator.waitFor:
+        // Timeout …` on line 1 and `waiting for locator('…selector…')`
+        // on line 2. Keeping both lines means the captured diagnostic
+        // can tell us *which* selector raced, which is the actionable
+        // bit for fixing layout-change bugs. Stack frames live on lines
+        // 3+ and stay dropped (visible via DEBUG=1 to console.error).
+        const lines = String(cmsg).split('\n').slice(0, 2).map(s => s.trim()).filter(Boolean);
+        console.log(`    ${chalk.red('·')} cause[${i}]: ${lines[0]}`);
+        if (lines[1]) console.log(`         ${lines[1]}`);
+      });
+    }
+  },
   // Per-service end-of-run summary + combined success+metrics marker.
   // Strict 3-field human line: "claimed, skipped, <n> <context-label>",
   // identical shape across all services so the run log scans vertically.

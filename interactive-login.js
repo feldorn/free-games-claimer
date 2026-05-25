@@ -517,22 +517,48 @@ async function loadDiagnosticsDb() {
   if (typeof diagnosticsDb.data.enabled !== 'boolean') diagnosticsDb.data.enabled = true;
   if (!diagnosticsDb.data.errors) diagnosticsDb.data.errors = {};
 }
-function _fingerprintError(script, errorClass, message) {
+function _fingerprintError(script, errorClass, message, stackLines) {
   // Strip volatile bits — line:col refs, hex/numeric IDs, ISO timestamps
   // — so the SAME bug across runs and minor edits hashes to one entry
   // instead of fragmenting per-occurrence.
-  const norm = String(message || '')
+  const normalize = (s) => String(s || '')
     .replace(/:\d+:\d+\b/g, '')                              // file:LINE:COL → file:
     .replace(/\b0x[0-9a-f]+\b/gi, '0x…')                     // hex addresses
     .replace(/\b\d{4}-\d{2}-\d{2}T[\d:.Z+-]+\b/g, '<ts>')    // ISO timestamps
     .replace(/\b\d{10,}\b/g, '<num>')                        // long numbers (epoch ms, IDs)
     .trim();
-  return crypto.createHash('sha1').update(`${script}::${errorClass}::${norm}`).digest('hex').slice(0, 16);
+  let key = `${script}::${errorClass}::${normalize(message)}`;
+  // AggregateError ("All promises were rejected") on its own under-
+  // specifies the failure — two different Promise.any sites in the same
+  // script would dedup to one fingerprint, so the user shares one and
+  // future hits on the OTHER site go silent. Mix in the first cause's
+  // first line when present (the log.exception helper emits `cause[0]:`)
+  // so distinct Promise.any sites get distinct fingerprints.
+  if (Array.isArray(stackLines)) {
+    const causeIdx = stackLines.findIndex(l => /cause\[0\]:/.test(String(l || '')));
+    if (causeIdx >= 0) {
+      const causeLine = String(stackLines[causeIdx]).replace(/^.*cause\[0\]:\s*/, '');
+      // Include the next line too if it's an indented continuation —
+      // log.exception splits Playwright's "locator.waitFor: Timeout …"
+      // onto line 1 and the actual selector (`waiting for locator(…)`)
+      // onto line 2, and the selector is what distinguishes two
+      // Promise.any sites in the same script (both timeouts look
+      // identical on line 1). Without this, a Prime Gaming login race
+      // and a claim-button race fingerprint identically.
+      const next = stackLines[causeIdx + 1];
+      const continuation = next && /^\s/.test(String(next)) && !/cause\[/.test(String(next))
+        ? String(next).replace(/^>>\s+|^\s+/, '').trim()
+        : '';
+      key += `::${normalize(causeLine)}`;
+      if (continuation) key += `::${normalize(continuation)}`;
+    }
+  }
+  return crypto.createHash('sha1').update(key).digest('hex').slice(0, 16);
 }
 function _recordDiagnosticError(script, errorClass, message, stackLines) {
   if (!diagnosticsDb || !diagnosticsDb.data) return; // not loaded yet
   if (!diagnosticsDb.data.enabled) return;            // user opted out via Never Share
-  const fp = _fingerprintError(script, errorClass, message);
+  const fp = _fingerprintError(script, errorClass, message, stackLines);
   const now = Date.now();
   const recent = _recentFingerprintHits.get(fp);
   if (recent && (now - recent) < 5000) return;       // within 5s of last hit → skip
@@ -544,7 +570,7 @@ function _recordDiagnosticError(script, errorClass, message, stackLines) {
       script: script || 'unknown',
       errorClass: errorClass || 'Error',
       message: String(message || '').slice(0, 500),
-      stack: Array.isArray(stackLines) ? stackLines.slice(0, 12).join('\n').slice(0, 2000) : '',
+      stack: Array.isArray(stackLines) ? stackLines.slice(0, 25).join('\n').slice(0, 4000) : '',
       firstSeen: nowIso,
       lastSeen: nowIso,
       count: 1,
@@ -601,8 +627,20 @@ function _scanForErrors(buffer) {
       if (!m) continue;
       const cls = (m.groups && m.groups.cls) || 'Error';
       const msg = (m.groups && m.groups.msg) || '';
-      // Capture the next 10 lines (cleaned) as stack context.
-      const stack = lines.slice(i, i + 11).map(l => l.replace(/^\s*\d+:\d+:\d+\s+/, ''));
+      // Capture 6 lines BEFORE + the match + 14 lines AFTER (cleaned)
+      // for stack context. Leading context (section header, prior log
+      // lines, what the script was doing) carries more triage signal
+      // than 10 lines of Node-internal stack frames — flipside101's
+      // #50 single-line "All promises were rejected" had no surrounding
+      // context, so we couldn't tell whether it was the login Promise.
+      // any, the claim-button race, or the DLC click. Marker `>>` flags
+      // the match line so the reader can find it in the captured block.
+      const startIdx = Math.max(0, i - 6);
+      const endIdx   = Math.min(lines.length, i + 15);
+      const stack = lines.slice(startIdx, endIdx).map((l, idx) => {
+        const cleaned = l.replace(/^\s*\d+:\d+:\d+\s+/, '');
+        return (startIdx + idx === i) ? '>> ' + cleaned : '   ' + cleaned;
+      });
       _recordDiagnosticError(_currentSection || 'unknown', cls, msg, stack);
       break;
     }

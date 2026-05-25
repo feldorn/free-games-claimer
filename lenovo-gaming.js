@@ -334,7 +334,7 @@ try {
   }
 } catch (error) {
   process.exitCode ||= 1;
-  log.fail(`Exception: ${error.message || error}`);
+  log.exception(error);
   if (cfg.debug) console.error(error);
 } finally {
   if (page && page.video()) log.info(`Recorded video — ${await page.video().path()}`);
