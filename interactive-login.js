@@ -101,6 +101,18 @@ async function launchSite(siteId) {
   // that case and closeBrowser() below. Any other busy reason is a hard error.
   const busy = browserBusy({ allowActiveBrowser: true });
   if (busy) throw new Error(`Cannot launch browser — ${busy}.`);
+  // If the *same* site is already open, treat the request as idempotent and
+  // re-use the existing context. Mobile push clients (Pushover, Apple Mail,
+  // etc.) commonly re-fire a tap as two HTTP requests; without this guard
+  // the second request closed the first browser and opened a fresh one,
+  // orphaning the verify the user was about to do — observed 2026-05-25
+  // when two ?login=epic-games hits 2 s apart left the second context
+  // dangling and blocked MS for the rest of the morning.
+  if (activeBrowser && activeBrowser.siteId === siteId) {
+    const site = SITES[siteId];
+    console.log(`[${datetime()}] Browser already open for ${site.name} — reusing existing session.`);
+    return { success: true, site: siteId, name: site.name, reused: true };
+  }
   if (activeBrowser) {
     await closeBrowser();
   }

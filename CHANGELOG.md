@@ -4,6 +4,18 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.13
+
+**Two root causes behind 2026-05-25's MS-blocked-by-Epic incident finally chased down** (2.8.11 + 2.8.12 were the safety nets; this is the primary fix).
+
+- **False-positive "session expired" notifications.** Every site's `checkLogin()` had a bare `} catch {} → return { loggedIn: false }`. When Epic's `page.goto()` timed out 21 s into a 20 s budget right after a heavy claim run, the timeout was silently swallowed and reported as "definitely logged out." `postRunSessionCheck` only filters out entries with an `error` field — which the catch never set — so a network blip masqueraded as a real logout and fired the notification. All 7 site `checkLogin` catches now `catch (e)` and return `error: e.message`; `postRunSessionCheck`'s existing filter then correctly classifies it as "couldn't check" and stays quiet.
+
+- **Double-launch on notification taps.** `launchSite()` had `if (activeBrowser) await closeBrowser()` — unconditional. When a Pushover notification tap fires the `?login=epic-games` deep-link twice in rapid succession (common across mobile clients), the second call closed the first's browser and opened a fresh context. The user's "I'm Logged In" click then raced the second launch — the verify hit a stale UI or never reached the new context — and the second `activeBrowser` was orphaned. Now: if the request is for the *same* siteId as the existing `activeBrowser`, the launch is idempotent and reuses the existing context with a log line.
+
+Together with 2.8.11's 10-min blocked-attempt backoff and 2.8.12's 30-min stale-session timeout, the morning's exact sequence wouldn't have produced a missed MS slot: the false-positive notification doesn't fire, the double-launch doesn't orphan a second context, and even if it did the timeout cleans it up.
+
+---
+
 ## What's new in 2.8.12
 
 **Stale interactive Login sessions now auto-close after 30 minutes.** Companion fix to 2.8.11 — the underlying cause of yesterday's MS slot rolling over was an Epic Games **Login** session left open for 5+ hours (the Login button on a site card sets a server-side `activeBrowser` flag that only clears when the user clicks "I'm Logged In" or the browser is explicitly closed). Without a timeout, a forgotten Login session blocks every scheduler attempt and every manual Run until someone notices.

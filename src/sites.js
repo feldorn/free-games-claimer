@@ -142,8 +142,14 @@ export const SITES = [
           return { loggedIn: true, user };
         }
         return { loggedIn: false };
-      } catch {
-        return { loggedIn: false };
+      } catch (e) {
+        // Surface the error so postRunSessionCheck can distinguish "page
+        // rendered, said not logged in" from "couldn't check at all"
+        // (timeout, network, page changed shape). The notification
+        // path skips entries with .error set — without this, a goto
+        // timeout right after a heavy claim run silently became a
+        // false "session expired" notification (observed 2026-05-25).
+        return { loggedIn: false, error: (e && e.message ? e.message.split('\n')[0] : String(e)).slice(0, 200) };
       }
     },
   },
@@ -184,8 +190,14 @@ export const SITES = [
           return { loggedIn: true, user: user || 'unknown' };
         }
         return { loggedIn: false };
-      } catch {
-        return { loggedIn: false };
+      } catch (e) {
+        // Surface the error so postRunSessionCheck can distinguish "page
+        // rendered, said not logged in" from "couldn't check at all"
+        // (timeout, network, page changed shape). The notification
+        // path skips entries with .error set — without this, a goto
+        // timeout right after a heavy claim run silently became a
+        // false "session expired" notification (observed 2026-05-25).
+        return { loggedIn: false, error: (e && e.message ? e.message.split('\n')[0] : String(e)).slice(0, 200) };
       }
     },
   },
@@ -281,8 +293,14 @@ export const SITES = [
           if (cookieUser) user = cookieUser;
         }
         return { loggedIn: true, user: user || 'unknown' };
-      } catch {
-        return { loggedIn: false };
+      } catch (e) {
+        // Surface the error so postRunSessionCheck can distinguish "page
+        // rendered, said not logged in" from "couldn't check at all"
+        // (timeout, network, page changed shape). The notification
+        // path skips entries with .error set — without this, a goto
+        // timeout right after a heavy claim run silently became a
+        // false "session expired" notification (observed 2026-05-25).
+        return { loggedIn: false, error: (e && e.message ? e.message.split('\n')[0] : String(e)).slice(0, 200) };
       }
     },
   },
@@ -326,8 +344,14 @@ export const SITES = [
           if (user.length > 0) return { loggedIn: true, user };
         }
         return { loggedIn: false };
-      } catch {
-        return { loggedIn: false };
+      } catch (e) {
+        // Surface the error so postRunSessionCheck can distinguish "page
+        // rendered, said not logged in" from "couldn't check at all"
+        // (timeout, network, page changed shape). The notification
+        // path skips entries with .error set — without this, a goto
+        // timeout right after a heavy claim run silently became a
+        // false "session expired" notification (observed 2026-05-25).
+        return { loggedIn: false, error: (e && e.message ? e.message.split('\n')[0] : String(e)).slice(0, 200) };
       }
     },
   },
@@ -381,8 +405,14 @@ export const SITES = [
           if (which === 'login') return { loggedIn: false };
         }
         return { loggedIn: false };
-      } catch {
-        return { loggedIn: false };
+      } catch (e) {
+        // Surface the error so postRunSessionCheck can distinguish "page
+        // rendered, said not logged in" from "couldn't check at all"
+        // (timeout, network, page changed shape). The notification
+        // path skips entries with .error set — without this, a goto
+        // timeout right after a heavy claim run silently became a
+        // false "session expired" notification (observed 2026-05-25).
+        return { loggedIn: false, error: (e && e.message ? e.message.split('\n')[0] : String(e)).slice(0, 200) };
       }
     },
   },
@@ -443,8 +473,14 @@ export const SITES = [
         }
         const user = await readMicrosoftRewardsUser(page);
         return { loggedIn: true, user: user || 'Microsoft account' };
-      } catch {
-        return { loggedIn: false };
+      } catch (e) {
+        // Surface the error so postRunSessionCheck can distinguish "page
+        // rendered, said not logged in" from "couldn't check at all"
+        // (timeout, network, page changed shape). The notification
+        // path skips entries with .error set — without this, a goto
+        // timeout right after a heavy claim run silently became a
+        // false "session expired" notification (observed 2026-05-25).
+        return { loggedIn: false, error: (e && e.message ? e.message.split('\n')[0] : String(e)).slice(0, 200) };
       }
     },
   },
@@ -479,8 +515,14 @@ export const SITES = [
         // so don't append it here too.
         const user = await readMicrosoftRewardsUser(page);
         return { loggedIn: true, user: user || 'Microsoft account' };
-      } catch {
-        return { loggedIn: false };
+      } catch (e) {
+        // Surface the error so postRunSessionCheck can distinguish "page
+        // rendered, said not logged in" from "couldn't check at all"
+        // (timeout, network, page changed shape). The notification
+        // path skips entries with .error set — without this, a goto
+        // timeout right after a heavy claim run silently became a
+        // false "session expired" notification (observed 2026-05-25).
+        return { loggedIn: false, error: (e && e.message ? e.message.split('\n')[0] : String(e)).slice(0, 200) };
       }
     },
   },
