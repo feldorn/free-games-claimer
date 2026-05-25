@@ -4,6 +4,16 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.7
+
+**Boot-time X server hang on container restarts ([#41](https://github.com/feldorn/free-games-claimer/issues/41), [#51](https://github.com/feldorn/free-games-claimer/issues/51)).** Sahibishere's TurboVNC log finally showed the smoking gun: `_XSERVTransmkdir: Cannot create /tmp/.X11-unix with root ownership`, followed by `Killing Xvnc process ID 24 / Xvnc seems to be deadlocked`, and only ~2 minutes later does a second Xvnc successfully start. WaBiiZ's diagnostics-banner-submitted issue (#51) was the same root cause — Steam's `browserType.launchPersistentContext: Target page, context or browser has been closed`, with `Looks like you launched a headed browser without having a XServer running` in the stack — the panel had spawned a claim run inside that 2-minute hang window.
+
+Root cause: `/tmp/.X11-unix` was persisting across runs with mismatched ownership (different PUID between restarts, podman userns mapping, prior-root-now-non-root flip). When TurboVNC came up as a non-root user, its `_XSERVTransmkdir` couldn't reset the dir's ownership, so the first Xvnc instance hung on the retry, got killed by the supervisor, and a fresh Xvnc started ~2 min later. The existing entrypoint cleanup only removed the inner `X1` socket file, not the dir itself.
+
+Fix: while still root (i.e. before any `gosu` drop to PUID/PGID), the entrypoint now `rm -rf /tmp/.X11-unix` and recreates it as `drwxrwxrwt root:root` (mode 1777 — the standard X11 socket dir convention). The block is guarded on `id -u == 0` so the re-exec'd, non-root second pass of the entrypoint skips it correctly. Verified end-to-end: poisoned `/tmp/.X11-unix` (mode 700, owned by an unmapped uid) recovers cleanly on restart — Xvnc creates its socket inside the freshly-permissioned dir and xdpyinfo's protocol probe succeeds on the first try, no 2-minute deadlock.
+
+---
+
 ## What's new in 2.8.6
 
 **Lenovo Gaming "Coming Soon" drops no longer stick at a stale `due now` date when Lenovo reschedules.** A drop's date is pulled once from the embedded tickcounter.com countdown widget on the drop's detail page and then cached in `data/lenovo-gaming-watch.json`. Previously the scraper only re-fetched the detail page when the drop was newly discovered or when its `scheduledAt` was missing entirely — so if Lenovo bumped the date (e.g. April 15 postponed to May 27), our copy stayed on April 15 forever and the panel kept showing `Apr 15 · due now`.

@@ -2,6 +2,24 @@
 
 set -eo pipefail # exit on error, error on any fail in pipe (not just last cmd); add -x to print each cmd; see gist bash_strict_mode.md
 
+# X11 socket dir reset — must run while we're root (we may gosu-drop
+# below to a different PUID). Stale ownership in /tmp/.X11-unix from a
+# prior container run (different PUID across restarts, podman userns
+# mapping, or a previously-root-now-non-root flip) trips TurboVNC's
+# _XSERVTransmkdir — the first Xvnc instance hangs ~2 minutes trying
+# to recreate the dir with root ownership, gets killed by the watchdog,
+# and a second Xvnc finally starts. Anything spawned in the panel
+# during that 2-min window fails with "no X server" / "Target page,
+# context or browser has been closed". Reported as #41 (Sahibishere,
+# podman/Fedora) and #51 (WaBiiZ, diagnostics).
+# Guard on root because the re-exec'd, non-root second pass of this
+# script can't (and shouldn't) reset /tmp ownership.
+if [ "$(id -u)" = "0" ]; then
+  rm -rf /tmp/.X11-unix
+  mkdir -p /tmp/.X11-unix
+  chmod 1777 /tmp/.X11-unix
+fi
+
 # --- Optional non-root mode (opt-in via PUID/PGID) ----------------------
 # When PUID is set and we're currently root, reconcile a runtime user `fgc`
 # with the requested UID/GID, fix ownership of writable paths, then re-exec
