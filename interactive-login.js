@@ -125,9 +125,27 @@ async function launchSite(siteId) {
   if (!site.contextOptions?.viewport) await page.setViewportSize({ width: cfg.width, height: cfg.height });
   await page.goto(site.loginUrl, { waitUntil: 'domcontentloaded' });
 
-  activeBrowser = { siteId, context, page };
+  activeBrowser = { siteId, context, page, openedAt: Date.now() };
   console.log(`[${datetime()}] Browser launched for ${site.name}. User can now log in via VNC.`);
   return { success: true, site: siteId, name: site.name };
+}
+
+// How long an interactive browser session can sit before we assume the
+// user forgot it open. Anything > 30 min is well beyond any normal
+// login flow (typically <5 min, captcha solves <10 min). Without this
+// timeout a forgotten Login session blocks the MS scheduler (and
+// everything else that needs the profile) indefinitely — observed
+// 2026-05-25 when Epic's session was held the full morning and the
+// MS slot rolled to tomorrow.
+const ACTIVE_BROWSER_STALE_MS = 30 * 60 * 1000;
+async function expireStaleActiveBrowser() {
+  if (!activeBrowser) return false;
+  const age = Date.now() - (activeBrowser.openedAt || 0);
+  if (age < ACTIVE_BROWSER_STALE_MS) return false;
+  const name = SITES[activeBrowser.siteId]?.name || activeBrowser.siteId;
+  console.log(`[${datetime()}] Auto-closing stale ${name} login session — open ${Math.round(age / 60000)} min, exceeded ${ACTIVE_BROWSER_STALE_MS / 60000}-min idle threshold.`);
+  await closeBrowser();
+  return true;
 }
 
 async function verifyAndClose() {
@@ -1967,6 +1985,13 @@ function withScheduleLock(fn) {
 }
 
 async function fireScheduledRun({ label, sites, extraEnv, postRun }) {
+  // Preempt a forgotten/stale interactive Login session before checking
+  // for a busy lock. Without this, a Login session left open for hours
+  // (e.g. user clicked Login on Epic, then walked away) would block
+  // every scheduled run until manually closed — observed 2026-05-25
+  // costing the MS slot. Inside the 30-min staleness threshold, the
+  // session is assumed live and we still respect the lock.
+  await expireStaleActiveBrowser();
   return withScheduleLock(async () => {
     if (sites && sites.length === 0) {
       console.log(`[${datetime()}] Scheduler (${label}): no active services — skipping.`);
@@ -7391,6 +7416,7 @@ const server = http.createServer(async (req, res) => {
       const sites = body && Array.isArray(body.sites)
         ? body.sites.filter(s => typeof s === 'string' && s)
         : null;
+      await expireStaleActiveBrowser();
       const result = runAllScripts({ source: 'panel', sites: sites && sites.length ? sites : null });
       sendJson(res, result);
       return;
@@ -7406,6 +7432,7 @@ const server = http.createServer(async (req, res) => {
         }
         // microsoft and microsoft-mobile are both served by microsoft.js;
         // passing either ID runs the shared script once.
+        await expireStaleActiveBrowser();
         const result = runAllScripts({ source: 'panel', sites: [site] });
         sendJson(res, result);
       } catch (e) {

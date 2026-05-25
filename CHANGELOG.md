@@ -4,6 +4,22 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.12
+
+**Stale interactive Login sessions now auto-close after 30 minutes.** Companion fix to 2.8.11 — the underlying cause of yesterday's MS slot rolling over was an Epic Games **Login** session left open for 5+ hours (the Login button on a site card sets a server-side `activeBrowser` flag that only clears when the user clicks "I'm Logged In" or the browser is explicitly closed). Without a timeout, a forgotten Login session blocks every scheduler attempt and every manual Run until someone notices.
+
+Fix:
+- `activeBrowser` now records an `openedAt` timestamp at launch.
+- A new `expireStaleActiveBrowser()` helper auto-closes the session when it's been open longer than 30 minutes. 30 min is generous — typical logins complete in <5 min, captcha solves take <10 min, so anything older is "the user forgot."
+- `fireScheduledRun` (the scheduler fire path) and `/api/run-all` / `/api/run-service` (manual Run buttons) call the helper before checking the busy lock. A stale session is closed, then the run proceeds normally.
+- A session inside the 30-min window is still respected — won't disrupt a real in-progress login.
+
+A clean Auto-close emits a log line: `Auto-closing stale Epic Games login session — open 47 min, exceeded 30-min idle threshold.` so it's discoverable in the panel logs without being invisible.
+
+This + 2.8.11's blocked-attempt backoff together mean: short blockers ride out the 10-min retries; longer-lived stale sessions get preempted. The MS slot survives both modes.
+
+---
+
 ## What's new in 2.8.11
 
 **MS scheduler now backs off cleanly when blocked by another site's session.** Observed on 2026-05-25: the MS run was scheduled for 09:58 inside an 8:00–12:00 window, but Epic Games' interactive browser session was held for the entire morning (likely a "Show browser" tab left open). Every blocked attempt fell through to the v2.8.3 sub-case 2 (repick within remaining window) — which tightens as time passes — yielding 7 rapid retries between 09:58 and 11:59, then rolled to tomorrow when the remaining window dropped below the 90s floor.
