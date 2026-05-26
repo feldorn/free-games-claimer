@@ -277,3 +277,36 @@ the cron-spawned container, leaving the panel-up service unchanged.
 - **Steam**: Varies — free-to-keep promotions are infrequent
 
 Running once daily (`86400`) is recommended.
+
+---
+
+### PlayStation Plus
+
+Opt-in service (requires an active PS Plus subscription, any tier — Essential, Extra, or Premium). Default off. Add the row first; then either log in cookie-only or wire credential env vars (see below).
+
+| Env var | Default | Purpose |
+|---|---|---|
+| `PSP_ACTIVE` | `0` | Set to `1` (or toggle in Settings → PS Plus) to enable. |
+| `PSP_EMAIL` | (falls back to `EMAIL`) | PSN account email for automated relogin. Optional — see onboarding below. |
+| `PSP_PASSWORD` | (falls back to `PASSWORD`) | PSN account password. Optional. |
+| `PSP_OTPKEY` | (unset) | Base32 TOTP secret from authenticator-app 2FA. Optional. |
+| `PSP_MAX_CLAIMS_PER_RUN` | `5` | Catalog drain cap. Monthly Essentials bypass this — they always claim in full because they expire each month. |
+| `PSP_CLAIM_PAUSE_MIN_SEC` | `30` | Min jittered pause between consecutive claims. |
+| `PSP_CLAIM_PAUSE_MAX_SEC` | `60` | Max jittered pause. |
+
+**Two onboarding paths:**
+
+1. **Cookie-only (simplest, recommended).** Click *Login* on the PS Plus card in the Sessions tab. A visible browser opens via noVNC. Sign in by hand (2FA via your phone authenticator). The browser profile cookie persists in `data/browser-playstation/`. No `PSP_*` credential env vars need to be set. Re-login is only required when the session expires (typically weeks to months); the panel notifies you.
+
+2. **Fully automated relogin.** Set `PSP_EMAIL`, `PSP_PASSWORD`, and `PSP_OTPKEY` in your `docker-compose.yml` `environment:` block or in `data/config.env`. The runner re-authenticates without user intervention when the session expires.
+
+**Obtaining `PSP_OTPKEY`:**
+
+1. Sign in to https://www.playstation.com/acct/management/security/ → 2-Step Verification.
+2. If authenticator-app 2FA is already configured, disable and re-enable to see the secret (Sony does not show it after initial setup).
+3. During the QR-code step, look for *"Can't scan?"* or *"Enter manually"* — that reveals the Base32 secret.
+4. Save the secret as `PSP_OTPKEY=...`. Also scan the QR with your authenticator app so your phone still works alongside the bot.
+
+Caveat: users on SMS-based 2FA cannot use `PSP_OTPKEY`. Either switch to authenticator-app 2FA, or accept that every relogin pauses and notifies for manual MFA via noVNC.
+
+**Bot detection note:** Sony uses Akamai for store browsing and Arkose FunCaptcha for login. The runner retries once per Access-Denied (bouncing off the catalog page first) and trips a run-level circuit breaker after 3 consecutive blocks. See `docs/REFERENCE.md` "Per-store reality" for the full posture.

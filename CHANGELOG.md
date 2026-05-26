@@ -4,6 +4,21 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## 2.9.0 — feat(ps-plus): PlayStation Plus collector
+
+Adds an opt-in `playstation-plus` collector that claims expiring monthly Essential picks first (priority pass, no rate limit) and drains the PS-Plus-included catalog at a configurable rate (default 5 backlog claims per run with 30-60s jitter pauses). Requires an active PS Plus subscription (any tier).
+
+- **Two-source discovery.** Monthly Essentials from `/ps-plus/whats-new/` (scrape "Find out more" anchors); catalog backlog from `/ps-plus/games/` (scrape concept URLs). Monthlies whose titles match the catalog scrape get claimed via the canonical `store.playstation.com/concept/<id>` URL; monthlies not in the catalog (the common case for time-limited Essentials) get claimed via their `playstation.com/games/<slug>/` URL directly — Sony serves the same `mfeCtaMain` CTA component on both, so one claim path handles both URL shapes.
+- **Per-game claim reads** `data-qa="mfeCtaMain#cta#action"`'s `data-telemetry-meta` JSON to branch on `ctaType` (`ADD_TO_LIBRARY` / `OWNED` / `IN_LIBRARY` / `DOWNLOAD` / other).
+- **Access-Denied recovery.** Per-claim retry-via-catalog-bounce + run-level circuit breaker after 3 consecutive blocks. Failure path screenshots to `data/screenshots/playstation-plus/`.
+- **Rotate-to-bottom retry queue.** Failed catalog candidates sort to the back of the queue by `lastAttemptedAt`, so a persistently-failing game never blocks budget.
+- **FunCaptcha handoff** (Sony's Arkose vendor for login) via the existing `awaitUserCaptchaSolve` helper + noVNC pause.
+- **Settings UI** surfaces `maxClaimsPerRun`, `claimPauseMin/MaxSec`. Credentials (`PSP_EMAIL`, `PSP_PASSWORD`, `PSP_OTPKEY`) are env-only per project convention.
+
+See [docs/CONFIGURATION.md](docs/CONFIGURATION.md#playstation-plus) for onboarding (cookie-only or fully-automated) and [docs/superpowers/specs/2026-05-26-playstation-plus-collector-design.md](docs/superpowers/specs/2026-05-26-playstation-plus-collector-design.md) for the full design.
+
+---
+
 ## What's new in 2.8.18
 
 **MS Rewards: SwiftShader + explicit WebGL flags to harden the WebGL fingerprint.** Follow-on to 2.8.15 after @mzernetsch's data on [#56](https://github.com/feldorn/free-games-claimer/issues/56) made clear that result-clicking alone wasn't his lever — his solution was a bundle, and GPU/WebGL flags were in it. In a container with no GPU passthrough, Chromium without these flags can end up with WebGL either disabled or in a weird "broken-WebGL" state — both are stronger bot tells than a clean software-rendered WebGL fingerprint.
