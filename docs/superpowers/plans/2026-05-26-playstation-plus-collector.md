@@ -22,7 +22,7 @@
 - `test/ps-catalog.js` — ad-hoc verification script for `parseConceptId` (~30 lines).
 
 **Modified:**
-- `src/sites.js` — add PS Plus registry entry; bump `aliexpress.claimOrder` from 5 → 6.
+- `src/sites.js` — add PS Plus registry entry (claimOrder 11, appended after Lenovo's 10; no existing entries renumbered).
 - `src/config.js` — add `psp_*` exports reading from `services['playstation-plus']` + env fallbacks; expose `psp_email`/`psp_password`/`psp_otpkey` as env-only.
 - `docs/REFERENCE.md` — add a PS Plus row under "Bot detection — what works, what doesn't" (Category B, Akamai-pressured).
 - `docs/CONFIGURATION.md` — add `PSP_*` env vars + onboarding (cookie-only vs. fully-automated paths).

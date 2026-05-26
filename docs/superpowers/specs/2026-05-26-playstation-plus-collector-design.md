@@ -48,7 +48,7 @@ The two scrape sources have independent failure modes. Hard-failing the run is r
 ### Schedule + execution flow
 
 ```
-daily-chain LOOP fires → existing claimers run → playstation-plus runs (claimOrder: 5)
+daily-chain LOOP fires → existing claimers run → playstation-plus runs last (claimOrder: 11)
 
   ensureLoggedIn(page)
   user = readUsername(page)   // .psw-c-secondary
@@ -82,7 +82,7 @@ daily-chain LOOP fires → existing claimers run → playstation-plus runs (clai
   version: '1.0',
   subtitle: 'Monthly Essentials (priority) + Extra/Premium catalog drain. Requires an active PS Plus subscription.',
   script: 'playstation-plus.js',
-  claimOrder: 5,                            // after steam (4); aliexpress bumps to 6
+  claimOrder: 11,                           // appended after Lenovo (10); no existing entries renumbered
   loginUrl: 'https://www.playstation.com/en-us/ps-plus/whats-new/',
   homeUrl:  'https://www.playstation.com/en-us/ps-plus/whats-new/',
   get browserDir() { return cfg.dir.browser + '-playstation'; },
@@ -111,7 +111,7 @@ daily-chain LOOP fires → existing claimers run → playstation-plus runs (clai
 
 **Isolated browser profile** (`-playstation` suffix) keeps Sony's cookies and fingerprint separate from the shared `data/browser/` profile, limiting cross-contamination from other sites' anti-bot states. Same pattern AliExpress already uses.
 
-`claimOrder: 5` slots PlayStation Plus after Steam (4). AliExpress (currently 5) renumbers to 6.
+`claimOrder: 11` appends PlayStation Plus after Lenovo (10) so no existing entry is renumbered. Two reasons for the append-rather-than-insert decision: (a) zero risk of accidentally disturbing other services by editing entries we don't need to touch, and (b) PS Plus has the highest bot-detection risk in the chain (Sony's Akamai layer) — running last means a hang or Access-Denied circuit-breaker abort doesn't delay anything earlier.
 
 ### `playstation-plus.js` — runner
 
@@ -429,7 +429,7 @@ Files to add:
 - `src/playstation-plus-catalog.js` (~150 lines)
 
 Files to modify:
-- `src/sites.js` — add registry entry, bump AliExpress `claimOrder` from 5 to 6.
+- `src/sites.js` — add registry entry (claimOrder 11, appended after Lenovo's 10; no existing entries renumbered).
 - `src/config.js` — add `psp_*` exports reading from the new `services['playstation-plus']` block + env fallbacks.
 - `src/util.js` — export `randomMs` if not already (`microsoft.js` defines it locally; verify before importing). `awaitUserCaptchaSolve` already exists with the signature `(page, { service, label, captchaCheck, timeoutMs, pollMs })` — confirmed during spec review.
 - `docs/REFERENCE.md` — add PlayStation Plus row under "Bot detection — what works, what doesn't" with the Category B classification (real fingerprint pressure, intermittent Access-Denied).

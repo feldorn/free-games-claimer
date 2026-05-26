@@ -361,7 +361,13 @@ export const SITES = [
     version: '1.0',
     subtitle: 'Monthly Essentials (priority) + Extra/Premium catalog drain. Requires an active PS Plus subscription.',
     script: 'playstation-plus.js',
-    claimOrder: 5,
+    // Appended after Lenovo's 10 rather than inserted between Steam (4)
+    // and AliExpress (5). Two reasons: (a) avoids renumbering existing
+    // entries — no chance of accidentally disturbing other services; and
+    // (b) PS Plus has the highest bot-detection risk in the chain (Sony's
+    // Akamai layer), so running last means a hang or circuit-breaker abort
+    // doesn't delay anything earlier in the chain.
+    claimOrder: 11,
     loginUrl: 'https://www.playstation.com/en-us/ps-plus/whats-new/',
     homeUrl: 'https://www.playstation.com/en-us/ps-plus/whats-new/',
     get browserDir() { return cfg.dir.browser + '-playstation'; },
@@ -404,7 +410,7 @@ export const SITES = [
     version: '2.3',
     subtitle: 'Deprecated by AliExpress — web coin collection is being phased out in favor of the mobile app. Works for some accounts on a degradation curve. See README → Bot detection.',
     script: 'aliexpress.js',
-    claimOrder: 6,
+    claimOrder: 5,
     // AliExpress's coin collector only works on the mobile site; desktop just
     // says "install the app". Use a dedicated browser profile so its
     // fingerprint-injected session doesn't collide with the desktop services'
