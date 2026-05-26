@@ -40,8 +40,12 @@ async function ensureLoggedIn(page) {
 
   const userEl = page.locator('.psw-c-secondary').first();
   const signIn = page.locator('span:has-text("Sign in"), a:has-text("Sign in")').first();
+  // .psw-c-secondary lives inside the (hidden until opened) profile dropdown.
+  // It IS attached to the DOM and innerText-readable even when not rendered,
+  // so we wait for `attached` not `visible` — otherwise we'd misidentify a
+  // logged-in session as signed-out and try to re-login pointlessly.
   const detected = await Promise.race([
-    userEl.waitFor({ state: 'visible', timeout: 8000 }).then(() => 'logged-in'),
+    userEl.waitFor({ state: 'attached', timeout: 8000 }).then(() => 'logged-in'),
     signIn.waitFor({ state: 'visible', timeout: 8000 }).then(() => 'signed-out'),
   ]).catch(() => 'unknown');
 
@@ -102,13 +106,16 @@ async function ensureLoggedIn(page) {
   }
 
   await page.waitForURL(/^https:\/\/www\.playstation\.com\//, { timeout: cfg.login_timeout });
-  await page.locator('.psw-c-secondary').waitFor({ state: 'visible', timeout: 15000 });
+  await page.locator('.psw-c-secondary').waitFor({ state: 'attached', timeout: 15000 });
   if (!cfg.debug) context.setDefaultTimeout(cfg.timeout);
 }
 
 try {
   await ensureLoggedIn(page);
-  user = (await page.locator('.psw-c-secondary').first().innerText().catch(() => '')).trim() || 'unknown';
+  // textContent (not innerText) — the element is in a hidden-until-opened
+  // profile dropdown, innerText returns '' for non-rendered elements while
+  // textContent reads the underlying DOM string regardless of visibility.
+  user = (await page.locator('.psw-c-secondary').first().textContent().catch(() => '') || '').trim() || 'unknown';
   log.status('User', user);
   db.data[user] ||= {};
 
