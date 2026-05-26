@@ -7,7 +7,9 @@ import {
 } from './src/util.js';
 import { cfg } from './src/config.js';
 import { siteVersion } from './src/sites.js';
-import { URL_WHATS_NEW } from './src/playstation-plus-catalog.js';
+import {
+  discoverMonthlyRaw, discoverCatalog, matchMonthlyToCatalog, URL_WHATS_NEW,
+} from './src/playstation-plus-catalog.js';
 
 const screenshot = (...a) => path.resolve(cfg.dir.screenshots, 'playstation-plus', ...a);
 
@@ -149,7 +151,7 @@ async function readCtaMeta(page) {
   }
 }
 
-async function claimOne(page, entry, opts = { priority: false }) { // eslint-disable-line no-unused-vars
+async function claimOne(page, entry, opts = { priority: false }) {
   const now = datetime();
   db.data[user][entry.conceptId] ||= { title: entry.title, url: entry.conceptUrl, source: entry.source, conceptId: entry.conceptId, time: now };
   const row = db.data[user][entry.conceptId];
@@ -241,14 +243,127 @@ try {
   log.status('User', user);
   db.data[user] ||= {};
 
-  // Claim logic lands in next task. For now, just emit the summary and exit.
+  let monthlyRaw = [];
+  try {
+    monthlyRaw = await discoverMonthlyRaw(page);
+    log.status('Monthly Essentials (raw)', monthlyRaw.length);
+    if (monthlyRaw.length === 0) {
+      log.warn('Zero monthly Essentials discovered — Sony may have refactored whats-new.');
+      notify_games.push({
+        title: '⚠ Monthly Essentials detection failed — check manually this month',
+        url: 'https://www.playstation.com/en-us/ps-plus/whats-new/',
+        status: 'action',
+        details: 'Sony may have refactored /ps-plus/whats-new/. Run test/ps-monthly-probe.js and update discoverMonthlyRaw().',
+      });
+    }
+  } catch (e) {
+    log.warn(`Monthly discovery failed — ${e.message.split('\n')[0]}`);
+  }
+
+  let catalogEntries = [];
+  try {
+    catalogEntries = await discoverCatalog(page);
+    log.status('Catalog entries found', catalogEntries.length);
+    if (catalogEntries.length < 50) {
+      log.warn(`Catalog scrape returned only ${catalogEntries.length} entries (< 50) — skipping drain pass this run`);
+      catalogEntries = [];
+    }
+  } catch (e) {
+    log.warn(`Catalog discovery failed — ${e.message.split('\n')[0]}`);
+  }
+
+  // Join monthlies → catalog so all claims go through concept URLs.
+  const { matched: monthlyEntries, unmatched: monthlyOrphans } = matchMonthlyToCatalog(monthlyRaw, catalogEntries);
+  log.status('Monthly matched to catalog', `${monthlyEntries.length}/${monthlyRaw.length}`);
+  for (const orphan of monthlyOrphans) {
+    log.warn(`Monthly "${orphan.title}" had no catalog match — skipping (slug ${orphan.slug}). Update normalizeTitle if this is a recurring miss.`);
+    notify_games.push({
+      title: `⚠ Monthly "${orphan.title}" (no catalog match)`,
+      url: 'https://www.playstation.com' + orphan.slugUrl,
+      status: 'action',
+      details: 'discoverMonthlyRaw saw this title, but matchMonthlyToCatalog could not find it in the catalog scrape. Likely a normalizeTitle gap.',
+    });
+  }
+
+  const monthlyIds = new Set(monthlyEntries.map(e => e.conceptId));
+
+  const isTerminal = id => {
+    const s = db.data[user][id]?.status;
+    return s === 'claimed' || s === 'existed';
+  };
+  const jitterPause = async () => {
+    const min = Math.max(0, cfg.psp_claim_pause_min_sec * 1000);
+    const max = Math.max(min, cfg.psp_claim_pause_max_sec * 1000);
+    const pause = min + Math.floor(Math.random() * (max - min + 1));
+    if (pause > 0) {
+      log.info(`Pausing ${Math.floor(pause / 1000)}s before next claim…`);
+      await page.waitForTimeout(pause);
+    }
+  };
+
+  const monthlyWork = monthlyEntries.filter(e => !isTerminal(e.conceptId));
+  const drainCandidates = catalogEntries
+    .filter(e => !monthlyIds.has(e.conceptId))
+    .filter(e => !isTerminal(e.conceptId))
+    .sort((a, b) => {
+      const aLast = db.data[user][a.conceptId]?.lastAttemptedAt || '';
+      const bLast = db.data[user][b.conceptId]?.lastAttemptedAt || '';
+      return aLast.localeCompare(bLast) || a.conceptId.localeCompare(b.conceptId);
+    })
+    .slice(0, cfg.psp_max_claims_per_run);
+
+  const ACCESS_DENIED_RUN_BUDGET = 3;
+  let consecutiveBlocks = 0;
+  let circuitBroken = false;
+  const runOne = async (entry, opts) => {
+    if (circuitBroken) return;
+    const outcome = await claimOne(page, entry, opts);
+    if (outcome === 'access-denied') {
+      consecutiveBlocks++;
+      if (consecutiveBlocks >= ACCESS_DENIED_RUN_BUDGET) {
+        log.fail(`Access-Denied circuit breaker tripped after ${consecutiveBlocks} consecutive blocks — aborting run`);
+        notify_games.push({
+          title: '⚠ PS Plus run aborted — Sony bot block',
+          url: 'https://store.playstation.com/',
+          status: 'action',
+          details: 'Akamai bot manager scored this session too high. Run aborted. Will retry next run.',
+        });
+        circuitBroken = true;
+      }
+    } else {
+      consecutiveBlocks = 0;
+    }
+  };
+
+  log.status('Priority pass', `${monthlyWork.length} monthly title(s) pending`);
+  for (let i = 0; i < monthlyWork.length; i++) {
+    if (circuitBroken) break;
+    await runOne(monthlyWork[i], { priority: true });
+    const hasMoreWork = i < monthlyWork.length - 1 || drainCandidates.length > 0;
+    if (hasMoreWork && !circuitBroken) await jitterPause();
+  }
+
+  log.status('Drain pass', `${drainCandidates.length} backlog entry(ies) this run (cap ${cfg.psp_max_claims_per_run})`);
+  for (let i = 0; i < drainCandidates.length; i++) {
+    if (circuitBroken) break;
+    await runOne(drainCandidates[i], { priority: false });
+    if (i < drainCandidates.length - 1 && !circuitBroken) await jitterPause();
+  }
+
+  const counts = { claimed: 0, existed: 0, skipped: 0, failed: 0 };
+  for (const g of notify_games) {
+    if (g.status === 'claimed') counts.claimed++;
+    else if (g.status === 'existed') counts.existed++;
+    else if ((/^skipped/).test(g.status)) counts.skipped++;
+    else if ((/^failed/).test(g.status)) counts.failed++;
+  }
   log.summary({
     siteId: 'playstation-plus',
-    claimed: 0,
-    skipped: 0,
+    claimed: counts.claimed,
+    skipped: counts.skipped,
     display: 'alreadyOwned',
-    alreadyOwned: 0,
-    failed: 0,
+    alreadyOwned: counts.existed,
+    failed: counts.failed,
   });
 } catch (error) {
   process.exitCode ||= 1;
