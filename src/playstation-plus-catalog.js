@@ -29,6 +29,7 @@ function parseConceptId(href) {
 function normalizeTitle(title) {
   if (!title || typeof title !== 'string') return '';
   return title
+    // 1. Lowercase
     .toLowerCase()
     // 2. Remove trademark chars
     .replace(/[™®©]/g, '')
@@ -149,6 +150,10 @@ async function discoverMonthlyRaw(page) {
 // Returns [{ conceptId, conceptUrl, title }], deduped, ?smcid stripped.
 async function discoverCatalog(page) {
   await page.goto(URL_CATALOG, { waitUntil: 'domcontentloaded' });
+  // 20s networkidle vs 15s for whats-new: the catalog page renders ~242 game
+  // cards with lazy-loaded images and is meaningfully heavier than the
+  // marketing whats-new page. Both are best-effort (caught + ignored) — the
+  // goto + settle + scroll combo is the real signal.
   await page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
   await page.waitForTimeout(4000);
 
@@ -171,6 +176,10 @@ async function discoverCatalog(page) {
       const conceptId = m[1];
       if (seen.has(conceptId)) continue;
 
+      // v1: locale is hardcoded to en-us. Spec risk R5 documents this — non-US
+      // regions are out of scope for now. A future PSP_LOCALE config field would
+      // parameterize this; for now we always emit en-us URLs because the rest of
+      // the runner (login flow, catalog page, claim selectors) targets en-us too.
       const conceptUrl = `https://store.playstation.com/en-us/concept/${conceptId}`;
       const title = (a.textContent || '').trim()
         || a.getAttribute('aria-label')

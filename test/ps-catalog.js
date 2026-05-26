@@ -34,6 +34,8 @@ const ntCases = [
   ['Alienation™', 'alienation'],
   ['ANNO: Mutationem Collector\'s Edition PS4 & PS5', 'anno: mutationem'],
   ['Adventure Time Pirates of the Enchiridion', 'adventure time pirates of the enchiridion'],
+  [null, ''],
+  ['', ''],
 ];
 let ntPass = 0;
 for (const [input, expected] of ntCases) {
