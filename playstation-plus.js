@@ -2,14 +2,14 @@ import { chromium } from 'patchright';
 import { authenticator } from 'otplib';
 import path from 'node:path';
 import {
-  jsonDb, datetime, prompt, notify, html_game_list,
+  jsonDb, datetime, filenamify, prompt, notify, html_game_list,
   handleSIGINT, closeContextSafely, log, cleanProfileLocks, awaitUserCaptchaSolve,
 } from './src/util.js';
 import { cfg } from './src/config.js';
 import { siteVersion } from './src/sites.js';
 import { URL_WHATS_NEW } from './src/playstation-plus-catalog.js';
 
-const screenshot = (...a) => path.resolve(cfg.dir.screenshots, 'playstation-plus', ...a); // eslint-disable-line no-unused-vars
+const screenshot = (...a) => path.resolve(cfg.dir.screenshots, 'playstation-plus', ...a);
 
 log.section(`PlayStation Plus (v${siteVersion('playstation-plus')})`);
 log.status('Time', datetime());
@@ -108,6 +108,128 @@ async function ensureLoggedIn(page) {
   await page.waitForURL(/^https:\/\/www\.playstation\.com\//, { timeout: cfg.login_timeout });
   await page.locator('.psw-c-secondary').waitFor({ state: 'attached', timeout: 15000 });
   if (!cfg.debug) context.setDefaultTimeout(cfg.timeout);
+}
+
+async function attemptClaimWithBlockRecovery(page, entry) {
+  const MAX_ATTEMPTS = 2;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    await page.goto(entry.conceptUrl, { waitUntil: 'domcontentloaded' });
+    await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
+    const title = await page.title().catch(() => '');
+    if (!(/^Access Denied/i).test(title)) {
+      // Wait for the CTA to attach so the caller can read its meta.
+      // Sony renders <button> for ADD_TO_LIBRARY and <a> for DOWNLOAD/owned,
+      // so use a tag-agnostic selector here.
+      await page.locator('[data-qa="mfeCtaMain#cta#action"]').waitFor({ state: 'attached', timeout: cfg.timeout }).catch(() => {});
+      return 'ok';
+    }
+    log.warn(`Access Denied on ${entry.title} (attempt ${attempt}/${MAX_ATTEMPTS})`);
+    if (attempt < MAX_ATTEMPTS) {
+      // Bounce off the PS Plus catalog page to refresh the referer/session
+      // signal, then wait 15-30s random before retrying the concept URL.
+      await page.goto('https://www.playstation.com/en-us/ps-plus/games/', { waitUntil: 'domcontentloaded' }).catch(() => {});
+      const pause = 15000 + Math.floor(Math.random() * 15000);
+      await page.waitForTimeout(pause);
+    }
+  }
+  return 'access-denied';
+}
+
+async function readCtaMeta(page) {
+  // Sony renders a <button> for ADD_TO_LIBRARY and an <a> for DOWNLOAD (owned),
+  // so use a tag-agnostic selector to catch both states.
+  const handle = page.locator('[data-qa="mfeCtaMain#cta#action"]').first();
+  if (await handle.count() === 0) return null;
+  const raw = await handle.getAttribute('data-telemetry-meta').catch(() => null);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+async function claimOne(page, entry, opts = { priority: false }) { // eslint-disable-line no-unused-vars
+  const now = datetime();
+  db.data[user][entry.conceptId] ||= { title: entry.title, url: entry.conceptUrl, source: entry.source, conceptId: entry.conceptId, time: now };
+  const row = db.data[user][entry.conceptId];
+  row.lastAttemptedAt = now;
+  row.source = entry.source;
+
+  const notify_game = { title: entry.title, url: entry.conceptUrl, status: 'failed' };
+  notify_games.push(notify_game);
+
+  const blockOutcome = await attemptClaimWithBlockRecovery(page, entry);
+  if (blockOutcome === 'access-denied') {
+    log.fail(`${entry.title} — Access Denied (retry next run)`);
+    row.status = notify_game.status = 'failed:access-denied';
+    const p = screenshot(`${entry.conceptId}_${filenamify(now)}.png`);
+    await page.screenshot({ path: p, fullPage: false }).catch(() => {});
+    return 'access-denied';
+  }
+
+  const meta = await readCtaMeta(page);
+  if (!meta) {
+    log.fail(`${entry.title} — CTA not found (unexpected page state)`);
+    row.status = notify_game.status = 'failed';
+    const p = screenshot(`${entry.conceptId}_${filenamify(now)}.png`);
+    await page.screenshot({ path: p, fullPage: false }).catch(() => {});
+    return 'failed';
+  }
+  row.ctaType = meta.ctaType || 'unknown';
+  if (meta.productId) row.productId = meta.productId;
+
+  const cta = String(meta.ctaType || '').toUpperCase();
+  if (cta === 'ADD_TO_LIBRARY') {
+    if (cfg.dryrun) {
+      log.warn(`${entry.title} — dry run, would have clicked Add to Library`);
+      row.status = notify_game.status = 'skipped';
+      return 'skipped';
+    }
+    log.game(entry.title, `claiming (${opts.priority ? 'monthly priority' : 'catalog drain'})`);
+    await page.locator('button[data-qa="mfeCtaMain#cta#action"]').first().click({ delay: 11 });
+    // Race three success signals:
+    //   btn-flip: Sony replaces the <button> with an <a data-qa="mfeCtaMain#cta#action">
+    //             whose text is "Download from Library" (ctaType flips to DOWNLOAD).
+    //   toast: inline-toast confirmation message appears.
+    //   meta-flip: ctaType re-read becomes OWNED, IN_LIBRARY, or DOWNLOAD.
+    // First to fire wins.
+    const success = await Promise.race([
+      page.locator('a[data-qa="mfeCtaMain#cta#action"]').first().waitFor({ state: 'attached', timeout: cfg.timeout }).then(() => 'btn-flip'),
+      page.locator('[data-qa^="inline-toast"]:has-text("Added to library"), [data-qa^="inline-toast"]:has-text("in library")').first().waitFor({ state: 'visible', timeout: cfg.timeout }).then(() => 'toast'),
+      (async () => {
+        const start = Date.now();
+        while (Date.now() - start < cfg.timeout) {
+          const m = await readCtaMeta(page);
+          if (m && (/OWNED|IN_LIBRARY|DOWNLOAD/i).test(String(m.ctaType || ''))) return 'meta-flip';
+          await page.waitForTimeout(500);
+        }
+        throw new Error('no meta-flip');
+      })(),
+    ]).catch(() => null);
+    if (success) {
+      log.ok(`${entry.title} — claimed (${success})`);
+      row.status = notify_game.status = 'claimed';
+      row.time = datetime();
+      return 'claimed';
+    }
+    log.fail(`${entry.title} — claim click did not confirm`);
+    row.status = notify_game.status = 'failed';
+    const p = screenshot(`${entry.conceptId}_${filenamify(now)}.png`);
+    await page.screenshot({ path: p, fullPage: false }).catch(() => {});
+    return 'failed';
+  }
+
+  if (cta === 'OWNED' || cta === 'IN_LIBRARY' || cta === 'DOWNLOAD') {
+    log.owned(entry.title);
+    row.status = notify_game.status = 'existed';
+    return 'existed';
+  }
+
+  // Anything else — BUY, PRE_ORDER, COMING_SOON, REGION_LOCKED, etc.
+  log.skip(entry.title, `not included (ctaType=${cta || 'unknown'})`);
+  row.status = notify_game.status = 'skipped:not-included';
+  return 'skipped';
 }
 
 try {
