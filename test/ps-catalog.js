@@ -26,14 +26,24 @@ for (const [input, expected] of pcCases) {
 }
 console.log(`parseConceptId tests: ${pcPass}/${pcCases.length} OK`);
 
-// --- normalizeTitle — 6 cases -------------------------------------------
+// --- normalizeTitle — 11 cases ------------------------------------------
+// Punctuation-stripping + hyphen-to-space means a slug-shaped fallback
+// title (e.g. "marvels-spider-man-2") matches a catalog-shaped title
+// (e.g. "Marvel's Spider-Man 2"). Both normalize to "marvels spider man 2".
 const ntCases = [
-  ['Wuchang: Fallen Feathers PS4 & PS5', 'wuchang: fallen feathers'],
+  ['Wuchang: Fallen Feathers PS4 & PS5', 'wuchang fallen feathers'],
   ['A Hat in Time™', 'a hat in time'],
   ['Nine Sols', 'nine sols'],
   ['Alienation™', 'alienation'],
-  ['ANNO: Mutationem Collector\'s Edition PS4 & PS5', 'anno: mutationem'],
+  ['ANNO: Mutationem Collector\'s Edition PS4 & PS5', 'anno mutationem'],
   ['Adventure Time Pirates of the Enchiridion', 'adventure time pirates of the enchiridion'],
+  // Slug-shape ↔ catalog-shape parity for the Marvel's Spider-Man 2 case
+  // that broke Task 5's first verify run:
+  ['Marvel\'s Spider-Man 2', 'marvels spider man 2'],
+  ['marvels-spider-man-2', 'marvels spider man 2'],
+  // Slug with a double-hyphen (Clair Obscur live URL is /clair-obscur--expedition-33/)
+  ['clair-obscur--expedition-33', 'clair obscur expedition 33'],
+  // Falsy guard
   [null, ''],
   ['', ''],
 ];

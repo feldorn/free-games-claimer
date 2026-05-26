@@ -25,7 +25,9 @@ function parseConceptId(href) {
 
 // Normalise a game title for fuzzy matching between the monthly-games page
 // and the catalog page. Strips trademark symbols, parentheticals, platform
-// suffixes, and edition labels, then collapses whitespace.
+// suffixes, edition labels, and punctuation; converts hyphens to spaces so a
+// slug-shaped fallback title (e.g. "marvels-spider-man-2") matches a
+// catalog-shaped title (e.g. "Marvel's Spider-Man 2").
 function normalizeTitle(title) {
   if (!title || typeof title !== 'string') return '';
   return title
@@ -41,7 +43,14 @@ function normalizeTitle(title) {
     .replace(/\bps ?vr ?2\b/gi, '')
     // 4c. Edition suffixes
     .replace(/\b(?:standard|deluxe|premium|collector'?s|gold|complete|definitive) edition\b/gi, '')
-    // 5. Collapse whitespace, trim
+    // 5. Strip apostrophes/quotes ("Marvel's" → "Marvels")
+    .replace(/['"]/g, '')
+    // 6. Replace hyphens with spaces ("Spider-Man" → "Spider Man",
+    //    matches slug-shape "spider-man" → "spider man")
+    .replace(/-+/g, ' ')
+    // 7. Strip remaining non-alphanumeric except spaces (colons, commas, etc.)
+    .replace(/[^a-z0-9 ]+/g, '')
+    // 8. Collapse whitespace, trim
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -103,41 +112,44 @@ async function discoverMonthlyRaw(page) {
     const results = [];
     const seen = new Set();
 
-    // Walk siblings of #monthly-games until a boundary section.
-    const anchor = document.getElementById('monthly-games');
-    if (!anchor) return results;
+    // Page-wide scan for "Find out more" anchors matching the slug pattern.
+    // We originally tried walking siblings of #monthly-games, but Sony's
+    // whats-new page doesn't put per-game CTAs in immediate siblings of that
+    // section — they live anywhere in the document. The combination of
+    // text === "Find out more" + the slug regex has been a tight enough
+    // filter on real pages (Task 0 wide-probe returned ~4 anchors total,
+    // all real games). "Try this game" anchors (PS Plus Premium trials)
+    // are correctly excluded by the exact text match.
+    //
+    // A spotlight/highlight game that isn't actually a monthly Essential
+    // will still be picked up here, but matchMonthlyToCatalog joins each
+    // entry to the catalog scrape — if it's in the catalog, it gets
+    // priority-claimed (harmless: would be drain-claimed anyway), if not,
+    // it falls into `unmatched` and the operator gets an action notify.
+    for (const a of document.querySelectorAll('a[href]')) {
+      const href = a.getAttribute('href') || '';
+      const text = (a.textContent || '').trim();
+      if (text !== 'Find out more') continue;
+      const m = slugRe.exec(href);
+      if (!m) continue;
+      const slug = m[1];
+      if (seen.has(slug)) continue;
+      seen.add(slug);
 
-    let el = anchor.nextElementSibling;
-    const boundaryRe = /(extra|premium|classics|catalog|trials|next-month|coming|hours)/i;
+      // Title: aria-label first (most authoritative), then nearest h3 in
+      // the enclosing section/article/div, then slug.
+      // The page-wide scan can't reliably find the h3 (the closest section
+      // is usually the marketing-block-too-wide one whose first h3 belongs
+      // to a different card). We fall through to slug rather often; that's
+      // fine because normalizeTitle treats slug-form and catalog-title-form
+      // as equivalent (hyphens → spaces, strip punctuation).
+      const container = a.closest('section, article, div');
+      const h3 = container?.querySelector('h3');
+      const title = a.getAttribute('aria-label')
+        || h3?.textContent?.trim()
+        || slug;
 
-    while (el) {
-      const elId = el.id || '';
-      if (boundaryRe.test(elId)) break;
-
-      // Collect all anchors within this sibling.
-      const anchors = Array.from(el.querySelectorAll('a[href]'));
-      for (const a of anchors) {
-        const href = a.getAttribute('href') || '';
-        const text = (a.textContent || '').trim();
-        if (text !== 'Find out more') continue;
-        const m = slugRe.exec(href);
-        if (!m) continue;
-        const slug = m[1];
-        if (seen.has(slug)) continue;
-        seen.add(slug);
-
-        // Title: nearest h3 in the enclosing section/article/div,
-        // fallback to aria-label, fallback to slug.
-        const container = a.closest('section, article, div');
-        const h3 = container?.querySelector('h3');
-        const title = h3?.textContent?.trim()
-          || a.getAttribute('aria-label')
-          || slug;
-
-        results.push({ slug, slugUrl: href, title });
-      }
-
-      el = el.nextElementSibling;
+      results.push({ slug, slugUrl: href, title });
     }
 
     return results;
