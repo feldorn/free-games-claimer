@@ -280,21 +280,22 @@ Per-game (`claimOne(page, entry, { priority })`):
 
 1. Call `attemptClaimWithBlockRecovery(page, entry)` — max 2 attempts:
    - `page.goto(entry.conceptUrl, { waitUntil: 'domcontentloaded' })`.
-   - Wait networkidle (10s best-effort) + button selector `button[data-qa="mfeCtaMain#cta#action"]`.
+   - Wait networkidle (10s best-effort) + tag-agnostic selector `[data-qa="mfeCtaMain#cta#action"]` (Sony renders a `<button>` for `ADD_TO_LIBRARY` and an `<a>` for `DOWNLOAD`/owned, so we cannot use a tag-specific selector).
    - Check `page.title()` — if matches `/^Access Denied/i`, on first attempt bounce off `URL_CATALOG`, pause 15–30s random, retry.
    - On second Access-Denied: return `'access-denied'`.
-2. Parse `data-telemetry-meta` JSON from the CTA button. Branch on `ctaType`:
-   - `ADD_TO_LIBRARY` → click. Race three success signals: button text → "In Library", `inline-toast` confirmation render, or `ctaType` re-read flips to `OWNED`. First to fire wins.
-   - `OWNED` / `IN_LIBRARY` → mark `existed`, skip.
+2. Parse `data-telemetry-meta` JSON from the CTA element. Branch on `ctaType`:
+   - `ADD_TO_LIBRARY` → click. Race three success signals: CTA text → "In Library", `inline-toast` confirmation render, or `ctaType` re-read flips to `OWNED`/`IN_LIBRARY`/`DOWNLOAD`. First to fire wins.
+   - `OWNED` / `IN_LIBRARY` / `DOWNLOAD` → mark `existed`, skip. (`DOWNLOAD` is the post-claim state Sony shows for games already in your library — the CTA becomes a download link instead of an add-to-library button.)
    - `BUY` / `PRE_ORDER` / other → mark `skipped:not-included`.
 3. Persist DB row (title, url, status, time, source, conceptId, productId, ctaType, lastAttemptedAt). Screenshot on failure.
 4. If there's another claim attempt coming after this one (in either pass), `jitterPause(claimPauseMinSec, claimPauseMaxSec)`. Pacing applies between any two attempts within the run, regardless of pass.
 
-Selectors confirmed live during inspection (2026-05-26):
-- `button[data-qa="mfeCtaMain#cta#action"]` — primary CTA (clickable)
-- `data-telemetry-meta` attribute on the same button — JSON with `ctaType`, `productId`, `conceptId`, `ctaSubType`
-- `[data-qa="mfeCtaMain#offer0#serviceIcon#ps-plus"]` — confirms offer 0 is PS-Plus-included
-- `.psw-c-secondary` — username
+Selectors confirmed live during inspection + Task 4 smoke test (2026-05-26):
+- `[data-qa="mfeCtaMain#cta#action"]` — primary CTA (clickable). **Tag-agnostic** because Sony renders `<button>` pre-claim and `<a>` post-claim.
+- `data-telemetry-meta` attribute on the CTA element — JSON with `ctaType`, `productId`, `conceptId`, `ctaSubType`.
+- Known `ctaType` values: `ADD_TO_LIBRARY` (claimable), `DOWNLOAD` (already in library — most common owned-state), `OWNED` / `IN_LIBRARY` (also owned-state, used historically), `BUY` (paid only), `PRE_ORDER`, `COMING_SOON`.
+- `[data-qa="mfeCtaMain#offer0#serviceIcon#ps-plus"]` — confirms offer 0 is PS-Plus-included.
+- `.psw-c-secondary` — username; lives in the (hidden until opened) profile dropdown — must be read via `state: 'attached'` not `state: 'visible'`, and `textContent` not `innerText`.
 
 ## Access-Denied recovery
 
