@@ -30,16 +30,20 @@ Requires an active PS Plus subscription (any tier — Essential, Extra, or Premi
 
 ## Architecture overview
 
-### Two-source discovery, single runner
+### Two-source discovery, single claim path (concept URLs)
 
-Each run does two independent discovery scrapes (both static HTML pages, ~1s each) and produces two lists:
+Each run does two independent discovery scrapes (both static HTML pages, ~1s each), then **joins them** so all claims go through one unified path:
 
-| List | Source | Treatment |
-|---|---|---|
-| `monthlyEntries` | `/ps-plus/whats-new/` — the current month's expiring Essentials | **Priority pass** — claim all, no rate limit. Each retries every run until claimed or until they fall out of the monthly set. |
-| `catalogEntries` | `/ps-plus/games/` — the full PS-Plus-included catalog (~242 titles) | **Drain pass** — up to `maxClaimsPerRun` per run, rotate-to-bottom on failure. |
+| List | Source | Output shape | Treatment |
+|---|---|---|---|
+| `monthlyEntriesRaw` | `/ps-plus/whats-new/` — current month's expiring Essentials | `{ slugUrl, title }` from sibling sections under the `#monthly-games` H2, anchor text = "Find out more" | Joined to catalog via title-fuzzy-match → `conceptUrl`. **Priority pass** — claim all, no rate limit. |
+| `catalogEntries` | `/ps-plus/games/` — full PS-Plus-included catalog (~242 titles) | `{ conceptId, conceptUrl, title }` directly from store.playstation.com/concept/ anchors | **Drain pass** — up to `maxClaimsPerRun` per run, rotate-to-bottom on failure. |
 
-The two sources have independent failure modes. Hard-failing the run is reserved for the case where *both* sources fail (extremely unlikely simultaneous breakage).
+**Why the join exists.** Sony's marketing whats-new page links monthlies to `playstation.com/en-us/games/<slug>/` (marketing pages), NOT `store.playstation.com/concept/<id>` (the actual claim surface where our `data-qa` selectors live). The catalog page surfaces both the canonical concept URL AND the title for every PS-Plus-included game. Joining them — `monthlyTitle ≈ catalogTitle` (normalized fuzzy match) → `conceptUrl` — means every claim attempt uses the same selectors and the same retry/circuit-breaker logic. One claim mechanism, not two.
+
+**Monthlies not in catalog** (e.g., catalog rotation timing — a brand-new monthly added between catalog scrape and whats-new scrape): we fall back to claiming via the slug page directly, with a `log.warn` documenting the mismatch. This path uses different selectors and is fragile; the goal of the catalog join is to keep it the rare case.
+
+The two scrape sources have independent failure modes. Hard-failing the run is reserved for the case where *both* sources fail (extremely unlikely simultaneous breakage).
 
 ### Schedule + execution flow
 
@@ -132,18 +136,37 @@ New file under `src/` matching the convention of `src/gamerpower.js` / `src/free
 const URL_WHATS_NEW = 'https://www.playstation.com/en-us/ps-plus/whats-new/';
 const URL_CATALOG   = 'https://www.playstation.com/en-us/ps-plus/games/';
 const CONCEPT_RE    = /^https:\/\/store\.playstation\.com\/[a-z]{2}-[a-z]{2}\/concept\/(\d+)\b/;
+const SLUG_RE       = /^\/[a-z]{2}-[a-z]{2}\/games\/([a-z0-9-]+)\/?$/;
 
 // API
-export async function discoverMonthly(page)   // → [{ conceptId, conceptUrl, title, source:'whats-new' }]
-export async function discoverCatalog(page)   // → [{ conceptId, conceptUrl, title, source:'catalog' }]
-export function   parseConceptId(href)        // → string|null (pure helper, testable)
+export async function discoverMonthlyRaw(page)                        // → [{ slug, slugUrl, title }]
+export async function discoverCatalog(page)                           // → [{ conceptId, conceptUrl, title }]
+export function   matchMonthlyToCatalog(monthlyRaw, catalogEntries)   // → { matched: [{ ..., conceptId, conceptUrl, source:'monthly' }], unmatched: [{ slug, slugUrl, title }] }
+export function   parseConceptId(href)                                // → string|null (pure helper, testable)
+export function   normalizeTitle(title)                               // → string (pure helper, testable)
 ```
 
-**`discoverMonthly` strategy:**
+**`discoverMonthlyRaw` strategy:**
 1. `page.goto(URL_WHATS_NEW)` → wait for networkidle (best-effort 15s) → 3s settle.
-2. Probe the entire page for anchors matching `CONCEPT_RE`. Dedup by concept id.
-3. **Sanity guard:** zero results → push a `status: 'action'` entry into the run summary with the message *"⚠ Monthly Essentials detection failed — Sony may have refactored /ps-plus/whats-new/. Check manually this month."* (so the user is notified that a deadline-critical claim may have slipped).
-4. **Cross-reference logging** (informational): match titles against `fetchFGFPosts()` / `fetchGamerPowerGiveaways()` for the `playstation-plus` platform tag. If those aggregators list a monthly we missed, log it as an unhandled-discovery line. Does NOT trigger claiming on its own — just surfaces the gap.
+2. Scroll 4 viewport heights to trigger any lazy-load.
+3. Find the `#monthly-games` section. Walk forward through `nextElementSibling` until either (a) the cursor is null, or (b) the cursor's own id matches `/(extra|premium|classics|catalog|trials|next-month|coming|hours)/i` (boundary signal).
+4. Within the captured sibling range, collect anchors where (i) `href` matches `SLUG_RE` and (ii) text is exactly `"Find out more"` (the spotlight CTAs use that text; "Try this game" anchors are game trials — different category — and must NOT be captured).
+5. For each captured anchor, the nearest `<h3>` upward gives the canonical title (e.g., "Nine Sols", "Wuchang: Fallen Feathers").
+6. **Sanity guard:** zero results → push a `status: 'action'` entry with message *"⚠ Monthly Essentials detection failed — Sony may have refactored /ps-plus/whats-new/. Check manually this month."*
+7. **Cross-reference logging** (informational): match titles against `fetchFGFPosts()` / `fetchGamerPowerGiveaways()` for the `playstation-plus` platform tag. Log gaps as an unhandled-discovery line.
+
+**`matchMonthlyToCatalog` strategy** (pure, testable):
+1. Build `catalogIndex` keyed by `normalizeTitle(catalogEntry.title) → catalogEntry`.
+2. For each monthly raw entry, compute `normalizeTitle(monthlyTitle)`. Lookup in `catalogIndex`.
+3. On hit: emit a `matched` entry merging the catalog's conceptId/conceptUrl with the monthly's title and `source: 'monthly'`.
+4. On miss: emit to `unmatched`. Caller decides — log and skip, or fall back to slug-page claim. v1 logs + skips with `log.warn` (slug-page claim path is too brittle to maintain without verified selectors).
+
+**`normalizeTitle` strategy** (pure, testable):
+- Lowercase.
+- Strip platform suffixes: `\bps[45]( & ps[45])?\b`, `\bps vr2\b`, `\b(standard|deluxe|premium|collector'?s|gold)\s+edition\b`.
+- Strip trademark/special chars: `[™®©]`, `\(.*?\)` (parenthetical region/edition tags).
+- Collapse whitespace and trim.
+- Result: `"Wuchang: Fallen Feathers PS4 & PS5"` → `"wuchang: fallen feathers"`.
 
 **`discoverCatalog` strategy:**
 1. `page.goto(URL_CATALOG)` → wait for networkidle (best-effort 20s) → 4s settle.
@@ -361,7 +384,7 @@ Notification `kind` follows the project convention:
 | ID | Risk | Mitigation |
 |---|---|---|
 | R1 | Akamai bot scoring is account-level and can persist for days. | Conservative defaults, isolated browser profile, circuit breaker. Accepted residual risk: users may need to manually pause the service for days. Will be documented in README bot-detection addendum. |
-| R2 | Whats-new page may not contain per-game anchors at all. We confirmed the `#monthly-games` heading block is empty but assumed sibling blocks contain CTAs. Not verified live. | `discoverMonthly` sanity guard fails loudly (notify) when zero monthlies detected. Pre-merge testing (below) verifies the discovery selectors return ≥ 1 entry. If absent, FGF/GamerPower cross-reference becomes mandatory, not optional — we'd revise this spec before implementation. |
+| R2 | **RESOLVED 2026-05-26.** Pre-merge probe (`test/ps-monthly-probe.js`) found the monthly CTAs live in `<section>` siblings to `#monthly-games` and link to `playstation.com/en-us/games/<slug>/` paths (NOT `store.playstation.com/concept/<id>`). Spec revised to scrape slug URLs and fuzzy-match titles into the catalog scrape for the conceptUrl. See `discoverMonthlyRaw` + `matchMonthlyToCatalog`. |
 | R3 | "Add to Library → In Library" state transition not observed live. | Three-signal race (Epic pattern): button-text flip + toast render + ctaType re-read. **First test run, observe live transition and tune.** |
 
 ### Medium
@@ -377,6 +400,7 @@ Notification `kind` follows the project convention:
 | R7 | Subscription lapse → all catalog CTAs read `BUY`, runner correctly skips all as `skipped:not-included`. | Add a `log.warn` when drain-pass success rate is exactly 0 ("subscription lapsed or CTA enum renamed"). |
 | R8 | Sony renames `ctaType` enum values. | Persist `ctaType` to DB. `log.warn` on any unknown enum value. |
 | R9 | First-ever run claims ~8 games in quick succession (no DB history). | Accepted. Alternative (warmup mode) is over-engineering. |
+| R10 | `matchMonthlyToCatalog` title-fuzzy-match may miss matches when Sony's whats-new title and catalog title differ unpredictably (suffixes like "PS4 & PS5", region tags, deluxe-edition variants). | `normalizeTitle` strips known suffix patterns. Unmatched monthlies fall through to `unmatched` and trigger `log.warn` with both titles — operator can extend normalizeTitle or add explicit `data/ps-title-aliases.json` mapping. The catalog scrape also includes the slug-cleaned title (e.g., URL `/concept/228903` linked from anchor with text "A Hat in Time"), giving a secondary match dimension if title alone fails. |
 
 ## Testing & verification
 
