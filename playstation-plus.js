@@ -283,8 +283,8 @@ try {
   // Premium catalog) just claim via their slug URL directly.
   const { matched: monthlyMatched, unmatched: monthlyOrphans } = matchMonthlyToCatalog(monthlyRaw, catalogEntries);
   const monthlyFromOrphans = monthlyOrphans.map(o => ({
-    conceptId: o.slug,                                            // DB key — slugs and numeric conceptIds don't collide
-    conceptUrl: 'https://www.playstation.com' + o.slugUrl,        // absolute URL claimOne can goto
+    conceptId: o.slug, // DB key — slugs and numeric conceptIds don't collide
+    conceptUrl: 'https://www.playstation.com' + o.slugUrl, // absolute URL claimOne can goto
     title: o.title,
     slug: o.slug,
     slugUrl: o.slugUrl,
