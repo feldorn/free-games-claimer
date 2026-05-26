@@ -272,20 +272,27 @@ try {
     log.warn(`Catalog discovery failed — ${e.message.split('\n')[0]}`);
   }
 
-  // Join monthlies → catalog so all claims go through concept URLs.
-  const { matched: monthlyEntries, unmatched: monthlyOrphans } = matchMonthlyToCatalog(monthlyRaw, catalogEntries);
-  log.status('Monthly matched to catalog', `${monthlyEntries.length}/${monthlyRaw.length}`);
-  for (const orphan of monthlyOrphans) {
-    log.warn(`Monthly "${orphan.title}" had no catalog match — skipping (slug ${orphan.slug}). Update normalizeTitle if this is a recurring miss.`);
-    notify_games.push({
-      title: `⚠ Monthly "${orphan.title}" (no catalog match)`,
-      url: 'https://www.playstation.com' + orphan.slugUrl,
-      status: 'action',
-      details: 'discoverMonthlyRaw saw this title, but matchMonthlyToCatalog could not find it in the catalog scrape. Likely a normalizeTitle gap.',
-    });
-  }
+  // Join monthlies → catalog so we can prefer canonical concept URLs.
+  // Probe finding 2026-05-26: Sony serves the SAME mfeCtaMain CTA component
+  // (data-qa="mfeCtaMain#cta#action" + offer / ps-plus-icon / discount-
+  // descriptor data-qa attributes) on both store.playstation.com/concept/
+  // AND playstation.com/games/<slug>/ — so claimOne works on either URL
+  // shape. Monthlies that don't appear in the catalog scrape (the common
+  // case — Essential monthlies aren't usually in the rotating Extra/
+  // Premium catalog) just claim via their slug URL directly.
+  const { matched: monthlyMatched, unmatched: monthlyOrphans } = matchMonthlyToCatalog(monthlyRaw, catalogEntries);
+  const monthlyFromOrphans = monthlyOrphans.map(o => ({
+    conceptId: o.slug,                                            // DB key — slugs and numeric conceptIds don't collide
+    conceptUrl: 'https://www.playstation.com' + o.slugUrl,        // absolute URL claimOne can goto
+    title: o.title,
+    slug: o.slug,
+    slugUrl: o.slugUrl,
+    source: 'monthly-slug',
+  }));
+  const monthlyEntries = [...monthlyMatched, ...monthlyFromOrphans];
+  log.status('Monthly: catalog-joined / slug-direct', `${monthlyMatched.length}/${monthlyFromOrphans.length}`);
 
-  const monthlyIds = new Set(monthlyEntries.map(e => e.conceptId));
+  const monthlyIds = new Set(monthlyMatched.map(e => e.conceptId));
 
   const isTerminal = id => {
     const s = db.data[user][id]?.status;
