@@ -8354,6 +8354,7 @@ server.listen(PANEL_PORT, async () => {
       cfg.dir.browser + '-aliexpress',
       cfg.dir.browser + '-mobile',
       cfg.dir.browser + '-lenovo',
+      cfg.dir.browser + '-playstation',
     ];
     let totalRemoved = 0;
     for (const d of sweepDirs) {

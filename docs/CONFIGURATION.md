@@ -75,6 +75,7 @@ Each store can use the default `EMAIL`/`PASSWORD` or be overridden individually:
 | GOG | `GOG_EMAIL` | `GOG_PASSWORD` | | `GOG_NEWSLETTER=1` |
 | Steam | `STEAM_EMAIL` | `STEAM_PASSWORD` | | `STEAM_MIN_RATING`, `STEAM_MIN_PRICE` |
 | Microsoft Rewards | `MS_EMAIL` | `MS_PASSWORD` | `MS_OTPKEY` | `MS_SCHEDULE_HOURS` |
+| PlayStation Plus | `PSP_EMAIL` | `PSP_PASSWORD` | `PSP_OTPKEY` | `PSP_ACTIVE=1` (opt-in; subscription required). `PSP_MAX_CLAIMS_PER_RUN`, `PSP_CLAIM_PAUSE_MIN_SEC`, `PSP_CLAIM_PAUSE_MAX_SEC`. See the [PlayStation Plus section](#playstation-plus) below. |
 | AliExpress | `AE_EMAIL` | `AE_PASSWORD` | | `AE_ENABLED=1` (opt-in; disabled by default; **deprecated** — web channel being phased out by AliExpress, see [Bot detection](REFERENCE.md#bot-detection--what-works-what-doesnt)) |
 | Ubisoft Connect | — | — | — | `UBISOFT_ACTIVE=1` (opt-in; disabled by default). Watch-only — no login, no auto-claim. |
 | Humble Bundle | — | — | — | `HUMBLE_ACTIVE=1` (opt-in). Watch-only. |

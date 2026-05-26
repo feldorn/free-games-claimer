@@ -397,7 +397,11 @@ export const SITES = [
         if (/my\.account\.sony\.com|signin\.account\.sony\.com/.test(page.url())) return { loggedIn: false };
         const userEl = page.locator('.psw-c-secondary').first();
         if (await userEl.count() === 0) return { loggedIn: false };
-        const user = (await userEl.innerText()).trim();
+        // textContent (not innerText) — .psw-c-secondary lives inside the
+        // hidden-until-opened profile dropdown. innerText returns '' for
+        // non-rendered elements, so the username would silently come back
+        // as 'unknown' on every session check.
+        const user = (await userEl.textContent() || '').trim();
         return { loggedIn: true, user: user || 'unknown' };
       } catch (e) {
         return { loggedIn: false, error: (e && e.message ? e.message.split('\n')[0] : String(e)).slice(0, 200) };

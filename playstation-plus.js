@@ -42,10 +42,11 @@ async function ensureLoggedIn(page) {
 
   const userEl = page.locator('.psw-c-secondary').first();
   const signIn = page.locator('span:has-text("Sign in"), a:has-text("Sign in")').first();
-  // .psw-c-secondary lives inside the (hidden until opened) profile dropdown.
-  // It IS attached to the DOM and innerText-readable even when not rendered,
-  // so we wait for `attached` not `visible` — otherwise we'd misidentify a
-  // logged-in session as signed-out and try to re-login pointlessly.
+  // .psw-c-secondary lives inside the (hidden-until-opened) profile dropdown.
+  // It IS attached to the DOM even when not rendered, so we wait for
+  // `attached` not `visible` — otherwise we'd misidentify a logged-in session
+  // as signed-out and try to re-login pointlessly. Reading the text downstream
+  // uses textContent (not innerText) for the same reason.
   const detected = await Promise.race([
     userEl.waitFor({ state: 'attached', timeout: 8000 }).then(() => 'logged-in'),
     signIn.waitFor({ state: 'visible', timeout: 8000 }).then(() => 'signed-out'),
@@ -351,10 +352,30 @@ try {
   }
 
   log.status('Drain pass', `${drainCandidates.length} backlog entry(ies) this run (cap ${cfg.psp_max_claims_per_run})`);
+  const drainStartIdx = notify_games.length;
   for (let i = 0; i < drainCandidates.length; i++) {
     if (circuitBroken) break;
     await runOne(drainCandidates[i], { priority: false });
     if (i < drainCandidates.length - 1 && !circuitBroken) await jitterPause();
+  }
+
+  // Subscription-lapse signal: if every drain attempt this run came back
+  // as skipped:not-included (ctaType=BUY/etc), the user's PS Plus
+  // subscription has likely lapsed — every catalog game shows as paid.
+  // Warn once so the operator sees the lapse instead of N empty drain
+  // runs in a row.
+  if (drainCandidates.length > 0 && !circuitBroken) {
+    const drainResults = notify_games.slice(drainStartIdx);
+    const allSkippedNotIncluded = drainResults.length > 0 && drainResults.every(g => g.status === 'skipped:not-included');
+    if (allSkippedNotIncluded) {
+      log.warn('All drain candidates skipped (ctaType not ADD_TO_LIBRARY). Subscription may have lapsed, or Sony renamed the CTA enum — check manually.');
+      notify_games.push({
+        title: '⚠ All PS Plus drain candidates returned non-claimable CTAs',
+        url: 'https://www.playstation.com/en-us/ps-plus/',
+        status: 'action',
+        details: 'Every game in the drain pass returned a ctaType other than ADD_TO_LIBRARY. Most likely cause: PS Plus subscription has lapsed. Less likely: Sony renamed the ctaType enum (check data-telemetry-meta values in browser DevTools).',
+      });
+    }
   }
 
   const counts = { claimed: 0, existed: 0, skipped: 0, failed: 0 };
