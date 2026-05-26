@@ -21,6 +21,7 @@ const steam = svc['steam']        || {};
 const ae    = svc['aliexpress']   || {};
 const ms    = svc['microsoft']    || {};
 const lenovo = svc['lenovo-gaming'] || {};
+const psp   = svc['playstation-plus'] || {};
 
 // Options - also see table in README.md
 export const cfg = {
@@ -128,4 +129,14 @@ export const cfg = {
   // helps the at-drop wake punch through DnD/quiet-hours on supporting
   // notifiers (Pushover most notably).
   lenovo_notify_priority: lenovo.notifyPriority || 'normal',
+  // auth playstation plus (credentials stay env-only — see CONTRIBUTING.md)
+  psp_email:    process.env.PSP_EMAIL    || process.env.EMAIL,
+  psp_password: process.env.PSP_PASSWORD || process.env.PASSWORD,
+  psp_otpkey:   process.env.PSP_OTPKEY,
+  // Drain pace — Monthly Essentials are claimed unconditionally; this caps
+  // only the Extra/Premium catalog drain. 5 with 30-60s jitter drains ~242
+  // games in ~7 weeks at one run/day. Tunable via Settings → PS Plus.
+  psp_max_claims_per_run:  psp.maxClaimsPerRun  ?? 5,
+  psp_claim_pause_min_sec: psp.claimPauseMinSec ?? 30,
+  psp_claim_pause_max_sec: psp.claimPauseMaxSec ?? 60,
 };

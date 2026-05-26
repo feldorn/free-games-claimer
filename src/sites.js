@@ -356,12 +356,55 @@ export const SITES = [
     },
   },
   {
+    id: 'playstation-plus',
+    name: 'PlayStation Plus',
+    version: '1.0',
+    subtitle: 'Monthly Essentials (priority) + Extra/Premium catalog drain. Requires an active PS Plus subscription.',
+    script: 'playstation-plus.js',
+    claimOrder: 5,
+    loginUrl: 'https://www.playstation.com/en-us/ps-plus/whats-new/',
+    homeUrl: 'https://www.playstation.com/en-us/ps-plus/whats-new/',
+    get browserDir() { return cfg.dir.browser + '-playstation'; },
+    contextOptions: null,
+    defaultActive: false,
+    activeEnv: 'PSP_ACTIVE',
+    linkedWith: null,
+    claimDbFile: 'playstation-plus.json',
+    scheduleKind: 'daily-chain',
+    features: ['captcha-marker'],
+    configFields: [
+      { key: 'maxClaimsPerRun',  env: 'PSP_MAX_CLAIMS_PER_RUN',  type: 'number', default: 5,
+        label: 'Max backlog claims per run', unit: 'games',
+        hint: 'Monthly Essentials are always claimed in full (priority pass); this caps only the Extra/Premium catalog drain.',
+        coerce: { kind: 'numberBounded', min: 0, fallback: 5 } },
+      { key: 'claimPauseMinSec', env: 'PSP_CLAIM_PAUSE_MIN_SEC', type: 'number', default: 30,
+        label: 'Min pause between claims', unit: 'seconds',
+        coerce: { kind: 'numberBounded', min: 0, fallback: 30 } },
+      { key: 'claimPauseMaxSec', env: 'PSP_CLAIM_PAUSE_MAX_SEC', type: 'number', default: 60,
+        label: 'Max pause between claims', unit: 'seconds',
+        coerce: { kind: 'numberBounded', min: 0, fallback: 60 } },
+    ],
+    async checkLogin(page) {
+      try {
+        await page.goto('https://www.playstation.com/en-us/ps-plus/whats-new/', { waitUntil: 'domcontentloaded', timeout: 20000 });
+        await page.waitForTimeout(3000);
+        if (/my\.account\.sony\.com|signin\.account\.sony\.com/.test(page.url())) return { loggedIn: false };
+        const userEl = page.locator('.psw-c-secondary').first();
+        if (await userEl.count() === 0) return { loggedIn: false };
+        const user = (await userEl.innerText()).trim();
+        return { loggedIn: true, user: user || 'unknown' };
+      } catch (e) {
+        return { loggedIn: false, error: (e && e.message ? e.message.split('\n')[0] : String(e)).slice(0, 200) };
+      }
+    },
+  },
+  {
     id: 'aliexpress',
     name: 'AliExpress',
     version: '2.3',
     subtitle: 'Deprecated by AliExpress — web coin collection is being phased out in favor of the mobile app. Works for some accounts on a degradation curve. See README → Bot detection.',
     script: 'aliexpress.js',
-    claimOrder: 5,
+    claimOrder: 6,
     // AliExpress's coin collector only works on the mobile site; desktop just
     // says "install the app". Use a dedicated browser profile so its
     // fingerprint-injected session doesn't collide with the desktop services'
