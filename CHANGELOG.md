@@ -18,7 +18,7 @@ Adds an opt-in `playstation-plus` collector that claims expiring monthly Essenti
 - **Settings UI** surfaces `maxClaimsPerRun`, `claimPauseMin/MaxSec`. Credentials (`PSP_EMAIL`, `PSP_PASSWORD`, `PSP_OTPKEY`) are env-only per project convention.
 - **First fork-side automated tests.** 67 assertion-based tests across `npm test`: pure-helper unit tests (`test/ps-catalog.js`), config-schema tests (`test/ps-config-schema.js`), and panel-API integration tests that spawn `interactive-login.js` on a separate port and exercise `/api/config` + `/api/state` (`test/ps-panel-api.js`).
 
-See [docs/CONFIGURATION.md](docs/CONFIGURATION.md#playstation-plus) for onboarding (cookie-only or fully-automated) and [docs/superpowers/specs/2026-05-26-playstation-plus-collector-design.md](docs/superpowers/specs/2026-05-26-playstation-plus-collector-design.md) for the full design.
+See [docs/CONFIGURATION.md](docs/CONFIGURATION.md#playstation-plus) for onboarding (cookie-only or fully-automated).
 
 ---
 
