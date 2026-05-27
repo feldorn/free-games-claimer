@@ -2,7 +2,7 @@ import { chromium } from 'patchright';
 import { authenticator } from 'otplib';
 import path from 'node:path';
 import {
-  jsonDb, datetime, filenamify, prompt, notify, html_game_list,
+  jsonDb, datetime, filenamify, prompt, notify, html_game_list, escapeHtml,
   handleSIGINT, closeContextSafely, log, cleanProfileLocks, awaitUserCaptchaSolve,
 } from './src/util.js';
 import { cfg } from './src/config.js';
@@ -359,6 +359,11 @@ try {
           status: 'action',
           details: 'Akamai bot manager scored this session too high. Run aborted. Will retry next run.',
         });
+        // Mark the run as failed at the process level so the panel's
+        // Stats / Sessions tabs don't render a green "Success" indicator
+        // for a run that was aborted mid-flight. Matches how Epic / GOG
+        // surface partial failures via non-zero exitCode.
+        process.exitCode = 1;
         circuitBroken = true;
       }
     } else {
@@ -427,7 +432,7 @@ try {
   await db.write();
   if (notify_games.length) {
     const hasActionable = notify_games.some(g => g.status === 'failed' || g.status === 'action' || (/^failed:/).test(g.status));
-    await notify(`playstation-plus (${user || 'unknown'}):<br>${html_game_list(notify_games)}`, { kind: hasActionable ? 'action' : 'summary' });
+    await notify(`playstation-plus (${escapeHtml(user || 'unknown')}):<br>${html_game_list(notify_games)}`, { kind: hasActionable ? 'action' : 'summary' });
   }
   await closeContextSafely(context);
 }

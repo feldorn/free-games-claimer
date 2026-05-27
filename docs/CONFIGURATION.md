@@ -292,8 +292,8 @@ Opt-in service (requires an active PS Plus subscription, any tier — Essential,
 | `PSP_PASSWORD` | (falls back to `PASSWORD`) | PSN account password. Optional. |
 | `PSP_OTPKEY` | (unset) | Base32 TOTP secret from authenticator-app 2FA. Optional. |
 | `PSP_MAX_CLAIMS_PER_RUN` | `5` | Catalog drain cap. Monthly Essentials bypass this — they always claim in full because they expire each month. |
-| `PSP_CLAIM_PAUSE_MIN_SEC` | `30` | Min jittered pause between consecutive claims. |
-| `PSP_CLAIM_PAUSE_MAX_SEC` | `60` | Max jittered pause. |
+| `PSP_CLAIM_PAUSE_MIN_SEC` | `25` | Min jittered pause between consecutive claims. |
+| `PSP_CLAIM_PAUSE_MAX_SEC` | `35` | Max jittered pause. |
 
 **Two onboarding paths:**
 
