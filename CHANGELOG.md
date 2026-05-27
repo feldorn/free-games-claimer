@@ -4,6 +4,16 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.14
+
+**New "Hide rewards / DLC" filter on the Discoveries tab.** r/FreeGameFindings posts a lot of non-game freebies — in-game outfits, skins, currency packs, GPU/points-gated cosmetic rewards — that land in the "Other" bucket with no price. Because they have no price, the "Min price" filter couldn't catch them (it deliberately keeps unknown-price items so it doesn't false-hide real games we couldn't price), so they cluttered the games view. Example: two `007 First Light - … Outfit` rows that looked like duplicates but were distinct cosmetic giveaways.
+
+The new checkbox (default on, alongside "Hide claimed" / "Hide ignored / skipped") filters items whose title matches a conservative keyword list — `outfit, skin, cosmetic, emote, avatar, wrap, charm, currency, coin(s), gem(s), credit(s), booster, loot, in-game item, dlc` — with word-boundary matching (so "Cities: **Skylines**" doesn't trip "skin"). `bundle` and `pack` are intentionally excluded since they appear in legitimate free-game titles. Items you've explicitly marked as manually-claimed are never hidden by this filter. The toggle state persists per-browser like the others.
+
+Note: this was **not** a dedup bug — the two 007 rows were genuinely different outfits with distinct titles/URLs. 2.8.5's dedup only collapses the *same* item appearing across GamerPower + FGF.
+
+---
+
 ## What's new in 2.8.13
 
 **Two root causes behind 2026-05-25's MS-blocked-by-Epic incident finally chased down** (2.8.11 + 2.8.12 were the safety nets; this is the primary fix).

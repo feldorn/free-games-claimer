@@ -3601,6 +3601,7 @@ const PANEL_HTML = `<!DOCTYPE html>
       </label>
       <label class="disc-filter-label"><input type="checkbox" id="discHideClaimed" checked onchange="onDiscFilterChange()"> Hide claimed</label>
       <label class="disc-filter-label" title="Hides both items you dismissed (🚫) and items the SKIP forecast says your settings will filter at run time."><input type="checkbox" id="discHideIgnored" checked onchange="onDiscFilterChange()"> Hide ignored / skipped</label>
+      <label class="disc-filter-label" title="Hides in-game cosmetics and DLC (outfits, skins, packs, currency, GPU/points rewards) — these aren't standalone free games. Matches the title against a keyword list."><input type="checkbox" id="discHideRewards" checked onchange="onDiscFilterChange()"> Hide rewards / DLC</label>
       <span class="disc-filter-spacer"></span>
       <span class="disc-filter-hint" id="discHiddenHint"></span>
     </div>
@@ -3891,10 +3892,12 @@ function discLoadFilters() {
     const minPrice = document.getElementById('discMinPrice');
     const hideClaimed = document.getElementById('discHideClaimed');
     const hideIgnored = document.getElementById('discHideIgnored');
+    const hideRewards = document.getElementById('discHideRewards');
     if (search && typeof s.search === 'string') search.value = s.search;
     if (minPrice && typeof s.minPrice === 'number') minPrice.value = String(s.minPrice);
     if (hideClaimed && typeof s.hideClaimed === 'boolean') hideClaimed.checked = s.hideClaimed;
     if (hideIgnored && typeof s.hideIgnored === 'boolean') hideIgnored.checked = s.hideIgnored;
+    if (hideRewards && typeof s.hideRewards === 'boolean') hideRewards.checked = s.hideRewards;
     if (typeof s.activeTab === 'string') discActiveTab = s.activeTab;
   } catch {}
 }
@@ -3905,6 +3908,7 @@ function discSaveFilters() {
       minPrice: Number(document.getElementById('discMinPrice')?.value || 0),
       hideClaimed: !!document.getElementById('discHideClaimed')?.checked,
       hideIgnored: !!document.getElementById('discHideIgnored')?.checked,
+      hideRewards: !!document.getElementById('discHideRewards')?.checked,
       activeTab: discActiveTab,
     };
     localStorage.setItem('discFilters', JSON.stringify(s));
@@ -3965,6 +3969,20 @@ function discParseWorth(w) {
   return m ? parseFloat(m[1]) : NaN;
 }
 
+// In-game cosmetic / DLC / reward detector for the "Hide rewards / DLC"
+// filter. r/FreeGameFindings posts a lot of non-game freebies — outfit
+// skins, currency packs, GPU/points-gated rewards — that land in the
+// "Other" bucket with no price and clutter the games view (e.g. two
+// "007 First Light - … Outfit" rows). Word-boundary match (optional
+// trailing s) so we hit "Outfit"/"Outfits"/"Skin"/"Skins" without
+// false-matching substrings inside real game titles. Deliberately
+// conservative: "bundle"/"pack" are common enough in legit free-game
+// titles that we keep them out to avoid hiding real giveaways.
+const DISC_REWARD_RE = new RegExp('\\\\b(outfit|skin|cosmetic|emote|avatar|wrap|charm|currency|coins?|gems?|credits?|booster|loot|in-game item|dlc)s?\\\\b', 'i');
+function discIsReward(it) {
+  return DISC_REWARD_RE.test(String(it.title || ''));
+}
+
 // Decide whether an item passes the current global filters. Returns
 // { pass, reason } so the empty-state hint can explain why a tab is
 // empty ("3 items hidden by your filters").
@@ -3986,6 +4004,11 @@ function discPassesFilters(it, filters) {
   // (set by your settings); IGNORED is explicit (you clicked 🚫). Same
   // outcome, same hiding rule.
   if (filters.hideIgnored && (it.coverage.state === 'ignored' || it.coverage.state === 'skip')) return { pass: false, reason: 'ignored' };
+  // Never hide an item the user explicitly marked as manually-claimed —
+  // that's an intentional keep, regardless of the reward keyword match.
+  if (filters.hideRewards && discIsReward(it) && !(it.userState && it.userState.status === 'manually-claimed')) {
+    return { pass: false, reason: 'reward' };
+  }
   return { pass: true };
 }
 
@@ -3995,6 +4018,7 @@ function discReadFilters() {
     minPrice: Number(document.getElementById('discMinPrice')?.value || 0),
     hideClaimed: !!document.getElementById('discHideClaimed')?.checked,
     hideIgnored: !!document.getElementById('discHideIgnored')?.checked,
+    hideRewards: !!document.getElementById('discHideRewards')?.checked,
   };
 }
 
