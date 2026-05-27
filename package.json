@@ -12,6 +12,10 @@
   "main": "index.js",
   "scripts": {
     "lint": "npx eslint .",
+    "test": "node test/ps-catalog.js && node test/ps-config-schema.js && node test/ps-panel-api.js",
+    "test:unit": "node test/ps-catalog.js",
+    "test:config": "node test/ps-config-schema.js",
+    "test:panel": "node test/ps-panel-api.js",
     "docker:build": "docker build . -t ghcr.io/vogler/free-games-claimer",
     "docker:build-log": "(docker buildx build --progress=plain . -t ghcr.io/vogler/free-games-claimer; docker image ls) 2>&1 | tee data/docker-build.log",
     "docker": "docker run --rm -it -p 6080:6080 -p 7080:7080 -v fgc:/fgc/data --pull=always ghcr.io/vogler/free-games-claimer",
