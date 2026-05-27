@@ -183,6 +183,24 @@ async function claimOne(page, entry, opts = { priority: false }) {
   if (meta.productId) row.productId = meta.productId;
 
   const cta = String(meta.ctaType || '').toUpperCase();
+
+  // Trial filter. Sony has _PS_PLUS_TRIAL variants of the entire ctaType
+  // enum (ADD_TO_LIBRARY_PS_PLUS_TRIAL pre-claim, DOWNLOAD_PS_PLUS_TRIAL
+  // post-claim). These are 2-3 hour Premium-tier timed demos, not real
+  // keeper claims. Clicking the trial CTA adds the trial to the library —
+  // not what we want. Skip with a distinct status so they don't pollute
+  // the claimed-count and aren't retried.
+  //
+  // Catalog scrape filters trials out at the source (the "Game trials"
+  // section heading), but defense-in-depth here catches any trial that
+  // slips through — e.g. monthly orphans claimed via slug URL where we
+  // don't have the section-heading signal.
+  if (/_TRIAL\b|_TRIAL_/.test(cta)) {
+    log.skip(entry.title, `trial — not a keeper (ctaType=${cta})`);
+    row.status = notify_game.status = 'skipped:trial';
+    return 'skipped';
+  }
+
   if (cta === 'ADD_TO_LIBRARY') {
     if (cfg.dryrun) {
       log.warn(`${entry.title} — dry run, would have clicked Add to Library`);
@@ -264,9 +282,14 @@ try {
   let catalogEntries = [];
   try {
     catalogEntries = await discoverCatalog(page);
-    log.status('Catalog entries found', catalogEntries.length);
-    if (catalogEntries.length < 50) {
-      log.warn(`Catalog scrape returned only ${catalogEntries.length} entries (< 50) — skipping drain pass this run`);
+    log.status('Catalog entries found', `${catalogEntries.length} keeper(s) (trials section filtered)`);
+    // Sony's PS Plus catalog landing page surfaces ~18 keeper titles
+    // (section#plus-container) alongside ~218 timed-demo "trials"
+    // (section#trials, excluded at scrape time). A sub-10 result almost
+    // certainly means the page didn't load — skip drain in that case
+    // rather than misreport empty as "all candidates skipped."
+    if (catalogEntries.length < 10) {
+      log.warn(`Catalog scrape returned only ${catalogEntries.length} keeper(s) (< 10) — skipping drain pass this run. Sony may have refactored the catalog page; investigate before next run.`);
       catalogEntries = [];
     }
   } catch (e) {

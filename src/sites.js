@@ -383,12 +383,12 @@ export const SITES = [
         label: 'Max backlog claims per run', unit: 'games',
         hint: 'Monthly Essentials are always claimed in full (priority pass); this caps only the Extra/Premium catalog drain.',
         coerce: { kind: 'numberBounded', min: 0, fallback: 5 } },
-      { key: 'claimPauseMinSec', env: 'PSP_CLAIM_PAUSE_MIN_SEC', type: 'number', default: 30,
+      { key: 'claimPauseMinSec', env: 'PSP_CLAIM_PAUSE_MIN_SEC', type: 'number', default: 25,
         label: 'Min pause between claims', unit: 'seconds',
-        coerce: { kind: 'numberBounded', min: 0, fallback: 30 } },
-      { key: 'claimPauseMaxSec', env: 'PSP_CLAIM_PAUSE_MAX_SEC', type: 'number', default: 60,
+        coerce: { kind: 'numberBounded', min: 0, fallback: 25 } },
+      { key: 'claimPauseMaxSec', env: 'PSP_CLAIM_PAUSE_MAX_SEC', type: 'number', default: 35,
         label: 'Max pause between claims', unit: 'seconds',
-        coerce: { kind: 'numberBounded', min: 0, fallback: 60 } },
+        coerce: { kind: 'numberBounded', min: 0, fallback: 35 } },
     ],
     async checkLogin(page) {
       try {

@@ -134,9 +134,9 @@ export const cfg = {
   psp_password: process.env.PSP_PASSWORD || process.env.PASSWORD,
   psp_otpkey:   process.env.PSP_OTPKEY,
   // Drain pace — Monthly Essentials are claimed unconditionally; this caps
-  // only the Extra/Premium catalog drain. 5 with 30-60s jitter drains ~242
-  // games in ~7 weeks at one run/day. Tunable via Settings → PS Plus.
+  // only the Extra/Premium catalog drain. 5 with 25-35s jitter drains ~236
+  // games in ~9 weeks at one run/day. Tunable via Settings → PS Plus.
   psp_max_claims_per_run:  psp.maxClaimsPerRun  ?? 5,
-  psp_claim_pause_min_sec: psp.claimPauseMinSec ?? 30,
-  psp_claim_pause_max_sec: psp.claimPauseMaxSec ?? 60,
+  psp_claim_pause_min_sec: psp.claimPauseMinSec ?? 25,
+  psp_claim_pause_max_sec: psp.claimPauseMaxSec ?? 35,
 };

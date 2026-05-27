@@ -119,8 +119,8 @@ for (const p of expectedPaths) {
 const expectedDefaults = {
   'services.playstation-plus.active': false,
   'services.playstation-plus.maxClaimsPerRun': 5,
-  'services.playstation-plus.claimPauseMinSec': 30,
-  'services.playstation-plus.claimPauseMaxSec': 60,
+  'services.playstation-plus.claimPauseMinSec': 25,
+  'services.playstation-plus.claimPauseMaxSec': 35,
 };
 for (const [p, expected] of Object.entries(expectedDefaults)) {
   const f = config.fields?.find(f => f.path === p);

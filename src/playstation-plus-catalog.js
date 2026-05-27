@@ -181,12 +181,32 @@ async function discoverCatalog(page) {
     const seen = new Map(); // conceptId → entry
     const anchors = Array.from(document.querySelectorAll('a[href]'));
 
+    // Section-ID-based allow/deny. The catalog page has two distinct
+    // sections that list PS-Plus-related games:
+    //   <section id="plus-container">  — keeper catalog (Extra/Premium tier)
+    //   <section id="trials">          — Premium-tier 2-3 hour timed demos
+    // The trials section's CTA flow accepts the "Add to Library" click but
+    // adds the *trial* (DOWNLOAD_PS_PLUS_TRIAL ctaType), not a keeper claim.
+    // Yesterday's run claimed 6 trials before this filter existed.
+    //
+    // We use an explicit allowlist (must be inside #plus-container) with a
+    // defensive denylist (must NOT be inside #trials) — covers the case
+    // where Sony restructures #trials to be a child of #plus-container.
+    const plusContainer = document.querySelector('section#plus-container');
+    const trialsContainer = document.querySelector('section#trials');
+
     for (const a of anchors) {
       const href = (a.getAttribute('href') || '').split('?')[0]; // strip ?smcid=...
       const m = conceptRe.exec(href);
       if (!m) continue;
       const conceptId = m[1];
       if (seen.has(conceptId)) continue;
+
+      // Allowlist: must be inside #plus-container. Anchors elsewhere are
+      // page-nav, marketing tooltips, or trials section.
+      if (plusContainer && !plusContainer.contains(a)) continue;
+      // Denylist: defensive — skip anything inside #trials.
+      if (trialsContainer && trialsContainer.contains(a)) continue;
 
       // v1: locale is hardcoded to en-us. Spec risk R5 documents this — non-US
       // regions are out of scope for now. A future PSP_LOCALE config field would

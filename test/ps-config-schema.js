@@ -53,8 +53,8 @@ for (const p of pspPaths) {
 const defaults = {
   'services.playstation-plus.active': false,
   'services.playstation-plus.maxClaimsPerRun': 5,
-  'services.playstation-plus.claimPauseMinSec': 30,
-  'services.playstation-plus.claimPauseMaxSec': 60,
+  'services.playstation-plus.claimPauseMinSec': 25,
+  'services.playstation-plus.claimPauseMaxSec': 35,
 };
 for (const [p, expected] of Object.entries(defaults)) {
   const f = fields.find(f => f.path === p);
