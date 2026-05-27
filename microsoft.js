@@ -680,6 +680,33 @@ async function executeBingSearch(page, searchTerm, preEnterMs) {
     await page.mouse.wheel(0, 300 + Math.floor(Math.random() * 400));
     await delay(500 + Math.floor(Math.random() * 1000));
   }
+  // ~30% of the time, click an organic result and dwell on it. Humans
+  // who search almost always click *something*; a session that only
+  // ever searches-and-leaves is one of the strongest behavioral signals
+  // behind MS Rewards' "Unusual search activity may limit your ability
+  // to earn points" banner — it fires even on clean residential IPs
+  // with human-like timing. The click registers engagement via Bing's
+  // own click tracking; the destination navigation is incidental (the
+  // next search re-navigates to bing.com regardless). Best-effort: a
+  // missing/odd result must never break the search loop, so the whole
+  // block is wrapped and swallowed.
+  if (Math.random() < 0.3) {
+    try {
+      const results = page.locator('#b_results .b_algo h2 a');
+      const n = await results.count();
+      if (n > 0) {
+        // Bias toward the top results, where humans actually click.
+        const pick = Math.floor(Math.random() * Math.min(n, 5));
+        await results.nth(pick).click({ timeout: 5000 });
+        // Dwell like a human reading the page (2.5–6.5s), occasionally scroll.
+        await delay(2500 + Math.floor(Math.random() * 4000));
+        if (Math.random() < 0.5) {
+          await page.mouse.wheel(0, 200 + Math.floor(Math.random() * 600));
+          await delay(800 + Math.floor(Math.random() * 1500));
+        }
+      }
+    } catch { /* result-click is best-effort engagement — never fatal */ }
+  }
 }
 
 // A "browser closed" / "context closed" Playwright error means the

@@ -4,6 +4,16 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.15
+
+**MS Rewards search loop now clicks results occasionally, to look more human.** A maintainer hit the *"Unusual search activity may limit your ability to earn points"* banner on a clean residential IP with default timing and matching geo — which rules out IP reputation, velocity, and geo-mismatch, pointing at behavioral detection. The biggest tell: our search loop searched and left **every** time, never clicking a result. Real users who search almost always click something.
+
+`executeBingSearch` now, ~30% of the time, clicks one of the top organic results (biased toward the top 5, where humans click), dwells 2.5–6.5 s like someone reading, and occasionally scrolls — then the next search re-navigates to bing.com as before. The click registers engagement via Bing's own tracking; the destination navigation is incidental. The whole block is best-effort and wrapped — a missing or odd result can never break the search loop.
+
+This is a behavioral-detection mitigation, not a guarantee. If you're on a datacenter/VPS/VPN IP, that's a separate (and stronger) trigger we can't fix from code. See the tracking issue for the full detection-signal breakdown and to report whether you're seeing the banner too.
+
+---
+
 ## What's new in 2.8.14
 
 **New "Hide rewards / DLC" filter on the Discoveries tab.** r/FreeGameFindings posts a lot of non-game freebies — in-game outfits, skins, currency packs, GPU/points-gated cosmetic rewards — that land in the "Other" bucket with no price. Because they have no price, the "Min price" filter couldn't catch them (it deliberately keeps unknown-price items so it doesn't false-hide real games we couldn't price), so they cluttered the games view. Example: two `007 First Light - … Outfit` rows that looked like duplicates but were distinct cosmetic giveaways.
