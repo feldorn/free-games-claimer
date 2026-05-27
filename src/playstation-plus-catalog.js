@@ -158,25 +158,12 @@ async function discoverMonthlyRaw(page) {
   return raw;
 }
 
-// Scrape the PS Plus games catalog page for concept URLs.
-// Returns [{ conceptId, conceptUrl, title }], deduped, ?smcid stripped.
-async function discoverCatalog(page) {
-  await page.goto(URL_CATALOG, { waitUntil: 'domcontentloaded' });
-  // 20s networkidle vs 15s for whats-new: the catalog page renders ~242 game
-  // cards with lazy-loaded images and is meaningfully heavier than the
-  // marketing whats-new page. Both are best-effort (caught + ignored) — the
-  // goto + settle + scroll combo is the real signal.
-  await page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
-  await page.waitForTimeout(4000);
-
-  // Scroll to trigger lazy-load (5× viewport height, 700 ms pauses).
-  for (let i = 0; i < 5; i++) {
-    await page.evaluate(step => window.scrollBy(0, window.innerHeight * step), i + 1);
-    await page.waitForTimeout(700);
-  }
-
+// Scrape concepts on the currently-rendered page state. Used by the
+// pagination loop in discoverCatalog. Extracted because pagination has to
+// re-scrape after each "Go to page N" click.
+async function scrapeCurrentPageConcepts(page) {
   const conceptReSrc = CONCEPT_RE.source;
-  const raw = await page.evaluate(conceptReSrc => {
+  return await page.evaluate(conceptReSrc => {
     const conceptRe = new RegExp(conceptReSrc);
     const seen = new Map(); // conceptId → entry
     const anchors = Array.from(document.querySelectorAll('a[href]'));
@@ -222,8 +209,70 @@ async function discoverCatalog(page) {
 
     return Array.from(seen.values());
   }, conceptReSrc);
+}
 
-  return raw;
+// Scrape the PS Plus games catalog across ALL paginated pages.
+// Sony's catalog landing page renders ~18 keeper concepts per page with a
+// pagination control at the bottom (36+ pages total in practice). We click
+// through page-by-page using `a[aria-label="Go to page N"]` (the most
+// specific selector — Sony's "Next page" arrow has a sibling ellipsis with
+// the same label, which broke an earlier probe).
+//
+// Returns [{ conceptId, conceptUrl, title }], deduped across all pages,
+// ?smcid stripped. Game trials are excluded by scrapeCurrentPageConcepts
+// (section#plus-container allowlist).
+async function discoverCatalog(page) {
+  await page.goto(URL_CATALOG, { waitUntil: 'domcontentloaded' });
+  await page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
+  await page.waitForTimeout(4000);
+
+  // Sony lazy-loads the plus-container itself — the catalog cards don't
+  // render on initial paint, only after the user scrolls into them. Empirically
+  // (deep-scroll probe 2026-05-27) a single scrollBy returns 0 cards while two
+  // scrolls return the full page-1 batch. Do 5× to be safe, with longer
+  // waits so React commits the renders.
+  for (let i = 0; i < 5; i++) {
+    await page.evaluate(step => window.scrollBy(0, window.innerHeight * step), i + 1);
+    await page.waitForTimeout(700);
+  }
+
+  const all = new Map(); // conceptId → entry
+  const addAll = (entries) => { for (const e of entries) if (!all.has(e.conceptId)) all.set(e.conceptId, e); };
+
+  // Page 1 — current view.
+  addAll(await scrapeCurrentPageConcepts(page));
+
+  // Iterate pages 2..N. Hard cap at 100 as a defensive bound; if Sony ever
+  // exposes a 100+ page catalog we can lift the cap, but unbounded is
+  // wrong — a bug in the click-detection logic would loop forever otherwise.
+  const MAX_PAGES = 100;
+  for (let p = 2; p <= MAX_PAGES; p++) {
+    // The page-N anchor only renders when N is within Sony's pagination
+    // "window" — when we click "Go to page N", the window shifts to expose
+    // higher-numbered pages. So we just look for the next sequential N.
+    const link = page.locator(`a[aria-label="Go to page ${p}"]`).first();
+    if (await link.count() === 0) break; // no more pages
+
+    await link.scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {});
+    await link.click({ timeout: 8000 }).catch(() => {});
+
+    // React re-renders the plus-container with new concepts. Wait for at
+    // least one previously-unseen conceptId, or time out after 8s.
+    const sizeBefore = all.size;
+    let waited = 0;
+    while (waited < 8000) {
+      await page.waitForTimeout(500);
+      waited += 500;
+      addAll(await scrapeCurrentPageConcepts(page));
+      if (all.size > sizeBefore) break;
+    }
+    if (all.size === sizeBefore) {
+      // Stuck — page didn't progress. Bail rather than loop forever.
+      break;
+    }
+  }
+
+  return Array.from(all.values());
 }
 
 // --- Exports ---------------------------------------------------------------
