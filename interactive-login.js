@@ -173,6 +173,7 @@ async function verifyAndClose() {
 
   if (result.loggedIn) {
     console.log(`[${datetime()}] Login verified for ${site.name} as ${result.user}. Saving session.`);
+    if (siteId === 'playstation-plus') await logPsnCookies(context, 'login-verify (logged-in context, pre-close)');
     siteStatus[siteId] = { status: 'logged_in', user: result.user, checkedAt: datetime() };
     await context.close();
     activeBrowser = null;
@@ -190,6 +191,24 @@ async function closeBrowser() {
     await activeBrowser.context.close();
   } catch {}
   activeBrowser = null;
+}
+
+// TEMP diagnostic (playstation-plus session-persistence investigation, 2026-05-28).
+// Logs the PSN cookie state of a context so we can tell, across the
+// login -> close -> re-open(check) cycle, whether the session is (a) written
+// to disk and reloaded, or (b) written-then-rejected by Sony/Akamai. Remove
+// once the PS Plus "logged in then immediately logged out" issue is resolved.
+async function logPsnCookies(context, when) {
+  try {
+    const cookies = await context.cookies();
+    const psn = cookies.filter(c => /sony|playstation/i.test(c.domain || ''));
+    const sessionScoped = psn.filter(c => !c.expires || c.expires === -1).length;
+    const signedIn = psn.find(c => c.name === 'isSignedIn');
+    const abck = psn.find(c => c.name === '_abck');
+    console.log(`[${datetime()}] [psn-cookie-debug] ${when}: total=${cookies.length} psn=${psn.length} sessionScoped=${sessionScoped} isSignedIn=${signedIn ? `present(exp=${signedIn.expires})` : 'MISSING'} _abck=${abck ? 'present' : 'MISSING'}`);
+  } catch (e) {
+    console.log(`[${datetime()}] [psn-cookie-debug] ${when}: failed to read cookies — ${e.message}`);
+  }
 }
 
 let checkInProgress = false;
@@ -217,6 +236,7 @@ async function checkSiteStatus(siteId) {
     });
 
     const page = context.pages()[0] || await context.newPage();
+    if (siteId === 'playstation-plus') await logPsnCookies(context, 'check (fresh context, cookies loaded from disk)');
     const result = await site.checkLogin(page);
     siteStatus[siteId] = {
       status: result.loggedIn ? 'logged_in' : 'not_logged_in',

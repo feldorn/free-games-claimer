@@ -40,6 +40,15 @@ async function ensureLoggedIn(page) {
   await page.goto(URL_WHATS_NEW, { waitUntil: 'domcontentloaded' });
   await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
 
+  // TEMP diagnostic (session-persistence investigation, 2026-05-28): show what
+  // the runner loaded from the on-disk profile. Remove once resolved.
+  try {
+    const cookies = await page.context().cookies();
+    const psn = cookies.filter(c => /sony|playstation/i.test(c.domain || ''));
+    const signedIn = psn.find(c => c.name === 'isSignedIn');
+    log.status('PSN cookies at startup', `total=${cookies.length} psn=${psn.length} isSignedIn=${signedIn ? `present(exp=${signedIn.expires})` : 'MISSING'}`);
+  } catch { /* diagnostic only */ }
+
   const userEl = page.locator('.psw-c-secondary').first();
   const signIn = page.locator('span:has-text("Sign in"), a:has-text("Sign in")').first();
   // .psw-c-secondary lives inside the (hidden-until-opened) profile dropdown.
@@ -248,7 +257,16 @@ async function claimOne(page, entry, opts = { priority: false }) {
   }
 
   // Anything else — BUY, PRE_ORDER, COMING_SOON, REGION_LOCKED, etc.
-  log.skip(entry.title, `not included (ctaType=${cta || 'unknown'})`);
+  // TEMP diagnostic (2026-05-28): surface the PS_PLUS offer's applicability so
+  // we can tell "session not entitled" (UPSELL) from a genuine non-catalog
+  // game. Remove once the entitlement/session issue is resolved.
+  let offerInfo = '';
+  try {
+    const offers = (meta.productDetail && meta.productDetail[0] && meta.productDetail[0].productPriceDetail) || [];
+    const plus = offers.find(o => o.offerBranding === 'PS_PLUS');
+    offerInfo = plus ? ` psPlusOffer=${plus.discountPriceFormatted}/${plus.offerApplicability}` : ' psPlusOffer=NONE';
+  } catch { /* diagnostic only */ }
+  log.skip(entry.title, `not included (ctaType=${cta || 'unknown'}${offerInfo})`);
   row.status = notify_game.status = 'skipped:not-included';
   return 'skipped';
 }
