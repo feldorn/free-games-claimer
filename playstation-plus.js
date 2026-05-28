@@ -122,6 +122,34 @@ async function ensureLoggedIn(page) {
   if (!cfg.debug) context.setDefaultTimeout(cfg.timeout);
 }
 
+// Behavioral hardening for Akamai Bot Manager (which fronts the PlayStation
+// store and scores input/device telemetry, not just the static fingerprint).
+// A session that loads a concept page and instantly reads/clicks the CTA with
+// zero mouse movement, scroll, or dwell is a strong bot signal. Inject a little
+// human-like noise — a few stepped mouse moves, a scroll (sometimes back up),
+// and a reading dwell — before we act on the page. Fully wrapped + best-effort:
+// behavioral noise must NEVER break a claim. Mirrors microsoft.js's approach.
+async function humanize(page) {
+  try {
+    const vw = cfg.width || 1400;
+    const vh = cfg.height || 900;
+    const moves = 2 + Math.floor(Math.random() * 3); // 2-4 moves
+    for (let i = 0; i < moves; i++) {
+      const x = 80 + Math.floor(Math.random() * Math.max(1, vw - 160));
+      const y = 80 + Math.floor(Math.random() * Math.max(1, vh - 160));
+      await page.mouse.move(x, y, { steps: 6 + Math.floor(Math.random() * 18) });
+      await page.waitForTimeout(120 + Math.floor(Math.random() * 380));
+    }
+    await page.mouse.wheel(0, 250 + Math.floor(Math.random() * 650));
+    await page.waitForTimeout(400 + Math.floor(Math.random() * 900));
+    if (Math.random() < 0.5) { // sometimes scroll back up, like re-reading
+      await page.mouse.wheel(0, -(150 + Math.floor(Math.random() * 300)));
+      await page.waitForTimeout(300 + Math.floor(Math.random() * 600));
+    }
+    await page.waitForTimeout(900 + Math.floor(Math.random() * 2600)); // reading dwell
+  } catch { /* behavioral noise is best-effort — never break a claim */ }
+}
+
 async function attemptClaimWithBlockRecovery(page, entry) {
   const MAX_ATTEMPTS = 2;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
@@ -133,6 +161,8 @@ async function attemptClaimWithBlockRecovery(page, entry) {
       // Sony renders <button> for ADD_TO_LIBRARY and <a> for DOWNLOAD/owned,
       // so use a tag-agnostic selector here.
       await page.locator('[data-qa="mfeCtaMain#cta#action"]').waitFor({ state: 'attached', timeout: cfg.timeout }).catch(() => {});
+      // Look at the page like a human before we read/act on the CTA.
+      await humanize(page);
       return 'ok';
     }
     log.warn(`Access Denied on ${entry.title} (attempt ${attempt}/${MAX_ATTEMPTS})`);
@@ -220,7 +250,12 @@ async function claimOne(page, entry, opts = { priority: false }) {
       return 'skipped';
     }
     log.game(entry.title, `claiming (${opts.priority ? 'monthly priority' : 'catalog drain'})`);
-    await page.locator('button[data-qa="mfeCtaMain#cta#action"]').first().click({ delay: 11 });
+    // Move to the button and pause briefly before clicking, like a human
+    // deciding to add it — rather than an instant programmatic click.
+    const addBtn = page.locator('button[data-qa="mfeCtaMain#cta#action"]').first();
+    await addBtn.hover().catch(() => {});
+    await page.waitForTimeout(300 + Math.floor(Math.random() * 800));
+    await addBtn.click({ delay: 11 });
     // Race three success signals:
     //   btn-flip: Sony replaces the <button> with an <a data-qa="mfeCtaMain#cta#action">
     //             whose text is "Download from Library" (ctaType flips to DOWNLOAD).
