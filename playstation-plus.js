@@ -6,7 +6,7 @@ import {
   handleSIGINT, closeContextSafely, log, cleanProfileLocks, awaitUserCaptchaSolve,
 } from './src/util.js';
 import { cfg } from './src/config.js';
-import { siteVersion } from './src/sites.js';
+import { siteVersion, WEBGL_HARDENING_ARGS } from './src/sites.js';
 import {
   discoverMonthlyRaw, discoverCatalog, matchMonthlyToCatalog, URL_WHATS_NEW,
 } from './src/playstation-plus-catalog.js';
@@ -30,7 +30,7 @@ const context = await chromium.launchPersistentContext(PROFILE_DIR, {
   viewport: { width: cfg.width, height: cfg.height },
   locale: 'en-US',
   handleSIGINT: false,
-  args: ['--hide-crash-restore-bubble'],
+  args: ['--hide-crash-restore-bubble', ...WEBGL_HARDENING_ARGS],
 });
 handleSIGINT(context);
 if (!cfg.debug) context.setDefaultTimeout(cfg.timeout);

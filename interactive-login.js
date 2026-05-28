@@ -8,7 +8,7 @@ import { chromium } from 'patchright';
 import { datetime, notify, jsonDb, normalizeTitle, cleanProfileLocks } from './src/util.js';
 import { cfg } from './src/config.js';
 import { describeConfig, patchConfig, describeEnv, getSchedulerConfig, CONFIG_FILE_PATH } from './src/app-config.js';
-import { SITES as SITE_REGISTRY, getLoginSitesById, getClaimScriptOrder, getLinkedActiveMap, getClaimDbFiles, getServiceRows } from './src/sites.js';
+import { SITES as SITE_REGISTRY, getLoginSitesById, getClaimScriptOrder, getLinkedActiveMap, getClaimDbFiles, getServiceRows, WEBGL_HARDENING_ARGS } from './src/sites.js';
 import { fetchGamerPowerGiveaways, filterFor as filterGpFor, COLLECTOR_PATTERNS as GP_COLLECTOR_PATTERNS, GP_TITLE_HINTS } from './src/gamerpower.js';
 import { fetchFGFPosts, filterFor as filterFgfFor, cleanTitle as fgfCleanTitle, COLLECTOR_TITLE_PATTERNS as FGF_COLLECTOR_PATTERNS } from './src/freegamefindings.js';
 
@@ -127,7 +127,9 @@ async function launchSite(siteId) {
     viewport: { width: cfg.width, height: cfg.height },
     locale: 'en-US',
     handleSIGINT: false,
-    args: ['--hide-crash-restore-bubble'],
+    // hardenWebgl sites (PlayStation → Akamai) get SwiftShader/WebGL flags so
+    // the login context's GPU fingerprint matches the check + runner contexts.
+    args: ['--hide-crash-restore-bubble', ...(site.hardenWebgl ? WEBGL_HARDENING_ARGS : [])],
     ...(site.contextOptions || {}),
   });
 
@@ -231,7 +233,11 @@ async function checkSiteStatus(siteId) {
       viewport: { width: cfg.width, height: cfg.height },
       locale: 'en-US',
       handleSIGINT: false,
-      args: ['--hide-crash-restore-bubble', '--no-sandbox', '--disable-gpu'],
+      // hardenWebgl sites drop --disable-gpu (which would defeat WebGL) in favor
+      // of the SwiftShader set, so the check context's fingerprint matches login.
+      args: site.hardenWebgl
+        ? ['--hide-crash-restore-bubble', '--no-sandbox', ...WEBGL_HARDENING_ARGS]
+        : ['--hide-crash-restore-bubble', '--no-sandbox', '--disable-gpu'],
       ...(site.contextOptions || {}),
     });
 
@@ -341,7 +347,7 @@ async function importSiteCookies(siteId, rawCookies) {
       viewport: { width: cfg.width, height: cfg.height },
       locale: 'en-US',
       handleSIGINT: false,
-      args: ['--hide-crash-restore-bubble'],
+      args: ['--hide-crash-restore-bubble', ...(site.hardenWebgl ? WEBGL_HARDENING_ARGS : [])],
       ...(site.contextOptions || {}),
     });
     await context.addCookies(normalized);

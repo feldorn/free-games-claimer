@@ -50,6 +50,17 @@
 import { devices } from 'patchright';
 import { cfg } from './config.js';
 
+// GPU / WebGL fingerprint hardening for sites behind aggressive bot managers
+// (PlayStation → Akamai). In a container without GPU passthrough, default
+// Chromium can end up with WebGL disabled or in a broken state, which is a
+// strong bot tell; SwiftShader gives a consistent software-rendered WebGL
+// that looks like a real browser doing software rendering ("Google SwiftShader")
+// instead of "no WebGL". Same set microsoft.js uses (2.8.18). Opt-in per site
+// via `hardenWebgl: true` so the working desktop logins stay unchanged, and so
+// a site's login / session-check / claim contexts all present the SAME WebGL
+// fingerprint (a mismatch across contexts is itself a bot signal).
+export const WEBGL_HARDENING_ARGS = ['--use-gl=swiftshader', '--enable-webgl', '--ignore-gpu-blocklist', '--enable-unsafe-webgpu'];
+
 // Read the signed-in Microsoft Rewards user via the dashboard's own
 // dapi/me endpoint. page.request inherits the browser context's cookies, so a
 // valid session authenticates automatically. Returns null on any failure so
@@ -378,6 +389,9 @@ export const SITES = [
     claimDbFile: 'playstation-plus.json',
     scheduleKind: 'daily-chain',
     features: ['captcha-marker'],
+    // Sony fronts the store with Akamai Bot Manager — harden the WebGL/GPU
+    // fingerprint in GPU-less containers (see WEBGL_HARDENING_ARGS above).
+    hardenWebgl: true,
     configFields: [
       { key: 'maxClaimsPerRun',  env: 'PSP_MAX_CLAIMS_PER_RUN',  type: 'number', default: 5,
         label: 'Max backlog claims per run', unit: 'games',
