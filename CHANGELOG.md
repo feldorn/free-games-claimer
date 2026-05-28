@@ -4,6 +4,16 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.19
+
+**Epic Games: all claims were silently failing — checkout button text changed.** Around 2026-05-28 Epic relabeled the confirm button in their checkout modal (`#webPurchaseContainer` iframe) from **"Place Order"** to **"Add to library"**. The script's two click sites still targeted the old text, so the click never fired and `Promise.race()` timed out without any captcha — every Epic claim silently failed and got mis-classified as "captcha-failed." Caught and diagnosed in detail by @amphoterism on [#59](https://github.com/feldorn/free-games-claimer/issues/59), with the exact selector locations and a screenshot of the new button.
+
+Fix: both locators (main claim path, `epic-games.js` ~line 500, and retry path ~line 637) now match **either** button text — `button:has-text("Add to library")` *or* `button:has-text("Place Order")`. Both preserve the existing `:not(:has(.payment-loading--loading))` guard. Keeping the old text as a fallback means we stay resilient if Epic flips back or surfaces "Place Order" in some regions / flows.
+
+Pull `:latest` (build is auto-publishing) — Epic claims work again. Three free games this week (Calico, LONESTAR, Northgard) are still available, so a manual run after the pull should catch them.
+
+---
+
 ## What's new in 2.8.18
 
 **MS Rewards: SwiftShader + explicit WebGL flags to harden the WebGL fingerprint.** Follow-on to 2.8.15 after @mzernetsch's data on [#56](https://github.com/feldorn/free-games-claimer/issues/56) made clear that result-clicking alone wasn't his lever — his solution was a bundle, and GPU/WebGL flags were in it. In a container with no GPU passthrough, Chromium without these flags can end up with WebGL either disabled or in a weird "broken-WebGL" state — both are stronger bot tells than a clean software-rendered WebGL fingerprint.

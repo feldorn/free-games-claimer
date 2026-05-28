@@ -497,7 +497,12 @@ try {
         }
 
         // Playwright clicked before button was ready to handle event, https://github.com/vogler/free-games-claimer/issues/84#issuecomment-1474346591
-        await iframe.locator('button:has-text("Place Order"):not(:has(.payment-loading--loading))').click({ delay: 11 });
+        // Epic relabeled the confirm button from "Place Order" → "Add to
+        // library" around 2026-05-28 (reported by @amphoterism on #59) —
+        // every claim silently timed out because the old selector no
+        // longer matched. Accept either text so we stay resilient if Epic
+        // flips back or surfaces "Place Order" in some regions/flows.
+        await iframe.locator('button:has-text("Add to library"):not(:has(.payment-loading--loading)), button:has-text("Place Order"):not(:has(.payment-loading--loading))').first().click({ delay: 11 });
 
         // I Agree button is only shown for EU accounts! https://github.com/vogler/free-games-claimer/pull/7#issuecomment-1038964872
         const btnAgree = iframe.locator('button:has-text("I Accept")');
@@ -634,7 +639,12 @@ try {
         const iframe = page.frameLocator('#webPurchaseContainer iframe');
         const btnAgree = iframe.locator('button:has-text("I Accept")');
         btnAgree.waitFor().then(() => btnAgree.click()).catch(_ => { });
-        await iframe.locator('button:has-text("Place Order"):not(:has(.payment-loading--loading))').click({ delay: 11 });
+        // Epic relabeled the confirm button from "Place Order" → "Add to
+        // library" around 2026-05-28 (reported by @amphoterism on #59) —
+        // every claim silently timed out because the old selector no
+        // longer matched. Accept either text so we stay resilient if Epic
+        // flips back or surfaces "Place Order" in some regions/flows.
+        await iframe.locator('button:has-text("Add to library"):not(:has(.payment-loading--loading)), button:has-text("Place Order"):not(:has(.payment-loading--loading))').first().click({ delay: 11 });
         // Same three-signal race as the main claim path above — see the
         // fuller comment there. Modal-text + popup-buttons + CTA-flip,
         // whichever fires first wins.
