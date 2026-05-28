@@ -4,6 +4,18 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.16
+
+**Lenovo drop notifications now re-arm when Lenovo reschedules a drop** — follow-up to 2.8.6. That release fixed the stale-`scheduledAt` refetch (a "Coming Soon" drop whose date Lenovo had bumped), but it corrected only the *date*, not the per-drop wake flags. So a drop whose `1h-before` / `5min-before` / `wentLive` wakes had already been marked sent — against the earlier, now-past date — inherited those "done" flags after the date was corrected, and the real drop-time notification never fired.
+
+Concretely: "Heavy Rain - Game Key Drops pt. 2" was scheduled Apr 15, its three wakes got marked sent on May 14 (suppressed as ">5min late" against the stale April date), 2.8.6 corrected the date to May 27, and then the May 27 drop went live with **no notification** because `computeNextLenovoWake` skips wakes already flagged sent.
+
+Fix: when the watcher detects a drop's `scheduledAt` has actually changed, it now resets the `1h-before` / `5min-before` / `wentLive` flags (keeping `discovered` and `restocked`) so all three pushes re-fire against the new date. Same-date re-confirmations don't reset anything. Verified across reschedule / unchanged / new-drop cases.
+
+Note: a drop that already fired silently before this release (its date is now correct but flags are stale) won't retroactively notify — its wakes are in the past and get suppressed as late. This fix prevents the silent-miss on the *next* reschedule.
+
+---
+
 ## What's new in 2.8.15
 
 **MS Rewards search loop now clicks results occasionally, to look more human.** A maintainer hit the *"Unusual search activity may limit your ability to earn points"* banner on a clean residential IP with default timing and matching geo — which rules out IP reputation, velocity, and geo-mismatch, pointing at behavioral detection. The biggest tell: our search loop searched and left **every** time, never clicking a result. Real users who search almost always click something.

@@ -236,9 +236,28 @@ try {
               return m ? m[0] : null;
             }).catch(() => null);
             if (isoLocal) {
+              const newScheduledAt = etToUtcIso(isoLocal);
+              const dateChanged = newScheduledAt && newScheduledAt !== drop.scheduledAt;
               drop.widgetId = widgetId;
               drop.scheduledAtRaw = isoLocal; // ET wall-clock
-              drop.scheduledAt = etToUtcIso(isoLocal);
+              drop.scheduledAt = newScheduledAt;
+              // When Lenovo reschedules a drop (the date moves), reset the
+              // per-drop wake flags so the 1h / 5min / at-drop pushes fire
+              // against the NEW date. Without this, a drop whose wakes were
+              // marked sent against an earlier date inherits those "done"
+              // flags when the date is corrected, and the real drop-time
+              // notification never goes out. 2.8.6 fixed the stale-date
+              // refetch but not the flags: Heavy Rain pt.2 moved
+              // Apr 15 -> May 27, its wakes were marked sent May 14 (as
+              // ">5min late" against the stale date), and the corrected
+              // May 27 drop then fired silently. Resetting on change makes
+              // the next reschedule re-notify correctly.
+              if (dateChanged && drop.notifications) {
+                drop.notifications['1h-before'] = null;
+                drop.notifications['5min-before'] = null;
+                drop.notifications.wentLive = null;
+                log.info(`${drop.title}: rescheduled to ${isoLocal} ET — reset wake notifications so they re-fire against the new date`);
+              }
             }
           }
         } finally {
