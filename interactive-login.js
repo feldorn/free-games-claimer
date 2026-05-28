@@ -2199,11 +2199,18 @@ async function fireLenovoWake(wake) {
   if (!drop) return; // dropped from state somehow
   if (drop.userCollected) return; // user collected between schedule and fire
 
-  // Past-target safety: if we're firing more than 5 min late (system was
-  // suspended, container restarted), mark as sent without a notification —
-  // the user already knows the drop happened.
+  // Past-target safety. Pre-alerts ("drop in 1h / 5min") are worthless
+  // once stale — a late one is just confusing — so suppress them beyond
+  // 5 min late (system suspended, container restarted across the wake).
+  // The at-drop "LIVE NOW" wake is different: a limited-key drop is
+  // usually still claimable for a while after it opens, so a late
+  // "it's live, hurry" is still actionable. Allow wentLive up to 12h
+  // late before suppressing — long enough to cover a same-day restart,
+  // bounded so we don't ping about a drop that's days gone. (computeNext-
+  // LenovoWake already excludes ended/expired/postponed drops, so a
+  // wentLive wake only exists for one we still believe is live.)
   const lateBy = Date.now() - wake.target.getTime();
-  const SUPPRESS_LATE_THRESHOLD = 5 * 60 * 1000;
+  const SUPPRESS_LATE_THRESHOLD = wake.kind === 'wentLive' ? 12 * 60 * 60 * 1000 : 5 * 60 * 1000;
   if (lateBy > SUPPRESS_LATE_THRESHOLD) {
     console.log(`[${datetime()}] Lenovo: ${wake.kind} for "${drop.title}" is ${Math.round(lateBy / 60000)}m late — marking sent without notify`);
     drop.notifications = drop.notifications || {};
@@ -2223,7 +2230,16 @@ async function fireLenovoWake(wake) {
   } else if (wake.kind === '5min-before') {
     body = `Lenovo Gaming: drop in 5 minutes — ${drop.title}<br>Get in queue<br>${drop.url}`;
   } else { // wentLive
-    body = `Lenovo Gaming: drop is LIVE NOW — ${drop.title}<br>Claim before keys run out<br>${drop.url}`;
+    // When we're fired on time the "LIVE NOW" framing is accurate; when
+    // we're catching up after a restart, say how long ago it opened so
+    // the user knows keys may already be limited rather than expecting a
+    // fresh drop.
+    const lateMin = Math.round(lateBy / 60000);
+    const liveNote = lateBy > 10 * 60 * 1000
+      ? `Went live ~${lateMin >= 120 ? Math.round(lateMin / 60) + 'h' : lateMin + 'm'} ago — keys may be limited`
+      : 'Claim before keys run out';
+    const header = lateBy > 10 * 60 * 1000 ? 'drop is LIVE' : 'drop is LIVE NOW';
+    body = `Lenovo Gaming: ${header} — ${drop.title}<br>${liveNote}<br>${drop.url}`;
     drop.status = 'active'; // promote local view; watcher will confirm next cycle
     drop.lastStatusChange = datetime();
   }

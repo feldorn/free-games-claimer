@@ -4,6 +4,14 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.17
+
+**Lenovo "drop is LIVE" notification now fires even if we're catching up late.** The wake-firing path suppressed *any* wake more than 5 minutes past its target (to avoid stale backlog pings after a container restart). That's right for the pre-alerts — a late "drop in 1 hour" is just confusing — but wrong for the at-drop "LIVE NOW" wake: a limited-key Lenovo drop is usually still claimable for a while after it opens, so a late "it's live, hurry" is still actionable.
+
+Now the suppression threshold is per-kind: `1h-before` / `5min-before` stay at 5 minutes; `wentLive` is allowed up to **12 hours** late before suppressing — long enough to cover a same-day restart across the drop moment, bounded so we don't ping about a drop that's days gone. (`computeNextLenovoWake` already excludes ended/expired/postponed drops, so a `wentLive` wake only exists for one we still believe is live.) When it does fire late, the body is honest about it — "drop is LIVE … Went live ~Nh ago — keys may be limited" instead of an inaccurate "LIVE NOW".
+
+---
+
 ## What's new in 2.8.16
 
 **Lenovo drop notifications now re-arm when Lenovo reschedules a drop** — follow-up to 2.8.6. That release fixed the stale-`scheduledAt` refetch (a "Coming Soon" drop whose date Lenovo had bumped), but it corrected only the *date*, not the per-drop wake flags. So a drop whose `1h-before` / `5min-before` / `wentLive` wakes had already been marked sent — against the earlier, now-past date — inherited those "done" flags after the date was corrected, and the real drop-time notification never fired.
