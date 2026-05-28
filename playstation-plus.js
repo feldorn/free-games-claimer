@@ -193,18 +193,21 @@ async function claimOne(page, entry, opts = { priority: false }) {
 
   const cta = String(meta.ctaType || '').toUpperCase();
 
-  // Trial filter. Sony has _PS_PLUS_TRIAL variants of the entire ctaType
-  // enum (ADD_TO_LIBRARY_PS_PLUS_TRIAL pre-claim, DOWNLOAD_PS_PLUS_TRIAL
-  // post-claim). These are 2-3 hour Premium-tier timed demos, not real
-  // keeper claims. Clicking the trial CTA adds the trial to the library —
-  // not what we want. Skip with a distinct status so they don't pollute
-  // the claimed-count and aren't retried.
+  // Trial filter. Sony has _PS_PLUS_TRIAL variants across the ctaType enum,
+  // but only the ADD variant (ADD_TO_LIBRARY_PS_PLUS_TRIAL) is a "don't claim"
+  // case — clicking it adds a 2-3h Premium timed demo, not a keeper. The
+  // DOWNLOAD/OWNED variants (e.g. DOWNLOAD_PS_PLUS_TRIAL, button text
+  // "Download from Library") mean the title is ALREADY in the library, so
+  // they're an owned/existed case handled below — NOT a trial to skip and
+  // retry every run. Observed 2026-05-28: a *purchased* game (Clair Obscur,
+  // offer "In library" selected) reported DOWNLOAD_PS_PLUS_TRIAL and was
+  // wrongly skipped as a trial on every run.
   //
   // Catalog scrape filters trials out at the source (the "Game trials"
-  // section heading), but defense-in-depth here catches any trial that
-  // slips through — e.g. monthly orphans claimed via slug URL where we
-  // don't have the section-heading signal.
-  if (/_TRIAL\b|_TRIAL_/.test(cta)) {
+  // section heading); this is defense-in-depth for anything that slips
+  // through — e.g. monthly orphans claimed via slug URL where we don't have
+  // the section-heading signal.
+  if (cta.startsWith('ADD_TO_LIBRARY') && /_TRIAL/.test(cta)) {
     log.skip(entry.title, `trial — not a keeper (ctaType=${cta})`);
     row.status = notify_game.status = 'skipped:trial';
     return 'skipped';
@@ -250,7 +253,10 @@ async function claimOne(page, entry, opts = { priority: false }) {
     return 'failed';
   }
 
-  if (cta === 'OWNED' || cta === 'IN_LIBRARY' || cta === 'DOWNLOAD') {
+  // Already in the library. Anchored at start so the _PS_PLUS_TRIAL download
+  // variant (owned game whose download CTA Sony tags with the trial suffix)
+  // is correctly treated as owned, not as a claimable trial.
+  if (/^(OWNED|IN_LIBRARY|DOWNLOAD)/.test(cta)) {
     log.owned(entry.title);
     row.status = notify_game.status = 'existed';
     return 'existed';
