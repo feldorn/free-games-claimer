@@ -50,6 +50,17 @@
 import { devices } from 'patchright';
 import { cfg } from './config.js';
 
+// GPU / WebGL fingerprint hardening for sites behind aggressive bot managers
+// (PlayStation → Akamai). In a container without GPU passthrough, default
+// Chromium can end up with WebGL disabled or in a broken state, which is a
+// strong bot tell; SwiftShader gives a consistent software-rendered WebGL
+// that looks like a real browser doing software rendering ("Google SwiftShader")
+// instead of "no WebGL". Same set microsoft.js uses (2.8.18). Opt-in per site
+// via `hardenWebgl: true` so the working desktop logins stay unchanged, and so
+// a site's login / session-check / claim contexts all present the SAME WebGL
+// fingerprint (a mismatch across contexts is itself a bot signal).
+export const WEBGL_HARDENING_ARGS = ['--use-gl=swiftshader', '--enable-webgl', '--ignore-gpu-blocklist', '--enable-unsafe-webgpu'];
+
 // Read the signed-in Microsoft Rewards user via the dashboard's own
 // dapi/me endpoint. page.request inherits the browser context's cookies, so a
 // valid session authenticates automatically. Returns null on any failure so
@@ -351,6 +362,79 @@ export const SITES = [
         // path skips entries with .error set — without this, a goto
         // timeout right after a heavy claim run silently became a
         // false "session expired" notification (observed 2026-05-25).
+        return { loggedIn: false, error: (e && e.message ? e.message.split('\n')[0] : String(e)).slice(0, 200) };
+      }
+    },
+  },
+  {
+    id: 'playstation-plus',
+    name: 'PlayStation Plus',
+    version: '1.0',
+    subtitle: 'Monthly Essentials (priority) + Extra/Premium catalog drain. Requires an active PS Plus subscription.',
+    script: 'playstation-plus.js',
+    // Appended after Lenovo's 10 rather than inserted between Steam (4)
+    // and AliExpress (5). Two reasons: (a) avoids renumbering existing
+    // entries — no chance of accidentally disturbing other services; and
+    // (b) PS Plus has the highest bot-detection risk in the chain (Sony's
+    // Akamai layer), so running last means a hang or circuit-breaker abort
+    // doesn't delay anything earlier in the chain.
+    claimOrder: 11,
+    loginUrl: 'https://www.playstation.com/en-us/ps-plus/whats-new/',
+    homeUrl: 'https://www.playstation.com/en-us/ps-plus/whats-new/',
+    get browserDir() { return cfg.dir.browser + '-playstation'; },
+    contextOptions: null,
+    defaultActive: false,
+    activeEnv: 'PSP_ACTIVE',
+    linkedWith: null,
+    claimDbFile: 'playstation-plus.json',
+    scheduleKind: 'daily-chain',
+    features: ['captcha-marker'],
+    // Sony fronts the store with Akamai Bot Manager — harden the WebGL/GPU
+    // fingerprint in GPU-less containers (see WEBGL_HARDENING_ARGS above).
+    hardenWebgl: true,
+    configFields: [
+      { key: 'maxClaimsPerRun',  env: 'PSP_MAX_CLAIMS_PER_RUN',  type: 'number', default: 5,
+        label: 'Max backlog claims per run', unit: 'games',
+        hint: 'Monthly Essentials are always claimed in full (priority pass); this caps only the Extra/Premium catalog drain.',
+        coerce: { kind: 'numberBounded', min: 0, fallback: 5 } },
+      { key: 'claimPauseMinSec', env: 'PSP_CLAIM_PAUSE_MIN_SEC', type: 'number', default: 25,
+        label: 'Min pause between claims', unit: 'seconds',
+        coerce: { kind: 'numberBounded', min: 0, fallback: 25 } },
+      { key: 'claimPauseMaxSec', env: 'PSP_CLAIM_PAUSE_MAX_SEC', type: 'number', default: 35,
+        label: 'Max pause between claims', unit: 'seconds',
+        coerce: { kind: 'numberBounded', min: 0, fallback: 35 } },
+    ],
+    async checkLogin(page) {
+      try {
+        await page.goto('https://www.playstation.com/en-us/ps-plus/whats-new/', { waitUntil: 'domcontentloaded', timeout: 20000 });
+        // Mirror the runner's ensureLoggedIn detection (playstation-plus.js):
+        // let the page settle, then WAIT for the profile-menu element to
+        // attach rather than snapshotting its presence after a fixed delay.
+        // The whats-new page (geo-redirect + consent + React hydration) takes
+        // >3s to hydrate `.psw-c-secondary` in headless/container — a fixed
+        // 3s wait + count() therefore fired too early and reported a false
+        // "not logged in" on every health check, while the scheduled run
+        // (which waits up to 8s for `attached`) logged in fine on the same
+        // profile seconds earlier.
+        await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+        if (/my\.account\.sony\.com|signin\.account\.sony\.com/.test(page.url())) return { loggedIn: false };
+        const userEl = page.locator('.psw-c-secondary').first();
+        const signIn = page.locator('span:has-text("Sign in"), a:has-text("Sign in")').first();
+        // .psw-c-secondary is attached (not visible) when logged in; the
+        // "Sign in" CTA is visible when signed out. Race them so a slow
+        // hydration can't be misread as signed-out.
+        const detected = await Promise.race([
+          userEl.waitFor({ state: 'attached', timeout: 8000 }).then(() => 'logged-in'),
+          signIn.waitFor({ state: 'visible', timeout: 8000 }).then(() => 'signed-out'),
+        ]).catch(() => 'unknown');
+        if (detected !== 'logged-in') return { loggedIn: false };
+        // textContent (not innerText) — .psw-c-secondary lives inside the
+        // hidden-until-opened profile dropdown. innerText returns '' for
+        // non-rendered elements, so the username would silently come back
+        // as 'unknown' on every session check.
+        const user = (await userEl.textContent().catch(() => '') || '').trim();
+        return { loggedIn: true, user: user || 'unknown' };
+      } catch (e) {
         return { loggedIn: false, error: (e && e.message ? e.message.split('\n')[0] : String(e)).slice(0, 200) };
       }
     },

@@ -4,6 +4,24 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## 2.9.0 — feat(ps-plus): PlayStation Plus collector
+
+Adds an opt-in `playstation-plus` collector that claims expiring monthly Essential picks first (priority pass, no rate limit) and drains the PS-Plus-included catalog at a configurable rate (default 5 backlog claims per run with 25-35s jitter pauses). Requires an active PS Plus subscription (any tier).
+
+- **Two-source discovery.** Monthly Essentials from `/ps-plus/whats-new/` (scrape "Find out more" anchors); catalog backlog from `/ps-plus/games/` (scrape concept URLs). Monthlies whose titles match the catalog scrape get claimed via the canonical `store.playstation.com/concept/<id>` URL; monthlies not in the catalog (the common case for time-limited Essentials) get claimed via their `playstation.com/games/<slug>/` URL directly — Sony serves the same `mfeCtaMain` CTA component on both, so one claim path handles both URL shapes.
+- **Per-game claim reads** `data-qa="mfeCtaMain#cta#action"`'s `data-telemetry-meta` JSON to branch on `ctaType` (`ADD_TO_LIBRARY` / `OWNED` / `IN_LIBRARY` / `DOWNLOAD` / other).
+- **Full paginated catalog scrape (~600+ keepers).** Sony paginates the catalog page (36+ pages, ~17 keepers each); the runner clicks through each page sequentially via `a[aria-label="Go to page N"]` and accumulates concepts. First scrape from the public landing surfaced only the page-1 alphabetic head (A-Ap) before this commit. Adds ~75s to the catalog discovery step but materially expands the drainable backlog.
+- **Trial filter** at scrape AND claim time. The catalog page also mixes ~218 PS Plus Premium timed-demo *trials* (`<section id="trials">`) alongside the keeper catalog (`<section id="plus-container">`). Sony reuses the `ADD_TO_LIBRARY` CTA for both, just with a `_PS_PLUS_TRIAL`-suffixed `ctaType` for trials. The scraper allowlists keepers via the section id; `claimOne` adds defense-in-depth that skips any `ctaType` containing `_TRIAL` (`skipped:trial` status) so the runner never accidentally adds a trial to the library.
+- **Access-Denied recovery.** Per-claim retry-via-catalog-bounce + run-level circuit breaker after 3 consecutive blocks. Failure path screenshots to `data/screenshots/playstation-plus/`.
+- **Rotate-to-bottom retry queue.** Failed catalog candidates sort to the back of the queue by `lastAttemptedAt`, so a persistently-failing game never blocks budget.
+- **FunCaptcha handoff** (Sony's Arkose vendor for login) via the existing `awaitUserCaptchaSolve` helper + noVNC pause.
+- **Settings UI** surfaces `maxClaimsPerRun`, `claimPauseMin/MaxSec`. Credentials (`PSP_EMAIL`, `PSP_PASSWORD`, `PSP_OTPKEY`) are env-only per project convention.
+- **First fork-side automated tests.** 67 assertion-based tests across `npm test`: pure-helper unit tests (`test/ps-catalog.js`), config-schema tests (`test/ps-config-schema.js`), and panel-API integration tests that spawn `interactive-login.js` on a separate port and exercise `/api/config` + `/api/state` (`test/ps-panel-api.js`).
+
+See [docs/CONFIGURATION.md](docs/CONFIGURATION.md#playstation-plus) for onboarding (cookie-only or fully-automated).
+
+---
+
 ## What's new in 2.8.18
 
 **MS Rewards: SwiftShader + explicit WebGL flags to harden the WebGL fingerprint.** Follow-on to 2.8.15 after @mzernetsch's data on [#56](https://github.com/feldorn/free-games-claimer/issues/56) made clear that result-clicking alone wasn't his lever — his solution was a bundle, and GPU/WebGL flags were in it. In a container with no GPU passthrough, Chromium without these flags can end up with WebGL either disabled or in a weird "broken-WebGL" state — both are stronger bot tells than a clean software-rendered WebGL fingerprint.

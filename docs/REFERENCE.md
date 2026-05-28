@@ -37,6 +37,7 @@ We've shipped what the JS layer can shim — viewport unification, persistent fi
 | **GOG** | Reliable | Soft captcha occasionally. |
 | **Steam** | Reliable | Free-to-keep flow has no fingerprint scoring. |
 | **Microsoft Rewards** | Reliable | Humanlike search timing required (built-in); runs take 30–45 min by design. |
+| **PlayStation Plus** | Reliable with caveats | Sony's Akamai bot manager occasionally returns Access Denied on `store.playstation.com/concept/<id>` navigations (~30% during inspection). Per-claim retry bounces off the catalog page; run-level circuit breaker aborts after 3 consecutive blocks to avoid raising the account's bot score. Monthly Essentials are always claimed first (priority pass, no rate limit) because they expire each month. Conservative pacing defaults: 5 catalog drains per run with 25-35s jitter between claims. |
 | **AliExpress** | **Deprecated channel — declining reliability** | Web coin collection is being phased out by AliExpress in favor of the mobile app (upstream confirms since Dec 2024). Works for some accounts, gates others with the AWSC slider, escalates long-running accounts to the "Network and device" prompt. **Manual cookie refresh every few weeks** is the realistic posture. We do not recommend depending on it. |
 | **Watchers** (Lenovo, Humble, Fanatical, Ubisoft) | Reliable | No login, no scoring, no detection issues. |
 

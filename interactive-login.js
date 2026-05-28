@@ -8,7 +8,7 @@ import { chromium } from 'patchright';
 import { datetime, notify, jsonDb, normalizeTitle, cleanProfileLocks } from './src/util.js';
 import { cfg } from './src/config.js';
 import { describeConfig, patchConfig, describeEnv, getSchedulerConfig, CONFIG_FILE_PATH } from './src/app-config.js';
-import { SITES as SITE_REGISTRY, getLoginSitesById, getClaimScriptOrder, getLinkedActiveMap, getClaimDbFiles, getServiceRows } from './src/sites.js';
+import { SITES as SITE_REGISTRY, getLoginSitesById, getClaimScriptOrder, getLinkedActiveMap, getClaimDbFiles, getServiceRows, WEBGL_HARDENING_ARGS } from './src/sites.js';
 import { fetchGamerPowerGiveaways, filterFor as filterGpFor, COLLECTOR_PATTERNS as GP_COLLECTOR_PATTERNS, GP_TITLE_HINTS } from './src/gamerpower.js';
 import { fetchFGFPosts, filterFor as filterFgfFor, cleanTitle as fgfCleanTitle, COLLECTOR_TITLE_PATTERNS as FGF_COLLECTOR_PATTERNS } from './src/freegamefindings.js';
 
@@ -127,7 +127,9 @@ async function launchSite(siteId) {
     viewport: { width: cfg.width, height: cfg.height },
     locale: 'en-US',
     handleSIGINT: false,
-    args: ['--hide-crash-restore-bubble'],
+    // hardenWebgl sites (PlayStation → Akamai) get SwiftShader/WebGL flags so
+    // the login context's GPU fingerprint matches the check + runner contexts.
+    args: ['--hide-crash-restore-bubble', ...(site.hardenWebgl ? WEBGL_HARDENING_ARGS : [])],
     ...(site.contextOptions || {}),
   });
 
@@ -173,6 +175,7 @@ async function verifyAndClose() {
 
   if (result.loggedIn) {
     console.log(`[${datetime()}] Login verified for ${site.name} as ${result.user}. Saving session.`);
+    if (siteId === 'playstation-plus') await logPsnCookies(context, 'login-verify (logged-in context, pre-close)');
     siteStatus[siteId] = { status: 'logged_in', user: result.user, checkedAt: datetime() };
     await context.close();
     activeBrowser = null;
@@ -190,6 +193,24 @@ async function closeBrowser() {
     await activeBrowser.context.close();
   } catch {}
   activeBrowser = null;
+}
+
+// TEMP diagnostic (playstation-plus session-persistence investigation, 2026-05-28).
+// Logs the PSN cookie state of a context so we can tell, across the
+// login -> close -> re-open(check) cycle, whether the session is (a) written
+// to disk and reloaded, or (b) written-then-rejected by Sony/Akamai. Remove
+// once the PS Plus "logged in then immediately logged out" issue is resolved.
+async function logPsnCookies(context, when) {
+  try {
+    const cookies = await context.cookies();
+    const psn = cookies.filter(c => /sony|playstation/i.test(c.domain || ''));
+    const sessionScoped = psn.filter(c => !c.expires || c.expires === -1).length;
+    const signedIn = psn.find(c => c.name === 'isSignedIn');
+    const abck = psn.find(c => c.name === '_abck');
+    console.log(`[${datetime()}] [psn-cookie-debug] ${when}: total=${cookies.length} psn=${psn.length} sessionScoped=${sessionScoped} isSignedIn=${signedIn ? `present(exp=${signedIn.expires})` : 'MISSING'} _abck=${abck ? 'present' : 'MISSING'}`);
+  } catch (e) {
+    console.log(`[${datetime()}] [psn-cookie-debug] ${when}: failed to read cookies — ${e.message}`);
+  }
 }
 
 let checkInProgress = false;
@@ -212,11 +233,16 @@ async function checkSiteStatus(siteId) {
       viewport: { width: cfg.width, height: cfg.height },
       locale: 'en-US',
       handleSIGINT: false,
-      args: ['--hide-crash-restore-bubble', '--no-sandbox', '--disable-gpu'],
+      // hardenWebgl sites drop --disable-gpu (which would defeat WebGL) in favor
+      // of the SwiftShader set, so the check context's fingerprint matches login.
+      args: site.hardenWebgl
+        ? ['--hide-crash-restore-bubble', '--no-sandbox', ...WEBGL_HARDENING_ARGS]
+        : ['--hide-crash-restore-bubble', '--no-sandbox', '--disable-gpu'],
       ...(site.contextOptions || {}),
     });
 
     const page = context.pages()[0] || await context.newPage();
+    if (siteId === 'playstation-plus') await logPsnCookies(context, 'check (fresh context, cookies loaded from disk)');
     const result = await site.checkLogin(page);
     siteStatus[siteId] = {
       status: result.loggedIn ? 'logged_in' : 'not_logged_in',
@@ -321,7 +347,7 @@ async function importSiteCookies(siteId, rawCookies) {
       viewport: { width: cfg.width, height: cfg.height },
       locale: 'en-US',
       handleSIGINT: false,
-      args: ['--hide-crash-restore-bubble'],
+      args: ['--hide-crash-restore-bubble', ...(site.hardenWebgl ? WEBGL_HARDENING_ARGS : [])],
       ...(site.contextOptions || {}),
     });
     await context.addCookies(normalized);
@@ -8354,6 +8380,7 @@ server.listen(PANEL_PORT, async () => {
       cfg.dir.browser + '-aliexpress',
       cfg.dir.browser + '-mobile',
       cfg.dir.browser + '-lenovo',
+      cfg.dir.browser + '-playstation',
     ];
     let totalRemoved = 0;
     for (const d of sweepDirs) {
