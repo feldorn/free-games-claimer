@@ -393,15 +393,32 @@ export const SITES = [
     async checkLogin(page) {
       try {
         await page.goto('https://www.playstation.com/en-us/ps-plus/whats-new/', { waitUntil: 'domcontentloaded', timeout: 20000 });
-        await page.waitForTimeout(3000);
+        // Mirror the runner's ensureLoggedIn detection (playstation-plus.js):
+        // let the page settle, then WAIT for the profile-menu element to
+        // attach rather than snapshotting its presence after a fixed delay.
+        // The whats-new page (geo-redirect + consent + React hydration) takes
+        // >3s to hydrate `.psw-c-secondary` in headless/container — a fixed
+        // 3s wait + count() therefore fired too early and reported a false
+        // "not logged in" on every health check, while the scheduled run
+        // (which waits up to 8s for `attached`) logged in fine on the same
+        // profile seconds earlier.
+        await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
         if (/my\.account\.sony\.com|signin\.account\.sony\.com/.test(page.url())) return { loggedIn: false };
         const userEl = page.locator('.psw-c-secondary').first();
-        if (await userEl.count() === 0) return { loggedIn: false };
+        const signIn = page.locator('span:has-text("Sign in"), a:has-text("Sign in")').first();
+        // .psw-c-secondary is attached (not visible) when logged in; the
+        // "Sign in" CTA is visible when signed out. Race them so a slow
+        // hydration can't be misread as signed-out.
+        const detected = await Promise.race([
+          userEl.waitFor({ state: 'attached', timeout: 8000 }).then(() => 'logged-in'),
+          signIn.waitFor({ state: 'visible', timeout: 8000 }).then(() => 'signed-out'),
+        ]).catch(() => 'unknown');
+        if (detected !== 'logged-in') return { loggedIn: false };
         // textContent (not innerText) — .psw-c-secondary lives inside the
         // hidden-until-opened profile dropdown. innerText returns '' for
         // non-rendered elements, so the username would silently come back
         // as 'unknown' on every session check.
-        const user = (await userEl.textContent() || '').trim();
+        const user = (await userEl.textContent().catch(() => '') || '').trim();
         return { loggedIn: true, user: user || 'unknown' };
       } catch (e) {
         return { loggedIn: false, error: (e && e.message ? e.message.split('\n')[0] : String(e)).slice(0, 200) };
