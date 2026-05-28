@@ -356,7 +356,17 @@ try {
     }
   };
 
-  const monthlyWork = monthlyEntries.filter(e => !isTerminal(e.conceptId));
+  // Always re-evaluate every discovered monthly each run — do NOT terminal-skip
+  // them. Monthlies are few (1-3/mo, only the current whats-new set), the
+  // priority pass is unthrottled, and they matter far more than catalog drains.
+  // Re-checking also avoids a stale terminal status permanently hiding a
+  // monthly: Sony's metadata can't reliably tell "owned outright" from
+  // "trial-in-library" (a purchased Clair Obscur reported DOWNLOAD_PS_PLUS_TRIAL),
+  // so a title we once marked 'existed' could later become a free Essential we'd
+  // otherwise skip. Already-owned monthlies resolve cheaply to 'existed' on
+  // re-check. Drains keep the terminal skip — re-checking ~600 catalog titles
+  // every run would be wasteful.
+  const monthlyWork = monthlyEntries;
   const drainCandidates = catalogEntries
     .filter(e => !monthlyIds.has(e.conceptId))
     .filter(e => !isTerminal(e.conceptId))
