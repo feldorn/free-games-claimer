@@ -72,7 +72,7 @@ for (let i = 2; i <= MAX_PAGES; i++) {
   while (waited < 8000) {
     await page.waitForTimeout(500);
     waited += 500;
-    const got = await collectConcepts();
+    await collectConcepts();
     if (allConcepts.size > before) break;
   }
   console.log(`page ${i}: total now ${allConcepts.size}`);
