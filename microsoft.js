@@ -284,6 +284,17 @@ async function createContext(isMobile) {
     handleSIGINT: false,
     args: [
       '--hide-crash-restore-bubble',
+      // GPU / WebGL fingerprint hardening. In a container without GPU
+      // passthrough, Chromium without these flags can end up with WebGL
+      // either disabled or in a weird "broken-WebGL" state — both are
+      // stronger bot tells than the consistent "software-rendered WebGL"
+      // fingerprint you get with SwiftShader (vendor "Google Inc.",
+      // renderer "Google SwiftShader"). Suggested by @mzernetsch on #56
+      // as part of the set of changes that historically cleared MS's
+      // "Unusual search activity" banner. --enable-webgl is default-on
+      // in modern Chromium but kept explicit so the intent is readable.
+      '--use-gl=swiftshader',
+      '--enable-webgl',
       '--ignore-gpu-blocklist',
       '--enable-unsafe-webgpu',
     ],

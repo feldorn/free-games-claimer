@@ -4,6 +4,16 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.18
+
+**MS Rewards: SwiftShader + explicit WebGL flags to harden the WebGL fingerprint.** Follow-on to 2.8.15 after @mzernetsch's data on [#56](https://github.com/feldorn/free-games-claimer/issues/56) made clear that result-clicking alone wasn't his lever — his solution was a bundle, and GPU/WebGL flags were in it. In a container with no GPU passthrough, Chromium without these flags can end up with WebGL either disabled or in a weird "broken-WebGL" state — both are stronger bot tells than a clean software-rendered WebGL fingerprint.
+
+`microsoft.js`'s `createContext` now passes `--use-gl=swiftshader --enable-webgl` alongside the existing `--ignore-gpu-blocklist --enable-unsafe-webgpu`. SwiftShader gives Chromium a known, consistent software renderer (vendor "Google Inc.", renderer "Google SwiftShader") that looks like a real browser doing software rendering, instead of "no WebGL." Isolated to microsoft.js — other claim scripts use their own launches and aren't affected.
+
+Paired (this same day) with a Settings-side bump of `MS_SEARCH_DELAY_MAX_SEC` to 1200 s (was 180 s) — wider random delay between searches further lowers the cumulative-volume signal MS's risk model tracks. Deliberately bundled (vs. staged single-variable testing) because the cost of waiting on an account already showing the banner is real and the per-flag risk is low.
+
+---
+
 ## What's new in 2.8.17
 
 **Lenovo "drop is LIVE" notification now fires even if we're catching up late.** The wake-firing path suppressed *any* wake more than 5 minutes past its target (to avoid stale backlog pings after a container restart). That's right for the pre-alerts — a late "drop in 1 hour" is just confusing — but wrong for the at-drop "LIVE NOW" wake: a limited-key Lenovo drop is usually still claimable for a while after it opens, so a late "it's live, hurry" is still actionable.
