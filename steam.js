@@ -437,26 +437,37 @@ try {
       continue;
     }
 
+    // The five skip paths below previously left the DB row's `status`
+    // field unset, which made cold reads of steam.json ambiguous: a
+    // row without a status looks structurally identical to a write-bug
+    // gap (cf. the prime-gaming internal-claim bug). Setting an
+    // explicit `skipped:<reason>` makes the data self-describing.
+    // Re-evaluation on next run is preserved because line 414's early-
+    // exit only short-circuits on `claimed` / `existed`.
     if (!details.isFree) {
       log.skip(title, 'not currently free on store page');
+      db.data[user][appId].status = 'skipped:not-free';
       skipped++;
       continue;
     }
 
     if (details.rating === null) {
       log.skip(title, 'no reviews (unrated)');
+      db.data[user][appId].status = 'skipped:unrated';
       skipped++;
       continue;
     }
 
     if (details.rating < cfg.steam_min_rating) {
       log.skip(title, `rating ${details.rating}/9 (${details.ratingText}) below min ${cfg.steam_min_rating}`);
+      db.data[user][appId].status = 'skipped:rating';
       skipped++;
       continue;
     }
 
     if (details.originalPrice !== null && details.originalPrice < cfg.steam_min_price) {
       log.skip(title, `price $${details.originalPrice} below min $${cfg.steam_min_price}`);
+      db.data[user][appId].status = 'skipped:price';
       skipped++;
       continue;
     }
@@ -465,6 +476,7 @@ try {
 
     if (cfg.dryrun) {
       log.warn(`dry run, skipping claim`);
+      db.data[user][appId].status = 'skipped:dryrun';
       notify_games.push({ title, url: game.url, status: 'skipped' });
       continue;
     }
