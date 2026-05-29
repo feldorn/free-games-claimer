@@ -45,6 +45,22 @@ log.status('Min price', `$${cfg.steam_min_price}`);
 
 const db = await jsonDb('steam.json', {});
 
+// One-time backfill for historical orphan rows. The Steam filter loop
+// only runs against appIds currently in Steam's free-games-list, so a
+// game that was tracked here but later rolled off the list never re-
+// enters the loop and never gets a status stamped. Pre-hygiene-fix
+// (commit eda3c49) the skip paths didn't write a status at all, so
+// these rows persist as unexplained no-status entries indefinitely.
+// Stamp 'skipped:legacy' so the data is self-describing. Idempotent.
+for (const userRecords of Object.values(db.data || {})) {
+  if (!userRecords || typeof userRecords !== 'object') continue;
+  for (const entry of Object.values(userRecords)) {
+    if (entry && typeof entry === 'object' && !entry.status) {
+      entry.status = 'skipped:legacy';
+    }
+  }
+}
+
 cleanProfileLocks(cfg.dir.browser);
 const context = await chromium.launchPersistentContext(cfg.dir.browser, {
   headless: cfg.headless,

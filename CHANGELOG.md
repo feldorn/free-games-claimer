@@ -4,6 +4,16 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.21
+
+**Stats now counts manually-rescued Epic claims.** Epic's claim script sets `status: 'manual'` on entries where a previous attempt was marked `failed:*` but a later run found the game in the user's library — i.e. the user manually rescued it through Epic's website after our script gave up. The game *is* claimed; the `manual` label just records that the user, not the script, completed it. `readAllClaims` was filtering on `status.startsWith('claimed')` only, so these rescued claims were invisible to Stats — same shape as the pre-2.8.20 Prime bug, just narrower scope.
+
+Fix: the filter now accepts `manual` alongside `claimed*`. Same precedent as Discoveries-marked manual claims being counted since 2.8.1 (it's still a real claim from the user's POV, even though the script didn't drive it).
+
+Plus a small Steam DB-hygiene chore: a one-time backfill at script start stamps `status: 'skipped:legacy'` on any historical Steam row without a status field — these were rows tracked for games no longer in Steam's current free-games-list, so they couldn't self-heal through the regular filter loop. No user-visible behavior change from the Steam piece; just makes a cold read of `steam.json` self-explanatory.
+
+---
+
 ## What's new in 2.8.20
 
 **Pure-Prime claims now actually show up in Stats** — fixing a long-standing data-completeness bug. The internal-Prime claim path in `prime-gaming.js` wrote DB rows with `time`, `url`, `store: 'internal'` — but **no `status` field**. External-store paths (Epic/GOG/MS Store/Legacy) always set `status: 'claimed'` after their click; the internal path never did. `readAllClaims` filters on `status.startsWith('claimed')`, so **every pure-Prime claim ever made on this fork was silently missing from the Stats tab** (KPIs, Per-service, Daily chart, Recent Claims).

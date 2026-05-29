@@ -2530,7 +2530,14 @@ async function readAllClaims() {
       for (const [gameId, entry] of Object.entries(userRecords)) {
         if (!entry || typeof entry !== 'object') continue;
         const status = typeof entry.status === 'string' ? entry.status : '';
-        if (!status.startsWith('claimed')) continue;
+        // 'manual' is set by Epic when a previously-failed claim is later
+        // detected as in-library — the user manually rescued it through
+        // Epic's website. The game IS in their library, so it counts
+        // toward Stats just like a script-claimed entry. (Same precedent
+        // as Discoveries manually-claimed items being included since
+        // 2.8.1.) Without this, every rescued Epic claim was silently
+        // invisible to Stats — same shape as the pre-2.8.20 Prime bug.
+        if (!status.startsWith('claimed') && status !== 'manual') continue;
         const at = parseLocalDateTime(entry.time);
         if (!at) continue;
         raw.push({ service, user, gameId, title: entry.title || gameId, url: entry.url || null, at, status });
