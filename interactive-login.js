@@ -1610,12 +1610,21 @@ function runAllScripts({ source = 'panel', sites = null, extraEnv = null } = {})
       if (code === 0 && /\bnode microsoft\.js\b/.test(cmd)) {
         try { markMsRunFiredToday(); } catch {}
       }
-      // Persist the scheduler-main completion timestamp so a panel
-      // restart doesn't reset the bare-LOOP wake clock (issue #32).
-      // We persist regardless of exit code — the intent is "scheduler
-      // woke up and fired today", a partial-failure shouldn't cause us
-      // to fire again immediately on next restart.
-      if (runSource && runSource.startsWith('scheduler-main')) {
+      // Persist the daily-cadence wake anchor (issue #32) so a panel restart
+      // doesn't reset the bare-LOOP wake clock. Both the scheduled main-chain
+      // run AND a run-on-startup run count as "today's run": anchoring on
+      // startup means a boot run pushes the next scheduled run to 24h from it,
+      // instead of leaving a stale anchor that fires a redundant catch-up run
+      // right after boot. We persist regardless of exit code — a partial
+      // failure still counts as "fired today" so we don't immediately re-fire
+      // on the next restart. Manual "Run Now" ('panel') and the MS loop
+      // ('scheduler-ms') deliberately do NOT anchor the daily cadence.
+      const anchorsDailyRun = !!runSource && (
+        runSource.startsWith('scheduler-main') ||  // the scheduled daily run
+        runSource.startsWith('startup') ||         // RUN_ON_STARTUP=1 boot run
+        runSource.startsWith('scheduler-startup')  // RUN_ON_STARTUP=2 one-shot boot run
+      );
+      if (anchorsDailyRun) {
         void persistMainCompletion();
       }
       // Persist before clearing the closure-captured runSource/runStartedAt
