@@ -374,10 +374,14 @@ export const SITES = [
     script: 'playstation-plus.js',
     // claimOrder uses a ×10 spacing convention (10, 20, … 100) so a service
     // can be reordered by dropping it into a gap without renumbering the rest.
-    // PS Plus sits last (110): it has the highest bot-detection risk in the
-    // chain (Sony's Akamai layer), so running last means a hang or
-    // circuit-breaker abort doesn't delay anything earlier in the chain.
-    claimOrder: 110,
+    // PS Plus runs at 45 — after the fast, stable storefront claimers
+    // (gog/prime/epic/steam) but before AliExpress, the watchers, and the slow
+    // Microsoft loop — so its time-sensitive monthly Essentials aren't stuck
+    // behind microsoft.js's wait-until-window. It's the highest bot-risk
+    // service (Sony's Akamai layer), so it isn't run first; its internal
+    // circuit-breaker + closeContextSafely cap any hang so an Akamai block
+    // can't stall the rest for long.
+    claimOrder: 45,
     loginUrl: 'https://www.playstation.com/en-us/ps-plus/whats-new/',
     homeUrl: 'https://www.playstation.com/en-us/ps-plus/whats-new/',
     get browserDir() { return cfg.dir.browser + '-playstation'; },
