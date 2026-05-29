@@ -4,6 +4,20 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.20
+
+**Pure-Prime claims now actually show up in Stats** — fixing a long-standing data-completeness bug. The internal-Prime claim path in `prime-gaming.js` wrote DB rows with `time`, `url`, `store: 'internal'` — but **no `status` field**. External-store paths (Epic/GOG/MS Store/Legacy) always set `status: 'claimed'` after their click; the internal path never did. `readAllClaims` filters on `status.startsWith('claimed')`, so **every pure-Prime claim ever made on this fork was silently missing from the Stats tab** (KPIs, Per-service, Daily chart, Recent Claims).
+
+The bug is at least as old as the fork. Caught by the maintainer noticing 2 games in Stats vs 3 actually claimed today (Pro Basketball Manager 2026 was the missing one — pure Prime). On the maintainer's instance, the backfill recovered **19 historical claims** (all-time jumped 113 → 132).
+
+Fix in two parts:
+1. **Write site (`prime-gaming.js:229-ish`):** internal path now mirrors the external pattern — `db.data[user][title].status = 'claimed'` after the click, matching how Epic/Legacy/GOG redeems already set their status.
+2. **One-time auto-backfill (top of `prime-gaming.js`):** at the start of every run, sweep `db.data` and set `status: 'claimed'` on any `store: 'internal'` row that's missing one. Safe because the row only exists if the click landed (line 229 runs after the await). Idempotent on already-set entries. Anyone with historical pure-Prime claims will see their Stats correct themselves on the next Prime run.
+
+No changes needed on the user's end beyond pulling `:latest` and letting the next scheduled Prime run execute (or hitting Run Now). The Stats tab will reflect the backfilled history.
+
+---
+
 ## What's new in 2.8.19
 
 **Epic Games: all claims were silently failing — checkout button text changed.** Around 2026-05-28 Epic relabeled the confirm button in their checkout modal (`#webPurchaseContainer` iframe) from **"Place Order"** to **"Add to library"**. The script's two click sites still targeted the old text, so the click never fired and `Promise.race()` timed out without any captcha — every Epic claim silently failed and got mis-classified as "captcha-failed." Caught and diagnosed in detail by @amphoterism on [#59](https://github.com/feldorn/free-games-claimer/issues/59), with the exact selector locations and a screenshot of the new button.

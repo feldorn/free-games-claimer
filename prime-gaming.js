@@ -18,6 +18,24 @@ log.section(`Prime Gaming (v${siteVersion('prime-gaming')})`);
 
 const db = await jsonDb('prime-gaming.json', {});
 
+// One-time backfill for the internal-Prime status-missing bug. Pre-2.8.20
+// the internal-store claim path wrote DB rows without a `status` field
+// (only external paths set it), so every pure-Prime claim was invisible
+// to readAllClaims (which filters on status.startsWith('claimed')) and
+// silently missing from the Stats tab — possibly for the lifetime of
+// the account. The DB row's existence at all means the click landed
+// (line 229's row creation only runs after a successful click), so
+// backfilling status='claimed' on internal-store rows that lack one is
+// safe. Idempotent: already-set status is left alone.
+for (const userRecords of Object.values(db.data || {})) {
+  if (!userRecords || typeof userRecords !== 'object') continue;
+  for (const entry of Object.values(userRecords)) {
+    if (entry && typeof entry === 'object' && entry.store === 'internal' && !entry.status) {
+      entry.status = 'claimed';
+    }
+  }
+}
+
 // https://playwright.dev/docs/auth#multi-factor-authentication
 cleanProfileLocks(cfg.dir.browser);
 const context = await chromium.launchPersistentContext(cfg.dir.browser, {
@@ -227,6 +245,11 @@ try {
     if (cfg.interactive && !await confirm()) { skippedCount++; continue; }
     await card.locator('.tw-button:has-text("Claim")').click();
     db.data[user][title] ||= { title, time: datetime(), url, store: 'internal' };
+    // External-store paths set status='claimed' (or '...and redeemed')
+    // after their click; this internal path historically didn't, so
+    // readAllClaims filtered every pure-Prime claim out of Stats.
+    // Mirror the external pattern: set status after the click landed.
+    db.data[user][title].status = 'claimed';
     log.ok(`${title} — claimed!`);
     claimedCount++;
     notify_games.push({ title, status: 'claimed', url });
