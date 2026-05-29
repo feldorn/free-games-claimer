@@ -717,9 +717,9 @@ let startupAutoCheck = null; // { current, total, siteName } while auto-check is
 // Claim script order is derived from src/sites.js (Phase 0 of the engine
 // refactor — issue #11). Each registry entry carries a claimOrder integer;
 // getClaimScriptOrder() filters to entries with a script and sorts by it.
-// microsoft.js is intentionally last (claimOrder 7) — it has an internal
-// wait-until-window that blocks the process; running it after everything
-// else lets the rest finish promptly. microsoft.js is shared between the
+// microsoft.js runs late (claimOrder 90; ×10 spacing) — it has an internal
+// wait-until-window that blocks the process; running it near the end lets the
+// faster claimers finish promptly. microsoft.js is shared between the
 // 'microsoft' (desktop) and 'microsoft-mobile' site cards — invoked once
 // via the linkedWith pointer and runs both sessions internally.
 const CLAIM_SCRIPT_ORDER = getClaimScriptOrder();

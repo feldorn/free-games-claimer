@@ -102,7 +102,7 @@ export const SITES = [
     version: '2.0',
     subtitle: null,
     script: 'prime-gaming.js',
-    claimOrder: 2,
+    claimOrder: 20,
     // Getter so PG_BASE_URL takes effect at access time. Reads on each
     // cookie-import (interactive-login.js#deriveTargetHost) and each
     // panel-opened browser-login — both happen long after module load,
@@ -170,7 +170,7 @@ export const SITES = [
     version: '2.1',
     subtitle: null,
     script: 'epic-games.js',
-    claimOrder: 3,
+    claimOrder: 30,
     loginUrl: 'https://www.epicgames.com/id/login?lang=en-US&noHostRedirect=true&redirectUrl=https://store.epicgames.com/en-US/free-games',
     // Sessions tab "open in new tab" target. loginUrl points to the login
     // form which is unhelpful for an already-authenticated user; homeUrl
@@ -218,7 +218,7 @@ export const SITES = [
     version: '2.2',
     subtitle: null,
     script: 'gog.js',
-    claimOrder: 1,
+    claimOrder: 10,
     loginUrl: 'https://www.gog.com/en',
     get browserDir() { return cfg.dir.browser; },
     contextOptions: null,
@@ -321,7 +321,7 @@ export const SITES = [
     version: '2.0',
     subtitle: null,
     script: 'steam.js',
-    claimOrder: 4,
+    claimOrder: 40,
     loginUrl: 'https://store.steampowered.com/login/',
     homeUrl: 'https://store.steampowered.com/',
     get browserDir() { return cfg.dir.browser; },
@@ -372,13 +372,12 @@ export const SITES = [
     version: '1.0',
     subtitle: 'Monthly Essentials (priority) + Extra/Premium catalog drain. Requires an active PS Plus subscription.',
     script: 'playstation-plus.js',
-    // Appended after Lenovo's 10 rather than inserted between Steam (4)
-    // and AliExpress (5). Two reasons: (a) avoids renumbering existing
-    // entries — no chance of accidentally disturbing other services; and
-    // (b) PS Plus has the highest bot-detection risk in the chain (Sony's
-    // Akamai layer), so running last means a hang or circuit-breaker abort
-    // doesn't delay anything earlier in the chain.
-    claimOrder: 11,
+    // claimOrder uses a ×10 spacing convention (10, 20, … 100) so a service
+    // can be reordered by dropping it into a gap without renumbering the rest.
+    // PS Plus sits last (110): it has the highest bot-detection risk in the
+    // chain (Sony's Akamai layer), so running last means a hang or
+    // circuit-breaker abort doesn't delay anything earlier in the chain.
+    claimOrder: 110,
     loginUrl: 'https://www.playstation.com/en-us/ps-plus/whats-new/',
     homeUrl: 'https://www.playstation.com/en-us/ps-plus/whats-new/',
     get browserDir() { return cfg.dir.browser + '-playstation'; },
@@ -456,7 +455,7 @@ export const SITES = [
     version: '2.3',
     subtitle: 'Deprecated by AliExpress — web coin collection is being phased out in favor of the mobile app. Works for some accounts on a degradation curve. See README → Bot detection.',
     script: 'aliexpress.js',
-    claimOrder: 5,
+    claimOrder: 50,
     // AliExpress's coin collector only works on the mobile site; desktop just
     // says "install the app". Use a dedicated browser profile so its
     // fingerprint-injected session doesn't collide with the desktop services'
@@ -517,7 +516,7 @@ export const SITES = [
     version: '2.1',
     subtitle: 'Runs both desktop and mobile sessions in one script.',
     script: 'microsoft.js',
-    claimOrder: 9,
+    claimOrder: 90,
     loginUrl: 'https://rewards.bing.com',
     get browserDir() { return cfg.dir.browser; },
     contextOptions: null,
@@ -627,7 +626,7 @@ export const SITES = [
     version: '2.0',
     subtitle: 'Watch-only: pings you when a new free game appears at store.ubisoft.com/us/free-games. No login, no auto-claim — go grab it manually.',
     script: 'ubisoft.js',
-    claimOrder: 6,
+    claimOrder: 60,
     loginUrl: null,
     homeUrl: 'https://store.ubisoft.com/us/free-games',
     browserDir: null,
@@ -647,7 +646,7 @@ export const SITES = [
     version: '0.1',
     subtitle: 'Watch-only: pings you when new free items appear at humblebundle.com store. No login, no auto-claim — go grab manually. Scaffolded scratch — selectors and URL paths may need iteration as Humble updates their store layout.',
     script: 'humble-bundle.js',
-    claimOrder: 7,
+    claimOrder: 70,
     loginUrl: null,
     homeUrl: 'https://www.humblebundle.com/store/search?sort=discount&filter=onsale&min=0&max=0',
     browserDir: null,
@@ -667,7 +666,7 @@ export const SITES = [
     version: '0.1',
     subtitle: 'Watch-only: pings you when new free Steam keys appear at fanatical.com/en/free-games-keys. No login, no auto-claim — go grab manually. Scaffolded — Fanatical\'s API endpoint and product shape may need iteration over time.',
     script: 'fanatical.js',
-    claimOrder: 8,
+    claimOrder: 80,
     loginUrl: null,
     // Fanatical removed the dedicated /en/free-games-keys landing page from
     // their SPA routing (the URL still loads enough of the shell for the
@@ -692,7 +691,7 @@ export const SITES = [
     version: '0.1',
     subtitle: 'Watch-only: tracks scheduled key-drops at gaming.lenovo.com/game-key-drops. Notifies on discovery + 1h before / 5min before / at drop time. Drops are first-come-first-served once they go live, so the script is paired with a per-drop wake scheduler that fires push notifications on time. Auto-claim is a future phase — keys are first-come-first-served and the redemption flow goes through GamesPlanet.',
     script: 'lenovo-gaming.js',
-    claimOrder: 10,
+    claimOrder: 100,
     loginUrl: null,
     homeUrl: 'https://gaming.lenovo.com/game-key-drops',
     browserDir: null,
@@ -747,9 +746,10 @@ export function getLoginSitesById() {
 
 // Run-order list consumed by buildClaimCommand. Sorted by claimOrder so the
 // registry's display ordering (used by the Sessions tab) stays decoupled from
-// the script execution sequence — gog runs first because it's the fastest
-// and most stable, microsoft runs last because microsoft.js has an internal
-// wait-until-window that blocks the process. linkedWith is preserved verbatim
+// the script execution sequence (claimOrder uses ×10 spacing — 10, 20, … —
+// leaving gaps to reorder without renumbering). gog runs first because it's
+// the fastest and most stable; microsoft runs late because microsoft.js has an
+// internal wait-until-window that blocks the process. linkedWith is preserved verbatim
 // so a single 'microsoft' entry covers both microsoft + microsoft-mobile via
 // the same microsoft.js invocation.
 export function getClaimScriptOrder() {
