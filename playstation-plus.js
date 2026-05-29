@@ -63,6 +63,18 @@ async function ensureLoggedIn(page) {
 
   if (detected === 'logged-in') return;
 
+  // DOM detection is flaky in the container — .psw-c-secondary hydrates slowly,
+  // so the race can return 'unknown' even when the session is perfectly valid
+  // (observed: VNC shows signed in, yet detection said signed out). Before
+  // tearing into the whole re-login flow, fall back to the auth cookie: Sony
+  // clears isSignedIn on logout, so its presence means we're still signed in.
+  // Only a *visible* "Sign in" CTA is a hard signed-out verdict.
+  if (detected !== 'signed-out') {
+    const signedIn = (await page.context().cookies().catch(() => []))
+      .some(c => c.name === 'isSignedIn' && (c.domain || '').includes('playstation.com'));
+    if (signedIn) { log.info('Signed in (verified via isSignedIn cookie; profile menu was slow to render)'); return; }
+  }
+
   if (cfg.nowait) {
     log.warn('Not signed in and NOWAIT set — exiting.');
     if (cfg.novnc_port) log.info(`Open http://localhost:${cfg.novnc_port} to sign in via the panel.`);

@@ -427,7 +427,18 @@ export const SITES = [
           userEl.waitFor({ state: 'attached', timeout: 8000 }).then(() => 'logged-in'),
           signIn.waitFor({ state: 'visible', timeout: 8000 }).then(() => 'signed-out'),
         ]).catch(() => 'unknown');
-        if (detected !== 'logged-in') return { loggedIn: false };
+        // A visible "Sign in" CTA is a hard signed-out verdict. But the
+        // profile-menu element hydrates slowly in the container, so the race
+        // often returns 'unknown' even when the session is valid — which
+        // produced false "not logged in" checks while the VNC showed signed in.
+        // Fall back to the auth cookie: Sony clears isSignedIn on logout, so its
+        // presence is a reliable positive signal.
+        if (detected === 'signed-out') return { loggedIn: false };
+        if (detected !== 'logged-in') {
+          const signedIn = (await page.context().cookies().catch(() => []))
+            .some(c => c.name === 'isSignedIn' && (c.domain || '').includes('playstation.com'));
+          if (!signedIn) return { loggedIn: false };
+        }
         // textContent (not innerText) — .psw-c-secondary lives inside the
         // hidden-until-opened profile dropdown. innerText returns '' for
         // non-rendered elements, so the username would silently come back
