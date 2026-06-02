@@ -96,6 +96,10 @@ export const cfg = {
   steam_password: process.env.STEAM_PASSWORD || process.env.PASSWORD,
   steam_min_rating: steam.minRating ?? 6, // minimum review rating on 1-9 scale (6 = Mostly Positive)
   steam_min_price: steam.minPrice ?? 10, // minimum original price in USD to filter out cheap/shovelware games
+  // Default true preserves the long-standing behavior of skipping
+  // games with zero reviews (assumed shovelware). Turn off to catch
+  // launch-day indies before they have reviews. See #61.
+  steam_skip_unrated: steam.skipUnrated ?? true,
   // auth microsoft rewards
   ms_email: process.env.MS_EMAIL || process.env.EMAIL,
   ms_password: process.env.MS_PASSWORD || process.env.PASSWORD,

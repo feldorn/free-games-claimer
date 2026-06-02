@@ -331,6 +331,9 @@ export const SITES = [
         prefix: '$',
         hint: 'Filters out shovelware that was free or near-free before the giveaway.',
         coerce: { kind: 'numberOr', fallback: 10 } },
+      { key: 'skipUnrated', env: 'STEAM_SKIP_UNRATED', type: 'boolean', default: true,
+        label: 'Skip unrated games (no reviews yet)',
+        hint: 'Default ON — unrated games (zero reviews) are usually low-quality or brand-new shovelware. Turn OFF to let unrated games through (still subject to the Min price filter). Helpful for catching launch-day free indies before they accumulate reviews (#61).' },
     ],
     async checkLogin(page) {
       try {

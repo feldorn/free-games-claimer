@@ -468,13 +468,16 @@ try {
     }
 
     if (details.rating === null) {
-      log.skip(title, 'no reviews (unrated)');
-      db.data[user][appId].status = 'skipped:unrated';
-      skipped++;
-      continue;
-    }
-
-    if (details.rating < cfg.steam_min_rating) {
+      if (cfg.steam_skip_unrated) {
+        log.skip(title, 'no reviews (unrated) — set STEAM_SKIP_UNRATED=0 to claim anyway');
+        db.data[user][appId].status = 'skipped:unrated';
+        skipped++;
+        continue;
+      }
+      // Letting it through — the user explicitly opted into unrated games.
+      // Fall through to the price filter; the claim path still applies.
+      log.info(`${title} — unrated but STEAM_SKIP_UNRATED=0, evaluating against price filter`);
+    } else if (details.rating < cfg.steam_min_rating) {
       log.skip(title, `rating ${details.rating}/9 (${details.ratingText}) below min ${cfg.steam_min_rating}`);
       db.data[user][appId].status = 'skipped:rating';
       skipped++;

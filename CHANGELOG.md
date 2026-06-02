@@ -4,6 +4,19 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.25
+
+**Steam unrated-game filter is now opt-out, not always-on** ([#61](https://github.com/feldorn/free-games-claimer/issues/61)). The Steam claim filter has always skipped games with zero Steam reviews (`details.rating === null`) under the assumption that "no rating = probably shovelware." But launch-day free indies often legitimately have zero reviews and get missed — @hanafytech reported wanting *IQ Under Construction* (Steam appId 3771740) which was free but got skipped on `no reviews (unrated)`.
+
+New setting **`services.steam.skipUnrated`** (env `STEAM_SKIP_UNRATED`) controls the behavior:
+
+- **Default `true`** — preserves long-standing behavior, no surprises for existing users
+- **Set `false`** — unrated games pass the rating filter and proceed to the price filter (so a $10 minPrice still applies; this isn't "claim everything"). Useful for catching launch-day freebies before reviews accumulate.
+
+Available on the Settings tab → Services → Steam, or via the `STEAM_SKIP_UNRATED` env var (legacy fallback). Either way, it's a one-toggle change with backwards-compatible default.
+
+---
+
 ## What's new in 2.8.24
 
 **Scheduler no longer gets permanently stuck on a phantom `runProcess`** ([#62](https://github.com/feldorn/free-games-claimer/issues/62)). @dabziuebu4egh2 reported the main scheduler logging `Cannot start run — claim run in progress (panel:microsoft)` once per minute for 20+ minutes, but with no actual MS process running in the logs. Root cause: the `runProcess` cleanup only fires on the child's `close` / `error` events. If the child dies via a path that doesn't trigger those (host OOM-kill, signal swallowed, abnormal exit), `runProcess` stays set forever and every scheduler tick reports "busy" against a phantom.
