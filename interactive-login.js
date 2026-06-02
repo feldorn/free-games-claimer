@@ -585,10 +585,42 @@ function _fingerprintError(script, errorClass, message, stackLines) {
   }
   return crypto.createHash('sha1').update(key).digest('hex').slice(0, 16);
 }
+// Redact credentials and webhook URLs from captured diagnostic text
+// before we persist or surface it. Apprise notifier URLs in particular
+// embed bot tokens / webhook secrets directly (discord://<webhook>,
+// pover://<apptoken>@<usertoken>, tgram://<bot-id>:<token>@<chat-id>,
+// mailto://user:password@host, slack://<token>, etc.) — without this,
+// any apprise CLI failure pulls the live credential into
+// diagnostics-state.json and into the Share-to-GitHub flow. Reported
+// as #66 — bgiesing had to manually redact a discord webhook before
+// posting their auto-generated issue body.
+const APPRISE_SCHEMES = [
+  'discord', 'pover', 'tgram', 'slack', 'mailto', 'mailtos', 'msteams',
+  'ntfy', 'ntfys', 'pushbullet', 'pushover', 'gotify', 'matrix', 'matrixs',
+  'twilio', 'signal', 'rocket', 'rockets', 'xmpp', 'xmpps', 'wxteams',
+  'wxteamsapi', 'webex', 'webexapi', 'mattermost', 'mattermosts',
+];
+const APPRISE_URL_RE = new RegExp('\\b(' + APPRISE_SCHEMES.join('|') + ')://[^\\s\'"]+', 'gi');
+function _redactCredentials(s) {
+  if (typeof s !== 'string' || !s) return s;
+  return s
+    // Apprise / webhook URLs — scheme://everything-until-whitespace
+    .replace(APPRISE_URL_RE, '$1://<redacted>')
+    // URL-embedded credentials in any scheme: foo://user:password@host
+    .replace(/([a-z][a-z0-9+.-]*:\/\/)[^\s'"@/]*:[^\s'"@/]*@/gi, '$1<credentials-redacted>@')
+    // Bearer tokens / generic API-key patterns the apprise libs sometimes emit
+    .replace(/\b(Bearer\s+|api[_-]?key=|token=)[A-Za-z0-9._-]{8,}/gi, '$1<redacted>');
+}
+
 function _recordDiagnosticError(script, errorClass, message, stackLines) {
   if (!diagnosticsDb || !diagnosticsDb.data) return; // not loaded yet
   if (!diagnosticsDb.data.enabled) return;            // user opted out via Never Share
-  const fp = _fingerprintError(script, errorClass, message, stackLines);
+  // Redact before fingerprinting AND storing — the fingerprint should
+  // stably collapse the same error across token rotations, and the
+  // stored row must not contain live credentials.
+  message = _redactCredentials(String(message || ''));
+  const redactedStack = Array.isArray(stackLines) ? stackLines.map(_redactCredentials) : stackLines;
+  const fp = _fingerprintError(script, errorClass, message, redactedStack);
   const now = Date.now();
   const recent = _recentFingerprintHits.get(fp);
   if (recent && (now - recent) < 5000) return;       // within 5s of last hit → skip
@@ -599,8 +631,8 @@ function _recordDiagnosticError(script, errorClass, message, stackLines) {
     errors[fp] = {
       script: script || 'unknown',
       errorClass: errorClass || 'Error',
-      message: String(message || '').slice(0, 500),
-      stack: Array.isArray(stackLines) ? stackLines.slice(0, 25).join('\n').slice(0, 4000) : '',
+      message: message.slice(0, 500),
+      stack: Array.isArray(redactedStack) ? redactedStack.slice(0, 25).join('\n').slice(0, 4000) : '',
       firstSeen: nowIso,
       lastSeen: nowIso,
       count: 1,
@@ -609,9 +641,8 @@ function _recordDiagnosticError(script, errorClass, message, stackLines) {
   } else {
     errors[fp].lastSeen = nowIso;
     errors[fp].count = (errors[fp].count || 0) + 1;
-    // Refresh stack if we have a richer one — captures the latest occurrence.
-    if (Array.isArray(stackLines) && stackLines.length) {
-      errors[fp].stack = stackLines.slice(0, 12).join('\n').slice(0, 2000);
+    if (Array.isArray(redactedStack) && redactedStack.length) {
+      errors[fp].stack = redactedStack.slice(0, 12).join('\n').slice(0, 2000);
     }
   }
   // Best-effort persist; failures here don't block the run.

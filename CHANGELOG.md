@@ -4,6 +4,22 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.22
+
+**Privacy fix: diagnostics now redacts apprise webhook URLs and embedded credentials before storing** ([#66](https://github.com/feldorn/free-games-claimer/issues/66)). When an apprise CLI call failed, the full command line — including the live discord webhook / pushover token / mailto password — was being captured verbatim into `data/diagnostics-state.json` and surfaced in the Share-to-GitHub flow. @bgiesing had to manually redact a discord webhook from their auto-generated issue body before posting. That's a real credential-exposure risk: users with less time or attention could paste their webhook publicly.
+
+Fix: a `_redactCredentials` pre-processor now runs on every message and stack line before it's fingerprinted, stored, or shared. It targets:
+
+- **Apprise notifier URLs** across 26 schemes (`discord://`, `pover://`, `tgram://`, `slack://`, `mailto[s]://`, `msteams://`, `ntfy[s]://`, `pushbullet://`, `pushover://`, `gotify://`, `matrix[s]://`, `twilio://`, `signal://`, `rocket[s]://`, `xmpp[s]://`, `webex[api]://`, `wxteams[api]://`, `mattermost[s]://`) — replaced with `<scheme>://<redacted>`
+- **URL-embedded credentials** (`scheme://user:password@host`) in any scheme — replaced with `<scheme>://<credentials-redacted>@host`
+- **Bearer tokens** and `api_key=...` / `token=...` patterns in body text — replaced with `<redacted>`
+
+The fingerprint is computed AFTER redaction, so the same error across token rotations still collapses to one DB row. 9/9 sandbox cases pass; pure error messages without credentials (ReferenceError, page.goto network errors, etc.) are untouched.
+
+**If you've previously used the Share button on a diagnostic involving an apprise failure**, please review your `data/diagnostics-state.json` and consider rotating any webhooks/tokens that may have appeared in submitted issue bodies. Existing entries on disk can be retroactively scrubbed with the same redaction logic — happy to provide the one-liner if you ask.
+
+---
+
 ## What's new in 2.8.21
 
 **Stats now counts manually-rescued Epic claims.** Epic's claim script sets `status: 'manual'` on entries where a previous attempt was marked `failed:*` but a later run found the game in the user's library — i.e. the user manually rescued it through Epic's website after our script gave up. The game *is* claimed; the `manual` label just records that the user, not the script, completed it. `readAllClaims` was filtering on `status.startsWith('claimed')` only, so these rescued claims were invisible to Stats — same shape as the pre-2.8.20 Prime bug, just narrower scope.
