@@ -15,7 +15,35 @@ export const resolve = (...a) => a.length && a[0] == '0' ? null : path.resolve(.
 import { JSONFilePreset } from 'lowdb/node';
 export const jsonDb = (file, defaultData) => JSONFilePreset(dataDir(file), defaultData);
 
-export const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+// Sleep that can be interrupted by SIGTERM/SIGINT. The previous plain
+// setTimeout-Promise made the script unresponsive to the panel's Stop
+// button during long pauses (MS_SEARCH_DELAY_MAX_SEC=1200 means a search
+// pause can be up to 20 min — Stop would just wait for the timer to fire
+// rather than canceling the sleep). On signal, every pending delay
+// resolves immediately so any awaiting code can either exit cleanly or
+// move forward to its next interruption point (Playwright nav/click
+// errors propagate out fast). Idempotent: signal handlers register once
+// per process via _delayInterruptInstalled. Both SIGTERM and SIGINT are
+// caught so docker stop, the panel's Stop endpoint, and Ctrl-C all work.
+const _pendingDelays = new Set();
+let _delayInterruptInstalled = false;
+function _installDelayInterrupt() {
+  if (_delayInterruptInstalled) return;
+  _delayInterruptInstalled = true;
+  const interrupt = () => {
+    for (const abort of _pendingDelays) abort();
+    _pendingDelays.clear();
+  };
+  process.on('SIGTERM', interrupt);
+  process.on('SIGINT', interrupt);
+}
+export const delay = ms => new Promise(resolve => {
+  _installDelayInterrupt();
+  let abort;
+  const timer = setTimeout(() => { _pendingDelays.delete(abort); resolve(); }, ms);
+  abort = () => { clearTimeout(timer); resolve(); };
+  _pendingDelays.add(abort);
+});
 // date and time as UTC (no timezone offset) in nicely readable and sortable format, e.g., 2022-10-06 12:05:27.313
 export const datetimeUTC = (d = new Date()) => d.toISOString().replace('T', ' ').replace('Z', '');
 // same as datetimeUTC() but for local timezone, e.g., UTC + 2h for the above in DE

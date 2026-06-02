@@ -8218,8 +8218,26 @@ const server = http.createServer(async (req, res) => {
         // bash, which wouldn't forward mid-pipeline. Negative PID =
         // process group leader's PID; detached:true on spawn makes
         // child.pid the group leader.
-        try { process.kill(-runProcess.pid, 'SIGTERM'); }
+        const targetPid = runProcess.pid;
+        try { process.kill(-targetPid, 'SIGTERM'); }
         catch (e) { console.error(`[${datetime()}] stop-run: group SIGTERM failed (${e.code || e.message}); falling back to child SIGTERM`); runProcess.kill('SIGTERM'); }
+        // Escalate to SIGKILL after a grace period. SIGTERM lets the
+        // script unwind cleanly (the delay() in src/util.js now aborts
+        // on signal, and Playwright operations bubble up when the
+        // browser closes). 15 s is more than enough headroom for a
+        // graceful exit; anything still running after that is hung.
+        // The close handler clears runProcess, so by the time the
+        // escalation timer fires the check below short-circuits if
+        // the process already exited.
+        setTimeout(() => {
+          if (runProcess && runProcess.pid === targetPid) {
+            console.warn(`[${datetime()}] stop-run: SIGTERM grace expired after 15s, escalating to SIGKILL (pid=${targetPid})`);
+            try { process.kill(-targetPid, 'SIGKILL'); }
+            catch (e) {
+              try { runProcess.kill('SIGKILL'); } catch {}
+            }
+          }
+        }, 15000).unref();
         runLog.push({ type: 'system', text: 'Scripts stopping — waiting for in-flight processes to exit cleanly...', time: datetime() });
         runStatus = 'stopping';
         // Deliberately do NOT clear runProcess here — the close handler

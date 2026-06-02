@@ -4,6 +4,21 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.26
+
+**The Stop button can now interrupt long sleeps mid-run.** Previously, hitting Stop during a long `await delay(...)` (e.g. `MS_SEARCH_DELAY_MAX_SEC=1200` could mean a 20-minute pause between Bing searches) sent SIGTERM but the script would just sit in the timer until it fired — Node's default behavior is to keep the event loop alive while a `setTimeout` is pending. So Stop "worked" but you'd wait minutes for the run to actually exit. Reported during a config-change-mid-run case.
+
+Two complementary fixes:
+
+1. **`delay()` is now interruptible.** `src/util.js`'s sleep helper now registers SIGTERM/SIGINT handlers that abort all pending delays on signal. A 20-minute sleep aborts in ~200 ms when the signal arrives. Every caller (`await delay(ms)`) gets the new behavior with no API change.
+2. **`/api/stop-run` now escalates to SIGKILL after 15 s.** Belt-and-braces: if any other operation (Playwright nav, a stuck redirect, a hanging websocket) doesn't bubble up the SIGTERM cleanly, the panel force-kills the process group. 15 s is enough headroom for the script to unwind voluntarily; anything still running after that is genuinely hung.
+
+Combined, Stop now goes from "indefinite wait" → "sub-second cancel" in the common case, with a hard ceiling at 15 s for the exotic stuck-on-something-else case.
+
+Note: configuration changes still don't propagate mid-run (each claim script reads `cfg` once at boot). The clean pattern remains: change config, click Stop, the run exits fast now, hit Run again to start fresh with the new settings.
+
+---
+
 ## What's new in 2.8.25
 
 **Steam unrated-game filter is now opt-out, not always-on** ([#61](https://github.com/feldorn/free-games-claimer/issues/61)). The Steam claim filter has always skipped games with zero Steam reviews (`details.rating === null`) under the assumption that "no rating = probably shovelware." But launch-day free indies often legitimately have zero reviews and get missed — @hanafytech reported wanting *IQ Under Construction* (Steam appId 3771740) which was free but got skipped on `no reviews (unrated)`.
