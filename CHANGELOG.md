@@ -4,6 +4,14 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.27
+
+**Stop button no longer triggers a false-positive diagnostic banner.** Pair to 2.8.26: when SIGTERM tears down a script mid-Playwright-operation, the navigation/click in progress throws `Target page, context or browser has been closed` — a perfectly expected side-effect of the user pressing Stop, *not* a bug. But our diagnostics-banner regex was capturing it as a `page.goto` error and prompting the user to share it. Reported by the maintainer immediately after exercising 2.8.26's new fast-stop.
+
+Fix: `src/util.js` now tracks a `shutdownRequested` flag (set by the same SIGTERM/SIGINT handler that aborts pending `delay()` calls). `log.exception` checks it: when shutdown was requested *and* the error message matches the "browser closed" family, it logs `⏹ Aborted (stop requested): <msg>` instead of `✗ Exception: <msg>`. The new prefix doesn't match the diagnostics-banner regex, so no false positive. Other errors during shutdown (e.g. unrelated TypeError) still surface normally — only the known-benign pattern is suppressed.
+
+---
+
 ## What's new in 2.8.26
 
 **The Stop button can now interrupt long sleeps mid-run.** Previously, hitting Stop during a long `await delay(...)` (e.g. `MS_SEARCH_DELAY_MAX_SEC=1200` could mean a 20-minute pause between Bing searches) sent SIGTERM but the script would just sit in the timer until it fired — Node's default behavior is to keep the event loop alive while a `setTimeout` is pending. So Stop "worked" but you'd wait minutes for the run to actually exit. Reported during a config-change-mid-run case.

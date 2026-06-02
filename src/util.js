@@ -27,10 +27,18 @@ export const jsonDb = (file, defaultData) => JSONFilePreset(dataDir(file), defau
 // caught so docker stop, the panel's Stop endpoint, and Ctrl-C all work.
 const _pendingDelays = new Set();
 let _delayInterruptInstalled = false;
+// Set true once SIGTERM/SIGINT has been received. log.exception checks
+// this to suppress diagnostic-banner-worthy formatting for benign
+// browser-closed errors that are an expected side-effect of Stop
+// (Playwright nav/click throwing "Target page, context or browser has
+// been closed" while the script is tearing down). Without this, every
+// Stop generated a false-positive diagnostic submission.
+export let shutdownRequested = false;
 function _installDelayInterrupt() {
   if (_delayInterruptInstalled) return;
   _delayInterruptInstalled = true;
   const interrupt = () => {
+    shutdownRequested = true;
     for (const abort of _pendingDelays) abort();
     _pendingDelays.clear();
   };
@@ -462,6 +470,17 @@ export const log = {
   // Prime Gaming login-state Promise.any rejected with no context).
   exception: (err) => {
     const message = err && (err.message || String(err)) || String(err);
+    // When the process is shutting down (SIGTERM/SIGINT received), a
+    // "Target page/context/browser has been closed" error is an
+    // *expected* consequence of the panel's Stop tearing down the
+    // Chromium context mid-Playwright-operation — not a bug. Render
+    // it as a clean stop notice instead of the `Exception:` shape
+    // that the diagnostics-banner regex picks up. Without this every
+    // Stop generated a false-positive diagnostic submission.
+    if (shutdownRequested && /Target (page|context|browser) has been closed|browser has been closed|target closed/i.test(message)) {
+      console.log(`  ${chalk.dim('⏹')} Aborted (stop requested): ${message.split('\n')[0]}`);
+      return;
+    }
     console.log(`  ${chalk.red('✗')} Exception: ${message}`);
     const causes = err && Array.isArray(err.errors) ? err.errors : null;
     if (causes && causes.length) {
