@@ -781,9 +781,38 @@ function resolveClaimCommand({ manual, sites = null }) {
 // or manual claim runs (runProcess), and batch redeem (batchRedeem). Any
 // entry point that wants the profile must check this first. Returns a human
 // description of what's busy, or null.
+// Aliveness check via signal-0 — costs nothing (no actual signal sent),
+// just probes whether the kernel still has the pid. Used by browserBusy
+// to detect stale runProcess state after a child died without firing
+// 'close' or 'error' (host OOM-kill, signal swallowed by an exotic
+// runtime, etc.). Reported as #62 (dabziuebu4egh2): panel showed
+// "claim run in progress (panel:microsoft)" forever, but no MS process
+// was actually running.
+function _processAlive(pid) {
+  if (!pid) return false;
+  try { process.kill(pid, 0); return true; }   // exists
+  catch (e) {
+    if (e.code === 'EPERM') return true;       // exists but unsignalable — still alive
+    return false;                              // ESRCH or anything else — gone
+  }
+}
+
 function browserBusy({ allowActiveBrowser = false } = {}) {
   if (checkInProgress) return 'auto-checking session status';
-  if (runProcess) return `claim run in progress${runSource ? ' (' + runSource + ')' : ''}`;
+  if (runProcess) {
+    // Defensive: verify the child is actually alive. If runProcess is
+    // set but the underlying pid is gone, the close/error handlers
+    // didn't fire and the scheduler would otherwise treat the panel
+    // as permanently busy.
+    if (!_processAlive(runProcess.pid)) {
+      console.warn(`[${datetime()}] Detected stale runProcess (pid=${runProcess.pid}, source=${runSource}) — resetting state.`);
+      runProcess = null;
+      runSource = null;
+      runStartedAt = null;
+    } else {
+      return `claim run in progress${runSource ? ' (' + runSource + ')' : ''}`;
+    }
+  }
   if (!allowActiveBrowser && activeBrowser) {
     const name = SITES[activeBrowser.siteId]?.name || activeBrowser.siteId;
     return `interactive browser session active for ${name}`;
@@ -2085,11 +2114,24 @@ async function mainSchedulerLoop() {
     // used). Decoupled mode: explicit non-MS list, which intentionally
     // bypasses CLAIM_CMD because the override would re-include microsoft.
     const sites = legacyCombinedMode(sched, active) ? null : nonMsActiveSiteIds();
-    await fireScheduledRun({
+    const fired = await fireScheduledRun({
       label: 'main',
       sites,
       postRun: () => postRunSessionCheck(),
     });
+    // Mirror 2.8.11's MS-scheduler backoff: when fireScheduledRun returns
+    // false (blocker — another run in progress, batch redeem in flight,
+    // interactive Login session active, etc.), back off 10 minutes before
+    // the next wake. Without this, computeMainWakeMs's wake-floor of 60 s
+    // means we tight-loop "Cannot start run — claim run in progress" once
+    // per minute against a long-running or stuck blocker. Reported by
+    // @dabziuebu4egh2 on #62 — 20+ minutes of one-line-per-minute log
+    // spam against a phantom runProcess. The browserBusy aliveness check
+    // (just added) auto-clears truly-dead runProcess state on the next
+    // tick, but if the blocker is real-but-long, this prevents noise.
+    if (!fired) {
+      await sleepUntilWakeup(10 * 60 * 1000);
+    }
   }
 }
 

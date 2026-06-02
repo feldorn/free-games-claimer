@@ -4,6 +4,20 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.24
+
+**Scheduler no longer gets permanently stuck on a phantom `runProcess`** ([#62](https://github.com/feldorn/free-games-claimer/issues/62)). @dabziuebu4egh2 reported the main scheduler logging `Cannot start run — claim run in progress (panel:microsoft)` once per minute for 20+ minutes, but with no actual MS process running in the logs. Root cause: the `runProcess` cleanup only fires on the child's `close` / `error` events. If the child dies via a path that doesn't trigger those (host OOM-kill, signal swallowed, abnormal exit), `runProcess` stays set forever and every scheduler tick reports "busy" against a phantom.
+
+Two fixes:
+
+1. **Defensive aliveness check in `browserBusy`.** When `runProcess` is set, the function now verifies the underlying pid is actually alive via a `process.kill(pid, 0)` signal-0 probe (costs nothing — no signal sent, just probes the kernel). If the pid is gone, state is cleared automatically with a log line, and the panel proceeds as not-busy. Self-healing on the next scheduler tick.
+
+2. **10-minute backoff in `mainSchedulerLoop` on blocked attempts.** Mirrors 2.8.11's MS-scheduler fix: when `fireScheduledRun` returns false (blocker — another run in progress, batch redeem, interactive Login, etc.), back off 10 min before the next wake instead of tight-looping at `computeMainWakeMs`'s 60 s floor. Even with a *genuinely-long* blocker (not a stale pid), this prevents 60 "Cannot start run" log lines per hour.
+
+Together: stale state self-clears on next scheduler tick (#1); real long-lived blockers no longer spam logs (#2).
+
+---
+
 ## What's new in 2.8.23
 
 **Prime Gaming Legacy Games redeem now bails cleanly when `LG_EMAIL` isn't set** ([#63](https://github.com/feldorn/free-games-claimer/issues/63)). With `PG_REDEEM=true` and no `LG_EMAIL` / `PG_EMAIL` / `EMAIL` env var, `cfg.lg_email` was `undefined` and got passed straight to `page.fill('[name=email]', undefined)` — Playwright threw `page.fill: value: expected string, got undefined`, surfacing as a generic cryptic exception that silently failed the redemption. Reported by @bgiesing trying to redeem Nordic Storm Solitaire.
