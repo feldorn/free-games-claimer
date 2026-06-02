@@ -383,6 +383,21 @@ try {
               }
             }
           } else if (store == 'legacy games') {
+            // Legacy Games' redeem form requires an email. cfg.lg_email
+            // falls back through LG_EMAIL → PG_EMAIL → EMAIL; if none
+            // are set it's undefined, and page.fill(selector, undefined)
+            // throws "expected string, got undefined" — silently failing
+            // the redemption with a cryptic error (#63 — bgiesing).
+            // Bail with a clear, actionable status instead.
+            if (!cfg.lg_email) {
+              redeem_action = 'redeem (LG_EMAIL not set)';
+              db.data[user][title].status = 'failed:LG_EMAIL not set';
+              log.warn(`${title} — needs LG_EMAIL (or PG_EMAIL / EMAIL) env var to redeem on Legacy Games`);
+              await page2.close();
+              notify_game.status = 'needs LG_EMAIL';
+              notify_game.details = `Set LG_EMAIL (or PG_EMAIL / EMAIL) and re-run to redeem this code on Legacy Games.`;
+              continue;
+            }
             await page2.fill('[name=coupon_code]', code);
             await page2.fill('[name=email]', cfg.lg_email);
             await page2.fill('[name=email_validate]', cfg.lg_email);

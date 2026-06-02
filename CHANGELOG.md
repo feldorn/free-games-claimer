@@ -4,6 +4,14 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.23
+
+**Prime Gaming Legacy Games redeem now bails cleanly when `LG_EMAIL` isn't set** ([#63](https://github.com/feldorn/free-games-claimer/issues/63)). With `PG_REDEEM=true` and no `LG_EMAIL` / `PG_EMAIL` / `EMAIL` env var, `cfg.lg_email` was `undefined` and got passed straight to `page.fill('[name=email]', undefined)` — Playwright threw `page.fill: value: expected string, got undefined`, surfacing as a generic cryptic exception that silently failed the redemption. Reported by @bgiesing trying to redeem Nordic Storm Solitaire.
+
+Fix: a pre-check guards the Legacy Games redeem branch. If `cfg.lg_email` is unset, the redeem action is marked `redeem (LG_EMAIL not set)`, the DB row gets `status: 'failed:LG_EMAIL not set'`, and the notification body says exactly which env var to set. The code is still preserved in the DB so a later run with `LG_EMAIL` configured can redeem it.
+
+---
+
 ## What's new in 2.8.22
 
 **Privacy fix: diagnostics now redacts apprise webhook URLs and embedded credentials before storing** ([#66](https://github.com/feldorn/free-games-claimer/issues/66)). When an apprise CLI call failed, the full command line — including the live discord webhook / pushover token / mailto password — was being captured verbatim into `data/diagnostics-state.json` and surfaced in the Share-to-GitHub flow. @bgiesing had to manually redact a discord webhook from their auto-generated issue body before posting. That's a real credential-exposure risk: users with less time or attention could paste their webhook publicly.
