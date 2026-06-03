@@ -97,7 +97,18 @@ export async function fetchFGFPosts({ maxAgeHours = 72 } = {}) {
     headers: { 'User-Agent': USER_AGENT },
     signal: AbortSignal.timeout(15000),
   });
-  if (!res.ok) throw new Error(`reddit API: ${res.status}`);
+  // 403 in particular is Reddit's unauthenticated rate-limit response —
+  // commonly hit on container egress IPs. We log this as a warn in the
+  // caller and continue with GamerPower-only discovery (which covers
+  // most of the same freebies), so it's non-fatal. The error string is
+  // user-facing in the warn log; make it self-explanatory so users don't
+  // wonder if the run failed.
+  if (!res.ok) {
+    const detail = res.status === 403
+      ? 'Reddit API rate-limited (HTTP 403) — supplementary discovery skipped; GamerPower coverage still applies'
+      : `Reddit API HTTP ${res.status} — supplementary discovery skipped; GamerPower coverage still applies`;
+    throw new Error(detail);
+  }
   const body = await res.json();
   const children = body?.data?.children;
   if (!Array.isArray(children)) return [];

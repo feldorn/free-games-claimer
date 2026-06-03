@@ -4,6 +4,16 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.28
+
+**Two log/notification-text clarifications — no behavior changes, just clearer wording.** Reported by the maintainer after reading their own logs and being puzzled twice:
+
+- **Prime Gaming "captcha" redeem status was misleading.** When `PG_REDEEM=true` and the script tried to auto-redeem a GOG code on `gog.com/redeem`, GOG's `/v1/bonusCodes/` endpoint sometimes returns `{ reason: "captcha" }` — but that's GOG's **rate-limit response**, not a human-solvable challenge. The notification read `"<game>: redeem (got captcha) on GOG"`, which sounds like the user needs to solve a captcha. In practice, the panel's **Batch Redeem** button retries the same code after the rate-limit cools and usually succeeds without intervention. The status now reads `"rate-limited (use Batch Redeem) on GOG"` and the log warn names the right next step (`"GOG rate-limited the redeem (their 'captcha' reason); click Batch Redeem in the panel to retry"`). Internal state machine is identical — just the user-facing text changed.
+
+- **FreeGameFindings Reddit 403 message is now self-explanatory.** The warn line `FreeGameFindings discovery skipped — reddit API: 403` left users wondering whether something was broken (it isn't — Reddit's unauthenticated API rate-limits aggressively, especially on container egress IPs). The thrown error from `src/freegamefindings.js` is now a full sentence: `Reddit API rate-limited (HTTP 403) — supplementary discovery skipped; GamerPower coverage still applies`. Same code path, the log just doesn't leave you guessing.
+
+---
+
 ## What's new in 2.8.27
 
 **Stop button no longer triggers a false-positive diagnostic banner.** Pair to 2.8.26: when SIGTERM tears down a script mid-Playwright-operation, the navigation/click in progress throws `Target page, context or browser has been closed` — a perfectly expected side-effect of the user pressing Stop, *not* a bug. But our diagnostics-banner regex was capturing it as a `page.goto` error and prompting the user to share it. Reported by the maintainer immediately after exercising 2.8.26's new fast-stop.

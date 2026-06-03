@@ -317,8 +317,12 @@ try {
             const reason = r1j.reason;
             // Responses: {"reason":"Invalid or no captcha"} | {"reason":"code_used"} | {"reason":"code_not_found"}
             if (reason?.includes('captcha')) {
-              redeem_action = 'redeem (got captcha)';
-              log.warn(`${title} — captcha on ${store}, redeem manually`);
+              // GOG's /v1/bonusCodes "captcha" reason is a rate-limit signal,
+              // not a user-solvable challenge. The panel's Batch Redeem button
+              // retries the same code after the rate-limit cools and usually
+              // succeeds without intervention — see #?? UX feedback.
+              redeem_action = 'rate-limited (use Batch Redeem)';
+              log.warn(`${title} — GOG rate-limited the redeem (their "captcha" reason); click Batch Redeem in the panel to retry`);
             } else if (reason == 'code_used') {
               redeem_action = 'already redeemed';
               log.ok(`${title} — already redeemed on ${store}`);
@@ -423,7 +427,7 @@ try {
           log.ok(`${title} — claimed on ${store} (manual redeem)`);
         }
         // Tally & notification
-        const needsManual = ['redeem', 'redeem (got captcha)', 'redeem (not found)', 'redeem (login)', 'unknown'].includes(redeem_action);
+        const needsManual = ['redeem', 'rate-limited (use Batch Redeem)', 'redeem (not found)', 'redeem (login)', 'unknown'].includes(redeem_action);
         if (redeem_action == 'redeemed' || redeem_action == 'redeemed?' || redeem_action == 'already redeemed') claimedCount++;
         else if (needsManual) needsActionCount++;
         // Pushover strips HTML tags, so <a> anchors don't survive. We avoid the bare
