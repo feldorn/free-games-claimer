@@ -109,15 +109,29 @@ async function ensureLoggedIn(page) {
     }).catch(() => {});
 
     // 2FA / TOTP. PSP_OTPKEY → automatic; otherwise prompt or notify.
-    page.locator('input[title="Enter Code"]').waitFor({ timeout: cfg.login_timeout }).then(async () => {
+    // Sony's DSB sign-in app (route #/signin/2sv/authenticator_code) renders the
+    // code field with a dynamic React id (e.g. ":r4:") and NO title attr — the
+    // old `input[title="Enter Code"]` matched nothing, so the code was never
+    // entered and the post-login waitForURL timed out at 180s. The stable hook
+    // is the aria-label "Verification code"; the submit is the "Verify" button
+    // (data-qa="button-primary"). Verified end-to-end via test/ps-login-probe.js
+    // (2026-06-02): patchright reaches 2sv, fills the code, and redirects to
+    // www.playstation.com/.
+    const codeField = page.locator('input[aria-label*="Verification code" i]');
+    codeField.waitFor({ timeout: cfg.login_timeout }).then(async () => {
       log.info('Two-Step Verification — entering code');
       const otp = cfg.psp_otpkey
         ? authenticator.generate(cfg.psp_otpkey)
         : await prompt({ type: 'text', message: 'Enter PSN two-factor code', validate: n => n.toString().length === 6 || 'Must be 6 digits' });
-      await page.locator('input[title="Enter Code"]').pressSequentially(otp.toString());
-      // "Trust this Browser" — opt-in, ignore if absent.
-      await page.locator('.checkbox-container input[type="checkbox"]').first().check().catch(() => {});
-      await page.locator('button.primary-button, button[type="submit"]').first().click();
+      await codeField.pressSequentially(otp.toString(), { delay: 60 });
+      // "Trust this Browser" — remembers this device so future re-auth skips the
+      // 2FA step entirely (fewer challenges = less risk). It's a custom psw
+      // checkbox whose real <input type=checkbox> is visually hidden, so
+      // Playwright's .check() no-ops on it (observed 2026-06-02: checked stayed
+      // false). Click the visible label text instead. Best-effort — never block
+      // the claim if it's absent or renamed.
+      await page.getByText('Trust this Browser', { exact: false }).first().click().catch(() => {});
+      await page.locator('button[data-qa="button-primary"], button:has-text("Verify"), button[type="submit"]').first().click();
     }).catch(() => {});
   } else {
     log.info('No PSP_EMAIL/PSP_PASSWORD — waiting for manual sign-in via the browser');
