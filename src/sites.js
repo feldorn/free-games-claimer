@@ -124,6 +124,10 @@ export const SITES = [
       { key: 'baseUrl', env: 'PG_BASE_URL', type: 'string', default: 'https://luna.amazon.com',
         label: 'Luna base URL',
         hint: 'For non-US users: when Amazon redirects you to a country-specific Luna host (e.g. luna.amazon.com.be), set this so the cookie-import host check accepts cookies from that domain and the script navigates to the right host. Trailing slash is stripped.' },
+      { key: 'redeemMaxAttempts', env: 'PG_REDEEM_MAX_ATTEMPTS', type: 'number', default: 3,
+        label: 'Max redeem retries before giving up',
+        hint: 'When GOG rate-limits the auto-redeem (their "captcha" reason), gog.js retries on each daily run. This caps the total retries before the code is flagged for manual intervention via the panel\'s Batch Redeem button. 3 daily attempts is a reasonable balance — long enough to cover transient rate-limits, short enough that expiring offers don\'t sit indefinitely.',
+        coerce: { kind: 'numberBounded', min: 1, fallback: 3 } },
     ],
     async checkLogin(page) {
       try {

@@ -120,6 +120,10 @@ export const cfg = {
   ae_password: process.env.AE_PASSWORD || process.env.PASSWORD,
   // experimental
   pg_redeem: pg.redeem ?? false, // prime-gaming: redeem keys on external stores
+  // Max cross-run retries for the GOG auto-redeem loop in gog.js. When GOG's
+  // /v1/bonusCodes/ returns reason: "captcha" (their rate-limit signal), the
+  // code stays pending and gog.js retries on the next daily run. Default 3.
+  pg_redeem_max_attempts: pg.redeemMaxAttempts ?? 3,
   lg_email: process.env.LG_EMAIL || process.env.PG_EMAIL || process.env.EMAIL, // prime-gaming: external: legacy-games: email to use for redeeming
   pg_claimdlc: pg.claimDlc ?? false, // prime-gaming: claim in-game content
   // Preserve old NaN semantics when unset (comparisons always false → skip

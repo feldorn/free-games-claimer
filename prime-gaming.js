@@ -143,6 +143,16 @@ try {
     xbox: 'https://account.microsoft.com/billing/redeem',
   };
   const terminalRx = /redeemed|expired|invalid/i;
+  // GOG codes mid-retry-loop (gog.js cross-run redeem retry, 2.8.29+) are
+  // skipped from the pending reminder — they're being handled automatically
+  // and surfacing them in the notification every day creates noise. Only
+  // GOG codes that have exhausted their retry budget OR are non-GOG stores
+  // (Microsoft, Legacy Games — not yet covered by the cross-run loop)
+  // still need user attention.
+  const isAutoRetryingGogCode = (entry) =>
+    entry.store === 'gog.com' &&
+    (entry.redeemAttempts || 0) < (cfg.pg_redeem_max_attempts || 3) &&
+    !/retries exhausted/i.test(String(entry.status || ''));
   // Optional age cutoff for the pending-redeem notification. NaN when unset,
   // which makes the comparison below always false so every non-terminal entry
   // surfaces (old behavior). Hidden entries stay in the DB unmodified.
@@ -151,24 +161,32 @@ try {
     : null;
   const pending = [];
   let hiddenByAge = 0;
+  let hiddenByRetry = 0;
   for (const [dbTitle, entry] of Object.entries(db.data[user])) {
     if (!entry || typeof entry !== 'object') continue;
     if (!entry.code) continue;
     if (!keyStores.has(entry.store)) continue;
     if (terminalRx.test(String(entry.status || ''))) continue;
     if (cutoffMs && entry.time && Date.parse(entry.time) < cutoffMs) { hiddenByAge++; continue; }
+    if (isAutoRetryingGogCode(entry)) { hiddenByRetry++; continue; }
     pending.push({ dbTitle, entry });
   }
   if (pending.length) {
-    log.status('Pending manual redeem', `${pending.length} code(s)${hiddenByAge ? ` (${hiddenByAge} hidden by age filter)` : ''}`);
+    const filterNotes = [];
+    if (hiddenByAge) filterNotes.push(`${hiddenByAge} hidden by age filter`);
+    if (hiddenByRetry) filterNotes.push(`${hiddenByRetry} auto-retrying`);
+    log.status('Pending manual redeem', `${pending.length} code(s)${filterNotes.length ? ` (${filterNotes.join(', ')})` : ''}`);
     for (const { dbTitle, entry } of pending) {
       const base = redeemBaseUrls[entry.store];
       const redeem_url = entry.store === 'gog.com' ? `${base}/${entry.code}` : base;
       log.warn(`${dbTitle} — pending manual redeem on ${entry.store}`);
       notify_pending.push({ title: dbTitle, url: redeem_url });
     }
-  } else if (hiddenByAge) {
-    log.status('Pending manual redeem', `0 visible (${hiddenByAge} hidden by age filter)`);
+  } else if (hiddenByAge || hiddenByRetry) {
+    const notes = [];
+    if (hiddenByAge) notes.push(`${hiddenByAge} hidden by age filter`);
+    if (hiddenByRetry) notes.push(`${hiddenByRetry} auto-retrying on next GOG run`);
+    log.status('Pending manual redeem', `0 visible (${notes.join(', ')})`);
   }
 
   const waitUntilStable = async (f, act) => {
@@ -318,11 +336,13 @@ try {
             // Responses: {"reason":"Invalid or no captcha"} | {"reason":"code_used"} | {"reason":"code_not_found"}
             if (reason?.includes('captcha')) {
               // GOG's /v1/bonusCodes "captcha" reason is a rate-limit signal,
-              // not a user-solvable challenge. The panel's Batch Redeem button
-              // retries the same code after the rate-limit cools and usually
-              // succeeds without intervention — see #?? UX feedback.
-              redeem_action = 'rate-limited (use Batch Redeem)';
-              log.warn(`${title} — GOG rate-limited the redeem (their "captcha" reason); click Batch Redeem in the panel to retry`);
+              // not a user-solvable challenge. gog.js's cross-run redeem loop
+              // (2.8.29+) auto-retries this code on each daily GOG run with a
+              // 90 s in-script cooldown, up to cfg.pg_redeem_max_attempts
+              // retries. The user can accelerate via the panel's Batch Redeem
+              // button if they don't want to wait for the next scheduled run.
+              redeem_action = 'queued for next run';
+              log.warn(`${title} — GOG rate-limited the redeem (their "captcha" reason); will retry on next daily GOG run`);
             } else if (reason == 'code_used') {
               redeem_action = 'already redeemed';
               log.ok(`${title} — already redeemed on ${store}`);
@@ -427,7 +447,12 @@ try {
           log.ok(`${title} — claimed on ${store} (manual redeem)`);
         }
         // Tally & notification
-        const needsManual = ['redeem', 'rate-limited (use Batch Redeem)', 'redeem (not found)', 'redeem (login)', 'unknown'].includes(redeem_action);
+        // 'queued for next run' is deliberately NOT in this list — gog.js's
+        // cross-run loop is handling it; the user doesn't need a redeem URL
+        // or sense of urgency. If it later exhausts the retry budget,
+        // gog.js flips the entry to 'claimed, redeem retries exhausted',
+        // which the pending-redeem reminder loop above surfaces normally.
+        const needsManual = ['redeem', 'redeem (not found)', 'redeem (login)', 'unknown'].includes(redeem_action);
         if (redeem_action == 'redeemed' || redeem_action == 'redeemed?' || redeem_action == 'already redeemed') claimedCount++;
         else if (needsManual) needsActionCount++;
         // Pushover strips HTML tags, so <a> anchors don't survive. We avoid the bare

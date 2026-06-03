@@ -4,6 +4,22 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.29
+
+**Prime Gaming → GOG auto-redeem is now self-healing on rate-limit.** Previously, when GOG's `/v1/bonusCodes/` endpoint returned `{ reason: "captcha" }` (their rate-limit signal — not a human-solvable challenge), `prime-gaming.js` gave up immediately, the code sat pending in `prime-gaming.json`, and the user had to manually click the panel's Batch Redeem button to retry. That's contrary to the platform's "unattended to the extent possible" philosophy: the rate-limit is transient and a delayed retry almost always succeeds.
+
+New behavior — keeps the user out of the loop on the common case:
+
+- **Same-day cooldown retry in `gog.js`.** The existing reconcile/probe pass now waits **90 seconds** and retries any code that gets a captcha response. That alone catches most rate-limits, since GOG's cooldown is typically under a minute for the kind of bursty traffic Prime Gaming's redeem flow creates.
+- **Cross-run retry across multiple days.** Each pending GOG code tracks a `redeemAttempts` counter in the DB. Each daily GOG run advances the counter on persistent rate-limits, until **`PG_REDEEM_MAX_ATTEMPTS`** (default `3`, settable per Settings → Services → Prime Gaming or env) is reached. After that the code is terminal-flagged `claimed, redeem retries exhausted` and surfaces in the Prime Gaming pending-redeem reminder — the genuine "human, please intervene" signal.
+- **Actually redeems valid codes.** The probe pass previously detected "valid and redeemable" codes but left them pending for manual redeem; it now clicks through to actually redeem them inline. (Same protocol as the panel's `processOneRedeemCode` — GET to confirm validity, then POST to redeem.)
+- **Quieter notifications.** During the auto-retry window, Prime Gaming's pending-redeem reminder skips codes still in budget — they're being handled and don't need to surface in every daily notification. The initial-claim notification reads `"<game>: queued for next run on GOG"` instead of the older `"redeem (got captcha)"` framing that implied user action. Only the genuine give-up state (post-`MAX_ATTEMPTS`) routes back to the manual-redeem notification flow.
+- **Batch Redeem button still works as the manual override.** Pending codes (in-budget or exhausted) remain visible to the panel's Batch Redeem flow — users who want to accelerate redemption without waiting for the next daily run can still click the button.
+
+Scope: GOG only for now. Microsoft Store / Xbox / Legacy Games redeems use different protocols and haven't shown the same rate-limit pattern in reports; if it surfaces there, the same model extends naturally.
+
+---
+
 ## What's new in 2.8.28
 
 **Two log/notification-text clarifications — no behavior changes, just clearer wording.** Reported by the maintainer after reading their own logs and being puzzled twice:
