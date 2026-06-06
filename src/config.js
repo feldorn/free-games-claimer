@@ -112,6 +112,11 @@ export const cfg = {
   ms_redeem_threshold: ms.redeemThreshold ?? 6500,
   ms_redeem_url:       ms.redeemUrl       ?? 'https://rewards.bing.com/redeem/000800000000',
   ms_redeem_label:     ms.redeemLabel     ?? '$5 Amazon GC',
+  // Force MS into the main daily chain instead of the decoupled scheduler. When
+  // true, legacyCombinedMode() returns true regardless of dailyStartTime/loop,
+  // so MS runs back-to-back with the other claim scripts. Workaround for users
+  // whose decoupled MS scheduler never fires for environment-specific reasons.
+  ms_run_with_main_chain: ms.runWithMainChain ?? false,
   // aliexpress — opt-in service. Disabled by default; toggle Active in
   // Settings → Per-service → AliExpress (stores services.aliexpress.active
   // in data/config.json). The runner consults `active` to decide whether

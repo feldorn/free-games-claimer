@@ -469,6 +469,9 @@ export const SITES = [
       { key: 'redeemUrl', env: 'MS_REDEEM_URL', type: 'string', default: 'https://rewards.bing.com/redeem/000800000000',
         label: 'Reward deep-link URL',
         hint: 'Direct link to the reward catalog page. Find it at https://rewards.bing.com/redeem/all — click the reward you want and copy the address-bar URL (looks like https://rewards.bing.com/redeem/000800000000).' },
+      { key: 'runWithMainChain', env: 'MS_RUN_WITH_MAIN_CHAIN', type: 'boolean', default: false,
+        label: 'Run Microsoft inline with main chain (skip decoupled scheduler)',
+        hint: 'Off (default): MS runs on its own daily window via the decoupled scheduler. On: MS runs back-to-back with Prime/Epic/GOG/Steam in the main daily run, ignoring the schedule-window settings above. Useful if your decoupled MS schedule never fires for an unknown reason — turning this on collapses MS into the same loop that already works for everything else.' },
     ],
     async checkLogin(page) {
       try {

@@ -1820,10 +1820,15 @@ function markMsRunFiredToday() {
 }
 
 // True when the user has neither START_TIME nor LOOP set but does have an
-// MS window — preserves pre-#10 single-chain-anchored-on-MS behavior.
+// MS window — preserves pre-#10 single-chain-anchored-on-MS behavior. Also
+// true when MS_RUN_WITH_MAIN_CHAIN is on, which lets users opt MS into the
+// main daily run even when they have dailyStartTime/loop set (workaround
+// for #69: decoupled scheduler quietly not firing in some environments).
 function legacyCombinedMode(sched = getSchedulerConfig(), active = activeServices()) {
   const msActive = active.has('microsoft') || active.has('microsoft-mobile');
-  return !sched.dailyStartTime && !sched.loop && msActive && sched.msHours > 0;
+  if (!msActive) return false;
+  if (cfg.ms_run_with_main_chain) return true;
+  return !sched.dailyStartTime && !sched.loop && sched.msHours > 0;
 }
 
 function computeMainWakeMs() {

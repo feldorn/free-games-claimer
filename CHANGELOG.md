@@ -4,6 +4,16 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.30
+
+**New opt-in toggle: `MS_RUN_WITH_MAIN_CHAIN`** — collapses Microsoft Rewards into the main daily run instead of the decoupled MS scheduler. Settings → Services → Microsoft Rewards → *Run Microsoft inline with main chain (skip decoupled scheduler)*, or env `MS_RUN_WITH_MAIN_CHAIN=1`. Default off (existing behavior preserved).
+
+Background: the decoupled MS scheduler (introduced in #10) runs MS on its own daily window — anchored to `MS_SCHEDULE_START` / `MS_SCHEDULE_HOURS` — completely independently from the main Prime/Epic/GOG/Steam loop. That's the right architecture for most users (lets the MS window track Bing's daily score-reset clock), but a handful of users have reported the decoupled scheduler quietly not firing in their environment (#62, #69) and would rather just have MS run back-to-back with everything else. With the new flag on, `legacyCombinedMode()` returns true regardless of `dailyStartTime`/`loop`, so MS rolls into the same daily chain as the other claim scripts — same loop that already works reliably for them. No schedule-window settings apply in this mode.
+
+When to flip it: turn it on if your MS Rewards scheduler has been silent ("no logs, no runs") for multiple days *despite* a configured window and active service. Turn it off (default) for the standard decoupled behavior — independent MS timing, MS continues even if the main chain breaks, etc.
+
+---
+
 ## What's new in 2.8.29
 
 **Prime Gaming → GOG auto-redeem is now self-healing on rate-limit.** Previously, when GOG's `/v1/bonusCodes/` endpoint returned `{ reason: "captcha" }` (their rate-limit signal — not a human-solvable challenge), `prime-gaming.js` gave up immediately, the code sat pending in `prime-gaming.json`, and the user had to manually click the panel's Batch Redeem button to retry. That's contrary to the platform's "unattended to the extent possible" philosophy: the rate-limit is transient and a delayed retry almost always succeeds.
