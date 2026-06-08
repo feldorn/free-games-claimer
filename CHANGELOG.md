@@ -4,6 +4,16 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.31
+
+**Steam now forces store pages into English regardless of account locale.** Reported by truresma ([#68](https://github.com/feldorn/free-games-claimer/issues/68)): on a German Steam account, the claim flow logged `✗ no "Add to Account" button found` for Tell Me Why and Gravity Circuit even though both games were genuinely free-to-keep and not yet in the library. The screenshot they shared showed Steam rendering the store page in German — the actual button read "Hinzufügen" / "Zur Bibliothek hinzufügen" instead of "Add to Account", so our locator (which hardcodes the English text) never matched.
+
+The Steam_Language=english cookie set at context-init was supposed to prevent this but evidently doesn't always stick — non-English `Accept-Language` browser headers and prior per-account language preferences both override it. The `?l=english` URL query parameter is authoritative — Steam respects it per-request regardless of cookies/headers — so `steam.js` now appends it to every store-page navigation (both `getGameDetails` and the post-click success recheck).
+
+If you were seeing the "no Add to Account button" failure for free-to-keep games on a non-English Steam account, this should now claim them correctly. Notifications and DB rows still use the bare URL (no `?l=english` suffix) so the panel links you receive look normal.
+
+---
+
 ## What's new in 2.8.30
 
 **New opt-in toggle: `MS_RUN_WITH_MAIN_CHAIN`** — collapses Microsoft Rewards into the main daily run instead of the decoupled MS scheduler. Settings → Services → Microsoft Rewards → *Run Microsoft inline with main chain (skip decoupled scheduler)*, or env `MS_RUN_WITH_MAIN_CHAIN=1`. Default off (existing behavior preserved).

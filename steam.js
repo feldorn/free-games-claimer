@@ -11,6 +11,17 @@ const screenshot = (...a) => resolve(cfg.dir.screenshots, 'steam', ...a);
 const URL_STORE = 'https://store.steampowered.com';
 const URL_LOGIN = `${URL_STORE}/login/`;
 
+// All our store-page selectors and success indicators key off English text
+// ("Add to Account", "has been added to your account", etc.). The
+// Steam_Language=english cookie set at context-init time is supposed to keep
+// pages in English, but Steam doesn't always honor it — non-English Accept-
+// Language headers (e.g. de-DE) and prior language preferences sticking to
+// the account both override it (#68: German user got "Hinzufügen" /
+// "Zur Bibliothek hinzufügen" buttons, locator never matched). The ?l=english
+// URL query param is authoritative — Steam respects it per-request regardless
+// of cookies or headers — so we append it to every store-page navigation.
+const withEnglish = (u) => u + (u.includes('?') ? '&' : '?') + 'l=english';
+
 const RATING_MAP = {
   'overwhelmingly positive': 9,
   'very positive': 8,
@@ -102,7 +113,7 @@ async function dismissAgeGate(p) {
 }
 
 async function getGameDetails(p, url) {
-  await p.goto(url, { waitUntil: 'domcontentloaded' });
+  await p.goto(withEnglish(url), { waitUntil: 'domcontentloaded' });
   await p.waitForTimeout(2000);
 
   await dismissAgeGate(p);
@@ -527,7 +538,7 @@ try {
       }
 
       if (!success) {
-        await page.goto(game.url, { waitUntil: 'domcontentloaded' });
+        await page.goto(withEnglish(game.url), { waitUntil: 'domcontentloaded' });
         await page.waitForTimeout(2000);
         await dismissAgeGate(page);
         if (await page.locator('.game_area_already_owned').count() > 0) {
