@@ -1,9 +1,9 @@
 import { chromium } from 'patchright';
-import { authenticator } from 'otplib';
 import path from 'node:path';
+import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import {
-  jsonDb, datetime, filenamify, prompt, notify, html_game_list, escapeHtml,
-  handleSIGINT, closeContextSafely, log, cleanProfileLocks, awaitUserCaptchaSolve,
+  jsonDb, datetime, filenamify, notify, html_game_list, escapeHtml,
+  handleSIGINT, closeContextSafely, log, cleanProfileLocks,
 } from './src/util.js';
 import { cfg } from './src/config.js';
 import { siteVersion, WEBGL_HARDENING_ARGS } from './src/sites.js';
@@ -24,6 +24,61 @@ let user;
 
 const PROFILE_DIR = cfg.dir.browser + '-playstation';
 cleanProfileLocks(PROFILE_DIR);
+
+// npsso silent re-auth (proven 2026-06-03, see test/ps-inject-npsso.js): a valid
+// ~2-month PlayStation SSO token completes Sony's OAuth authorize WITHOUT the
+// password/2FA/captcha form — the form being the Akamai-walled chokepoint. We
+// prefer an operator-provided PSP_NPSSO, else the token harvested from a prior
+// login, and persist a fresh one each run so the ~2-month clock keeps rolling.
+const NPSSO_FILE = path.join(path.dirname(PROFILE_DIR), 'playstation-npsso.txt');
+
+function loadNpsso() {
+  if (cfg.psp_npsso) return cfg.psp_npsso.trim(); // operator-provided wins
+  try { if (existsSync(NPSSO_FILE)) return readFileSync(NPSSO_FILE, 'utf8').trim() || null; } catch { /* ignore */ }
+  return null;
+}
+
+async function harvestNpsso(ctx) {
+  // Persist the live npsso cookie so future runs can silently re-auth. Never log
+  // the value (credential-equivalent). Best-effort.
+  try {
+    const c = (await ctx.cookies()).find(x => x.name === 'npsso' && (x.domain || '').includes('account.sony.com'));
+    if (c && c.value && c.value !== loadNpsso()) {
+      writeFileSync(NPSSO_FILE, c.value + '\n');
+      log.info('Stored refreshed npsso for future silent re-auth');
+    }
+  } catch { /* best-effort */ }
+}
+
+async function tryNpssoLogin(ctx, page, npsso) {
+  log.info('Attempting npsso silent re-auth (no form)…');
+  await ctx.addCookies([{
+    name: 'npsso',
+    value: npsso,
+    domain: 'ca.account.sony.com',
+    path: '/',
+    secure: true,
+    httpOnly: true,
+    sameSite: 'None',
+    expires: Math.floor(Date.now() / 1000) + 60 * 24 * 3600,
+  }]).catch(() => {});
+  const isSignedIn = async () => (await ctx.cookies().catch(() => []))
+    .some(c => c.name === 'isSignedIn' && (c.domain || '').includes('playstation.com'));
+  await page.goto('https://www.playstation.com/en-us/', { waitUntil: 'domcontentloaded' }).catch(() => {});
+  await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+  if (await isSignedIn()) return true;
+  // Trigger the OAuth authorize flow; a valid npsso completes it silently.
+  await page.locator('button:has-text("Sign In"), a:has-text("Sign In")').first().click({ timeout: 15000 }).catch(() => {});
+  for (let i = 0; i < 12; i++) { // ~36s
+    await page.waitForTimeout(3000);
+    if (await isSignedIn()) return true;
+    // If the credential form appears, the npsso is expired/invalid → fall back.
+    const formShown = await page.locator('#signin-entrance-input-signinId, #signin-password-input-password').count().catch(() => 0);
+    if (formShown) { log.warn('npsso silent re-auth failed (login form appeared — token likely expired)'); return false; }
+  }
+  log.warn('npsso silent re-auth timed out');
+  return false;
+}
 
 const context = await chromium.launchPersistentContext(PROFILE_DIR, {
   headless: cfg.headless,
@@ -75,6 +130,17 @@ async function ensureLoggedIn(page) {
     if (signedIn) { log.info('Signed in (verified via isSignedIn cookie; profile menu was slow to render)'); return; }
   }
 
+  // Not signed in. Try npsso silent re-auth FIRST — it sidesteps the Akamai-
+  // walled password/2FA form entirely (proven: test/ps-inject-npsso.js). This
+  // runs even under NOWAIT since it needs no human. Only fall through to the
+  // interactive form if there's no token or it's expired.
+  const npsso = loadNpsso();
+  if (npsso) {
+    if (await tryNpssoLogin(context, page, npsso)) { log.info('Signed in via npsso silent re-auth (no form)'); return; }
+    log.warn('Falling back to interactive login (npsso unavailable/expired)');
+    await page.goto(URL_WHATS_NEW, { waitUntil: 'domcontentloaded' }).catch(() => {}); // reset state for the form path
+  }
+
   if (cfg.nowait) {
     log.warn('Not signed in and NOWAIT set — exiting.');
     if (cfg.novnc_port) log.info(`Open http://localhost:${cfg.novnc_port} to sign in via the panel.`);
@@ -88,59 +154,20 @@ async function ensureLoggedIn(page) {
   await signIn.click().catch(() => {});
   await page.waitForURL(/my\.account\.sony\.com|signin\.account\.sony\.com/, { timeout: cfg.login_timeout }).catch(() => {});
 
-  if (cfg.psp_email && cfg.psp_password) {
-    log.info('Using credentials from environment');
-    await page.locator('#signin-entrance-input-signinId').fill(cfg.psp_email);
-    await page.locator('#signin-entrance-button').click();
-    await page.waitForSelector('#signin-password-input-password', { timeout: cfg.login_timeout });
-    await page.locator('#signin-password-input-password').fill(cfg.psp_password);
-    await page.locator('#signin-password-button').click();
-
-    // FunCaptcha handoff — Sony's Arkose challenge. The captcha-marker
-    // feature on the registry entry tells the panel to watch for the
-    // [CAPTCHA-START]/[CAPTCHA-END] markers awaitUserCaptchaSolve emits.
-    page.locator('#FunCaptcha').waitFor({ timeout: cfg.login_timeout }).then(async () => {
-      log.warn('Got FunCaptcha challenge during PSN login');
-      await awaitUserCaptchaSolve(page, {
-        service: 'playstation-plus',
-        label: 'FunCaptcha (PSN login)',
-        captchaCheck: async () => await page.locator('#FunCaptcha').count() === 0,
-      });
-    }).catch(() => {});
-
-    // 2FA / TOTP. PSP_OTPKEY → automatic; otherwise prompt or notify.
-    // Sony's DSB sign-in app (route #/signin/2sv/authenticator_code) renders the
-    // code field with a dynamic React id (e.g. ":r4:") and NO title attr — the
-    // old `input[title="Enter Code"]` matched nothing, so the code was never
-    // entered and the post-login waitForURL timed out at 180s. The stable hook
-    // is the aria-label "Verification code"; the submit is the "Verify" button
-    // (data-qa="button-primary"). Verified end-to-end via test/ps-login-probe.js
-    // (2026-06-02): patchright reaches 2sv, fills the code, and redirects to
-    // www.playstation.com/.
-    const codeField = page.locator('input[aria-label*="Verification code" i]');
-    codeField.waitFor({ timeout: cfg.login_timeout }).then(async () => {
-      log.info('Two-Step Verification — entering code');
-      const otp = cfg.psp_otpkey
-        ? authenticator.generate(cfg.psp_otpkey)
-        : await prompt({ type: 'text', message: 'Enter PSN two-factor code', validate: n => n.toString().length === 6 || 'Must be 6 digits' });
-      await codeField.pressSequentially(otp.toString(), { delay: 60 });
-      // "Trust this Browser" — remembers this device so future re-auth skips the
-      // 2FA step entirely (fewer challenges = less risk). It's a custom psw
-      // checkbox whose real <input type=checkbox> is visually hidden, so
-      // Playwright's .check() no-ops on it (observed 2026-06-02: checked stayed
-      // false). Click the visible label text instead. Best-effort — never block
-      // the claim if it's absent or renamed.
-      await page.getByText('Trust this Browser', { exact: false }).first().click().catch(() => {});
-      await page.locator('button[data-qa="button-primary"], button:has-text("Verify"), button[type="submit"]').first().click();
-    }).catch(() => {});
-  } else {
-    log.info('No PSP_EMAIL/PSP_PASSWORD — waiting for manual sign-in via the browser');
-    await notify('playstation-plus: not signed in and no credentials configured. Sign in via the panel.');
-    if (cfg.headless) {
-      log.info('Run `SHOW=1 node playstation-plus` to login in an opened browser.');
-      await context.close();
-      process.exit(1);
-    }
+  // Manual sign-in only — we deliberately do NOT automate the password/2FA form.
+  // We only reach here on an interactive run (NOWAIT off, so the scheduler has
+  // already exited above), which means a human is present to type. The automated
+  // form was Akamai's velocity-scored chokepoint — proven to get bot-blocked,
+  // while a human typing in noVNC is exactly the input that passes. After the
+  // human logs in, harvestNpsso() (in the main flow) captures the npsso so every
+  // subsequent run re-auths silently for ~2 months (test/ps-inject-npsso.js) —
+  // the form is never touched again. To bootstrap headlessly, set PSP_NPSSO.
+  log.info('Waiting for manual sign-in via the panel / noVNC…');
+  await notify('playstation-plus: not signed in — sign in via the panel (noVNC). A one-time login lets it auto-refresh for ~2 months.');
+  if (cfg.headless) {
+    log.info('Headless: run `SHOW=1 node playstation-plus` to log in in an opened browser, or set PSP_NPSSO.');
+    await context.close();
+    process.exit(1);
   }
 
   await page.waitForURL(/^https:\/\/www\.playstation\.com\//, { timeout: cfg.login_timeout });
@@ -345,6 +372,7 @@ try {
   // textContent reads the underlying DOM string regardless of visibility.
   user = (await page.locator('.psw-c-secondary').first().textContent().catch(() => '') || '').trim() || 'unknown';
   log.status('User', user);
+  await harvestNpsso(context); // refresh the stored npsso from this live session
   db.data[user] ||= {};
 
   let monthlyRaw = [];

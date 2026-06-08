@@ -75,7 +75,7 @@ Each store can use the default `EMAIL`/`PASSWORD` or be overridden individually:
 | GOG | `GOG_EMAIL` | `GOG_PASSWORD` | | `GOG_NEWSLETTER=1` |
 | Steam | `STEAM_EMAIL` | `STEAM_PASSWORD` | | `STEAM_MIN_RATING`, `STEAM_MIN_PRICE` |
 | Microsoft Rewards | `MS_EMAIL` | `MS_PASSWORD` | `MS_OTPKEY` | `MS_SCHEDULE_HOURS` |
-| PlayStation Plus | `PSP_EMAIL` | `PSP_PASSWORD` | `PSP_OTPKEY` | `PSP_ACTIVE=1` (opt-in; subscription required). `PSP_MAX_CLAIMS_PER_RUN`, `PSP_CLAIM_PAUSE_MIN_SEC`, `PSP_CLAIM_PAUSE_MAX_SEC`. See the [PlayStation Plus section](#playstation-plus) below. |
+| PlayStation Plus | — | — | — | `PSP_ACTIVE=1` (opt-in; subscription required). `PSP_NPSSO` (SSO token for form-free re-auth — login is manual + npsso, no automated form). `PSP_MAX_CLAIMS_PER_RUN`, `PSP_CLAIM_PAUSE_MIN_SEC`, `PSP_CLAIM_PAUSE_MAX_SEC`. See the [PlayStation Plus section](#playstation-plus) below. |
 | AliExpress | `AE_EMAIL` | `AE_PASSWORD` | | `AE_ENABLED=1` (opt-in; disabled by default; **deprecated** — web channel being phased out by AliExpress, see [Bot detection](REFERENCE.md#bot-detection--what-works-what-doesnt)) |
 | Ubisoft Connect | — | — | — | `UBISOFT_ACTIVE=1` (opt-in; disabled by default). Watch-only — no login, no auto-claim. |
 | Humble Bundle | — | — | — | `HUMBLE_ACTIVE=1` (opt-in). Watch-only. |
@@ -283,31 +283,28 @@ Running once daily (`86400`) is recommended.
 
 ### PlayStation Plus
 
-Opt-in service (requires an active PS Plus subscription, any tier — Essential, Extra, or Premium). Default off. Add the row first; then either log in cookie-only or wire credential env vars (see below).
+Opt-in service (requires an active PS Plus subscription, any tier — Essential, Extra, or Premium). Default off. Add the row first, then log in once (see onboarding below).
 
 | Env var | Default | Purpose |
 |---|---|---|
 | `PSP_ACTIVE` | `0` | Set to `1` (or toggle in Settings → PS Plus) to enable. |
-| `PSP_EMAIL` | (falls back to `EMAIL`) | PSN account email for automated relogin. Optional — see onboarding below. |
-| `PSP_PASSWORD` | (falls back to `PASSWORD`) | PSN account password. Optional. |
-| `PSP_OTPKEY` | (unset) | Base32 TOTP secret from authenticator-app 2FA. Optional. |
+| `PSP_NPSSO` | (unset) | Optional. 64-char PlayStation SSO token for **form-free silent re-auth** — lets the runner re-establish a session without the login form (which Sony's Akamai bot-blocks). ~2-month life; auto-refreshed once a session exists. See "Obtaining `PSP_NPSSO`" below. |
 | `PSP_MAX_CLAIMS_PER_RUN` | `5` | Catalog drain cap. Monthly Essentials bypass this — they always claim in full because they expire each month. |
 | `PSP_CLAIM_PAUSE_MIN_SEC` | `25` | Min jittered pause between consecutive claims. |
 | `PSP_CLAIM_PAUSE_MAX_SEC` | `35` | Max jittered pause. |
 
+**Login: manual once, then silent re-auth.** The automated email/password/2FA form login was **removed** — Sony fronts sign-in with Akamai Bot Manager + Arkose FunCaptcha, which reliably blocks automated form submission and scores it against your account. Instead a human signs in once, and the runner thereafter re-authenticates silently using the SSO token (`npsso`).
+
 **Two onboarding paths:**
 
-1. **Cookie-only (simplest, recommended).** Click *Login* on the PS Plus card in the Sessions tab. A visible browser opens via noVNC. Sign in by hand (2FA via your phone authenticator). The browser profile cookie persists in `data/browser-playstation/`. No `PSP_*` credential env vars need to be set. Re-login is only required when the session expires (typically weeks to months); the panel notifies you.
+1. **Cookie-only (simplest, recommended).** Click *Login* on the PS Plus card in the Sessions tab. A browser opens via noVNC. Sign in by hand (solve any 2FA/captcha yourself). The session persists in `data/browser-playstation/`, and the runner harvests the `npsso` token from it automatically — so future runs re-auth silently for ~2 months even after the cookie session lapses. No credential env vars needed. The panel notifies you only when a fresh manual login is required.
 
-2. **Fully automated relogin.** Set `PSP_EMAIL`, `PSP_PASSWORD`, and `PSP_OTPKEY` in your `docker-compose.yml` `environment:` block or in `data/config.env`. The runner re-authenticates without user intervention when the session expires.
+2. **Seed `PSP_NPSSO` (headless bootstrap).** If you can't do an interactive noVNC login, obtain the token yourself (below) and set `PSP_NPSSO` in your `docker-compose.yml` `environment:` block or `data/config.env`. The runner injects it and re-auths silently, and auto-refreshes the stored token each run.
 
-**Obtaining `PSP_OTPKEY`:**
+**Obtaining `PSP_NPSSO`:**
 
-1. Sign in to https://www.playstation.com/acct/management/security/ → 2-Step Verification.
-2. If authenticator-app 2FA is already configured, disable and re-enable to see the secret (Sony does not show it after initial setup).
-3. During the QR-code step, look for *"Can't scan?"* or *"Enter manually"* — that reveals the Base32 secret.
-4. Save the secret as `PSP_OTPKEY=...`. Also scan the QR with your authenticator app so your phone still works alongside the bot.
+1. Log in to https://www.playstation.com/ in any browser.
+2. In the **same browser**, visit https://ca.account.sony.com/api/v1/ssocookie — it returns `{"npsso":"<64-char token>"}`.
+3. Copy the 64-char value into `PSP_NPSSO`. Treat it like a password (it is one — it grants full account access). It lasts ~2 months; the runner auto-refreshes it while a session is alive, so you normally won't need to repeat this.
 
-Caveat: users on SMS-based 2FA cannot use `PSP_OTPKEY`. Either switch to authenticator-app 2FA, or accept that every relogin pauses and notifies for manual MFA via noVNC.
-
-**Bot detection note:** Sony uses Akamai for store browsing and Arkose FunCaptcha for login. The runner retries once per Access-Denied (bouncing off the catalog page first) and trips a run-level circuit breaker after 3 consecutive blocks. See `docs/REFERENCE.md` "Per-store reality" for the full posture.
+**Bot detection note:** Sony uses Akamai for store browsing and Arkose FunCaptcha for login. Login automation is avoided entirely (manual sign-in + npsso silent re-auth). For store claiming, the runner retries once per Access-Denied (bouncing off the catalog page first) and trips a run-level circuit breaker after 3 consecutive blocks. See `docs/REFERENCE.md` "Per-store reality" for the full posture.

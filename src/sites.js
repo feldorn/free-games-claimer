@@ -391,7 +391,10 @@ export const SITES = [
     linkedWith: null,
     claimDbFile: 'playstation-plus.json',
     scheduleKind: 'daily-chain',
-    features: ['captcha-marker'],
+    // No 'captcha-marker': login no longer automates the form, so no captcha
+    // handoff is emitted — a human solves any challenge during manual noVNC
+    // login, and silent npsso re-auth (tryNpssoLogin) never hits a captcha.
+    features: [],
     // Sony fronts the store with Akamai Bot Manager — harden the WebGL/GPU
     // fingerprint in GPU-less containers (see WEBGL_HARDENING_ARGS above).
     hardenWebgl: true,

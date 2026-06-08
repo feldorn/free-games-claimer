@@ -129,10 +129,12 @@ export const cfg = {
   // helps the at-drop wake punch through DnD/quiet-hours on supporting
   // notifiers (Pushover most notably).
   lenovo_notify_priority: lenovo.notifyPriority || 'normal',
-  // auth playstation plus (credentials stay env-only — see CONTRIBUTING.md)
-  psp_email:    process.env.PSP_EMAIL    || process.env.EMAIL,
-  psp_password: process.env.PSP_PASSWORD || process.env.PASSWORD,
-  psp_otpkey:   process.env.PSP_OTPKEY,
+  // auth playstation plus — npsso-only. The automated email/password/2FA form
+  // login was removed (Akamai bot-blocks it); a one-time manual noVNC login
+  // bootstraps and harvests this SSO token, then runs re-auth silently. ~2-month
+  // life, auto-refreshed once set. Credential-equivalent → env-only. See
+  // playstation-plus.js tryNpssoLogin().
+  psp_npsso:    process.env.PSP_NPSSO,
   // Drain pace — Monthly Essentials are claimed unconditionally; this caps
   // only the Extra/Premium catalog drain. 5 with 25-35s jitter drains ~236
   // games in ~9 weeks at one run/day. Tunable via Settings → PS Plus.
