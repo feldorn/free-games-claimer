@@ -25,17 +25,32 @@ let user;
 const PROFILE_DIR = cfg.dir.browser + '-playstation';
 cleanProfileLocks(PROFILE_DIR);
 
-// npsso silent re-auth (proven 2026-06-03, see test/ps-inject-npsso.js): a valid
-// ~2-month PlayStation SSO token completes Sony's OAuth authorize WITHOUT the
-// password/2FA/captcha form — the form being the Akamai-walled chokepoint. We
-// prefer an operator-provided PSP_NPSSO, else the token harvested from a prior
-// login, and persist a fresh one each run so the ~2-month clock keeps rolling.
+// npsso silent re-auth (see test/ps-inject-npsso.js): a valid ~2-month PlayStation
+// SSO token completes Sony's OAuth authorize WITHOUT the password/2FA/captcha form
+// — the form being the Akamai-walled chokepoint. Note: the npsso appears to be
+// bound to the device/context that minted it, so a token created on one machine
+// may not authorize from another (e.g. a GPU-less container) — watch the diag
+// lines below to tell "not accepted here" from "actually expired".
 const NPSSO_FILE = path.join(path.dirname(PROFILE_DIR), 'playstation-npsso.txt');
 
 function loadNpsso() {
-  if (cfg.psp_npsso) return cfg.psp_npsso.trim(); // operator-provided wins
-  try { if (existsSync(NPSSO_FILE)) return readFileSync(NPSSO_FILE, 'utf8').trim() || null; } catch { /* ignore */ }
+  // Precedence: the most-recently-harvested token wins (it rolls forward as live
+  // sessions refresh and reflects this device's own context); PSP_NPSSO is the
+  // operator-provided seed/fallback used until a token has been harvested.
+  try {
+    if (existsSync(NPSSO_FILE)) {
+      const t = readFileSync(NPSSO_FILE, 'utf8').trim();
+      if (t) return t;
+    }
+  } catch { /* ignore */ }
+  if (cfg.psp_npsso) return cfg.psp_npsso.trim();
   return null;
+}
+
+function npssoSource(npsso) {
+  try { if (existsSync(NPSSO_FILE) && readFileSync(NPSSO_FILE, 'utf8').trim() === npsso) return 'harvested-file'; } catch { /* ignore */ }
+  if (cfg.psp_npsso && cfg.psp_npsso.trim() === npsso) return 'env(PSP_NPSSO)';
+  return 'unknown';
 }
 
 async function harvestNpsso(ctx) {
@@ -50,8 +65,31 @@ async function harvestNpsso(ctx) {
   } catch { /* best-effort */ }
 }
 
+// Diagnostic snapshot of the current page+cookie state — labelled, never dumps
+// secret values. Used to see WHY a silent re-auth lands where it does.
+async function npssoDiag(ctx, page, label) {
+  let url = '';
+  try { url = page.url(); } catch { /* ignore */ }
+  const info = await page.evaluate(() => ({
+    hash: location.hash,
+    title: document.title,
+    emailField: !!document.querySelector('#signin-entrance-input-signinId'),
+    pwField: !!document.querySelector('#signin-password-input-password'),
+    twofa: !!document.querySelector('input[aria-label*="Verification code" i]'),
+    somethingWrong: /something went wrong/i.test(document.body ? document.body.innerText : ''),
+    cantConnect: /can.t connect to the server/i.test(document.body ? document.body.innerText : ''),
+    bodyHead: (document.body ? document.body.innerText : '').replace(/\s+/g, ' ').slice(0, 120),
+  })).catch(e => ({ evalErr: e.message ? e.message.split('\n')[0] : String(e) }));
+  const cookies = await ctx.cookies().catch(() => []);
+  const psn = cookies.filter(c => /sony|playstation/i.test(c.domain || ''));
+  const signedIn = psn.some(c => c.name === 'isSignedIn' && (c.domain || '').includes('playstation.com'));
+  const hasNpsso = cookies.some(c => c.name === 'npsso');
+  log.status(`npsso diag [${label}]`, `signedIn=${signedIn} npssoCookie=${hasNpsso} psnCookies=${psn.length} url=${url.slice(0, 70)} ${JSON.stringify(info)}`);
+  return signedIn;
+}
+
 async function tryNpssoLogin(ctx, page, npsso) {
-  log.info('Attempting npsso silent re-auth (no form)…');
+  log.info(`Attempting npsso silent re-auth (no form) — source=${npssoSource(npsso)} len=${npsso.length}`);
   await ctx.addCookies([{
     name: 'npsso',
     value: npsso,
@@ -61,22 +99,35 @@ async function tryNpssoLogin(ctx, page, npsso) {
     httpOnly: true,
     sameSite: 'None',
     expires: Math.floor(Date.now() / 1000) + 60 * 24 * 3600,
-  }]).catch(() => {});
-  const isSignedIn = async () => (await ctx.cookies().catch(() => []))
-    .some(c => c.name === 'isSignedIn' && (c.domain || '').includes('playstation.com'));
-  await page.goto('https://www.playstation.com/en-us/', { waitUntil: 'domcontentloaded' }).catch(() => {});
+  }]).then(() => log.info('npsso cookie injected'))
+    .catch(e => log.warn(`npsso cookie inject failed: ${e.message ? e.message.split('\n')[0] : e}`));
+  await page.goto('https://www.playstation.com/en-us/', { waitUntil: 'domcontentloaded' }).catch(e => log.warn(`goto failed: ${e.message ? e.message.split('\n')[0] : e}`));
   await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
-  if (await isSignedIn()) return true;
+  if (await npssoDiag(ctx, page, 'after-goto')) return true;
   // Trigger the OAuth authorize flow; a valid npsso completes it silently.
-  await page.locator('button:has-text("Sign In"), a:has-text("Sign In")').first().click({ timeout: 15000 }).catch(() => {});
+  log.info('Clicking Sign In to trigger authorize…');
+  await page.locator('button:has-text("Sign In"), a:has-text("Sign In")').first().click({ timeout: 15000 })
+    .catch(e => log.warn(`Sign In click failed: ${e.message ? e.message.split('\n')[0] : e}`));
+  await page.waitForTimeout(3000);
+  await npssoDiag(ctx, page, 'after-signin-click');
   for (let i = 0; i < 12; i++) { // ~36s
     await page.waitForTimeout(3000);
-    if (await isSignedIn()) return true;
-    // If the credential form appears, the npsso is expired/invalid → fall back.
+    if (await ctx.cookies().then(cs => cs.some(c => c.name === 'isSignedIn' && (c.domain || '').includes('playstation.com'))).catch(() => false)) {
+      await npssoDiag(ctx, page, `poll-${i}-SIGNED-IN`);
+      return true;
+    }
+    // If the credential form appears, the token wasn't accepted in this context.
+    // That is NOT necessarily "expired" — a device-bound token presented from a
+    // different machine/container shows the form too (see header note).
     const formShown = await page.locator('#signin-entrance-input-signinId, #signin-password-input-password').count().catch(() => 0);
-    if (formShown) { log.warn('npsso silent re-auth failed (login form appeared — token likely expired)'); return false; }
+    if (formShown) {
+      await npssoDiag(ctx, page, `poll-${i}-FORM-SHOWN`);
+      log.warn('npsso silent re-auth failed — Sony showed the login form (token not accepted in this context; may be device-bound rather than expired)');
+      return false;
+    }
   }
-  log.warn('npsso silent re-auth timed out');
+  await npssoDiag(ctx, page, 'TIMEOUT');
+  log.warn('npsso silent re-auth timed out (neither signed-in nor login form within ~36s)');
   return false;
 }
 
