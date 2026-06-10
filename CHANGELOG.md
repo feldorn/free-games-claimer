@@ -4,6 +4,36 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.33
+
+**Diagnostics submissions now carry the context I keep asking reporters for.** After auditing the round-trips on the last ~7 issues, two patterns stood out: (a) the pre-error log capture window was too small to include script-emitted diagnostic dumps (e.g. AliExpress's `JSON.stringify(snapshot, null, 2)` block that fires right before the throw in [#72](https://github.com/feldorn/free-games-claimer/issues/72)), and (b) every triage round eventually needed scheduler config + active-service list + locale + runtime info that I had to ask for separately. Both fixed.
+
+**1. Pre-error log capture: 6 lines → 25 lines before the matched error.** Stack-window in `_scanForErrors()` now covers `i-25 .. i+15` (capped at 6000 chars after redaction), up from `i-6 .. i+14` at 4000 chars. The new window catches intentional diagnostic-dump blocks (AliExpress page snapshots, MS run summaries, etc.) instead of truncating them mid-JSON. Section headers and the run's recent log context land in the issue body without a follow-up paste.
+
+**2. New `<details>` block: Config & run state at error time.** Each captured error now stores a non-sensitive snapshot of:
+
+- **Scheduler:** mode (legacy-combined / decoupled / loop-only / manual), `dailyStartTime`, loop seconds, runOnStartup
+- **MS scheduler:** window (start hour + width) or `inline (MS_RUN_WITH_MAIN_CHAIN=1)` or off
+- **Active services:** the resolved set after `defaultActive` + Settings overrides
+- **Per-service flags:** `PG_REDEEM` + max-attempts, Steam filters (`skipUnrated`, `minPrice`, `minRating`), MS pacing (`searchDelayMax`, `redeemThreshold`, `runWithMainChain`), notification level, BASE_PATH/PUBLIC_URL/NOVNC_URL presence
+- **Credentials present:** per-service `yes/no` (never the value itself — purely "is this service credential-bound or cookie-only?")
+- **Recent runs:** last 3 entries from `data/runs.json` — timestamp, status, claimed count, exit code
+- **Runtime:** Node version, platform/arch, `LANG`, `TZ`
+
+All available server-side at error time; nothing pulled from notification creds, no DB contents beyond the recent-run summaries. The block renders into the pre-filled issue body via a new `renderDiagnosticContext()` helper; falls back to silent skip if the field is missing (old records or future schema gaps degrade gracefully).
+
+**What this would have closed in one round:**
+
+- **[#68](https://github.com/feldorn/free-games-claimer/issues/68)** (truresma, Steam "no Add to Account") — `LANG=de_DE.UTF-8` would have surfaced immediately as the localization clue. Saved the screenshot round-trip.
+- **[#69](https://github.com/feldorn/free-games-claimer/issues/69)** (dabziuebu4egh2, MS not running) — scheduler mode + active services + runOnStartup would have replaced the "share your scheduler config" round.
+- **[#71](https://github.com/feldorn/free-games-claimer/issues/71)** (kevindevm, Argentina 0 points) — `ms_search_delay_max` value + recent-runs success/fail mix would have told us the throttle picture upfront.
+- **[#72](https://github.com/feldorn/free-games-claimer/issues/72)** (oat1, AliExpress detector fail) — the full Polish page-snapshot JSON block would have been in the body verbatim (item #1 fix), and `LANG=pl_PL.UTF-8` would have confirmed the locale (item #2).
+- **[#73](https://github.com/feldorn/free-games-claimer/issues/73)** (HelpMePleasepls, AliExpress cookie + fill) — the credentials-set block would have shown `aliexpress: no` immediately, pinning the diagnosis.
+
+No UI surface — server-only changes plus the issue-body builder. Applies to both the banner Share button and the Diagnostics tab's row-level Share button.
+
+---
+
 ## What's new in 2.8.32
 
 **Clearer error when AliExpress can't authenticate.** Reported by HelpMePleasepls ([#73](https://github.com/feldorn/free-games-claimer/issues/73)): after importing cookies via the panel, the script crashed with `locator.fill: value: expected string, got undefined` at `aliexpress.js:129`. The actual problem was that the login-marker detector didn't recognize the post-cookie state (likely a locale or layout drift, the same family as [#68](https://github.com/feldorn/free-games-claimer/issues/68) for Steam), so the script fell through to the credential-based login flow — but with `AE_EMAIL` unset (user expected cookies to be sufficient), the `prompt()` resolved to `undefined` in the headless container and `fill()` got an opaque error.

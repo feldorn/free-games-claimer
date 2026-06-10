@@ -612,6 +612,79 @@ function _redactCredentials(s) {
     .replace(/\b(Bearer\s+|api[_-]?key=|token=)[A-Za-z0-9._-]{8,}/gi, '$1<redacted>');
 }
 
+// Snapshot of config + run-state at error time. Goes into the issue body
+// the panel pre-fills for diagnostics submissions, eliminating the rounds
+// of "what's your scheduler config? which services are active? did you
+// have PG_REDEEM on?" follow-ups that 6+ recent issues all needed. Pulls
+// only from non-sensitive fields — no notification creds, no auth secrets,
+// no DB contents beyond a per-service "credentials present? yes/no" flag.
+// Failures here must not block diagnostics recording, so the entire body
+// is wrapped in try/catch and falls back to {}.
+function _captureErrorContext() {
+  try {
+    const sched = getSchedulerConfig();
+    const active = activeServices();
+    const combined = legacyCombinedMode(sched, active);
+    const has = (k) => Boolean(process.env[k] || cfg[k.toLowerCase()]);
+    // Recent runs from data/runs.json — last 3, status only.
+    let recentRuns = [];
+    try {
+      const runs = (runHistoryDb && runHistoryDb.data && runHistoryDb.data.runs) || [];
+      recentRuns = runs.slice(-3).map(r => ({
+        at: r.startedAt || r.at || '',
+        status: r.status || (r.exitCode === 0 ? 'success' : 'error'),
+        claimed: r.summary && typeof r.summary.claimed === 'number' ? r.summary.claimed : undefined,
+        exit: r.exitCode,
+      }));
+    } catch {}
+    return {
+      scheduler: {
+        mode: combined ? 'legacy-combined' : (sched.dailyStartTime ? 'decoupled' : (sched.loop ? 'loop-only' : 'manual')),
+        dailyStartTime: sched.dailyStartTime || null,
+        loopSeconds: sched.loop || 0,
+        runOnStartup: cfg.run_on_startup || 0,
+        msWindow: sched.msHours > 0
+          ? { startHour: sched.msScheduleStart, hours: sched.msHours, runWithMainChain: !!cfg.ms_run_with_main_chain }
+          : { off: true, runWithMainChain: !!cfg.ms_run_with_main_chain },
+      },
+      activeServices: Array.from(active).sort(),
+      // Per-service flags that have shaped recent triage. "credsSet" is
+      // a boolean — never the value itself.
+      flags: {
+        pg_redeem: !!cfg.pg_redeem,
+        pg_redeem_max_attempts: cfg.pg_redeem_max_attempts,
+        pg_baseUrl: cfg.pg_base_url,
+        steam_skip_unrated: !!cfg.steam_skip_unrated,
+        steam_min_price: cfg.steam_min_price,
+        steam_min_rating: cfg.steam_min_rating,
+        ms_search_delay_max: cfg.ms_search_delay_max,
+        ms_redeem_threshold: cfg.ms_redeem_threshold,
+        ms_run_with_main_chain: !!cfg.ms_run_with_main_chain,
+        ae_credsSet: has('AE_EMAIL') && has('AE_PASSWORD'),
+        pg_credsSet: has('PG_EMAIL') || has('EMAIL'),
+        eg_credsSet: has('EG_EMAIL') || has('EMAIL'),
+        steam_credsSet: has('STEAM_EMAIL') || has('EMAIL'),
+        gog_credsSet: has('GOG_EMAIL') || has('EMAIL'),
+        ms_credsSet: has('MS_EMAIL') || has('EMAIL'),
+        notify_level: cfg.notify_level,
+        base_path_set: !!cfg.base_path,
+        public_url_set: !!cfg.public_url,
+        novnc_url_set: !!process.env.NOVNC_URL,
+      },
+      recentRuns,
+      runtime: {
+        node: process.version,
+        platform: process.platform,
+        arch: process.arch,
+        lang: process.env.LANG || process.env.LC_ALL || null,
+        tz: process.env.TZ || null,
+      },
+    };
+  } catch (e) {
+    return { _captureError: String(e && e.message || e).slice(0, 200) };
+  }
+}
+
 function _recordDiagnosticError(script, errorClass, message, stackLines) {
   if (!diagnosticsDb || !diagnosticsDb.data) return; // not loaded yet
   if (!diagnosticsDb.data.enabled) return;            // user opted out via Never Share
@@ -632,7 +705,8 @@ function _recordDiagnosticError(script, errorClass, message, stackLines) {
       script: script || 'unknown',
       errorClass: errorClass || 'Error',
       message: message.slice(0, 500),
-      stack: Array.isArray(redactedStack) ? redactedStack.slice(0, 25).join('\n').slice(0, 4000) : '',
+      stack: Array.isArray(redactedStack) ? redactedStack.slice(0, 50).join('\n').slice(0, 6000) : '',
+      context: _captureErrorContext(),
       firstSeen: nowIso,
       lastSeen: nowIso,
       count: 1,
@@ -642,8 +716,12 @@ function _recordDiagnosticError(script, errorClass, message, stackLines) {
     errors[fp].lastSeen = nowIso;
     errors[fp].count = (errors[fp].count || 0) + 1;
     if (Array.isArray(redactedStack) && redactedStack.length) {
-      errors[fp].stack = redactedStack.slice(0, 12).join('\n').slice(0, 2000);
+      errors[fp].stack = redactedStack.slice(0, 50).join('\n').slice(0, 6000);
     }
+    // Refresh context on each occurrence — config can change between
+    // first-seen and last-seen, and the reporter cares about the state
+    // at the point they shared the banner (now), not the original.
+    errors[fp].context = _captureErrorContext();
   }
   // Best-effort persist; failures here don't block the run.
   diagnosticsDb.write().catch(e => console.warn(`[${datetime()}] diagnostics-state write failed: ${e.message}`));
@@ -688,16 +766,21 @@ function _scanForErrors(buffer) {
       if (!m) continue;
       const cls = (m.groups && m.groups.cls) || 'Error';
       const msg = (m.groups && m.groups.msg) || '';
-      // Capture 6 lines BEFORE + the match + 14 lines AFTER (cleaned)
+      // Capture 25 lines BEFORE + the match + 15 lines AFTER (cleaned)
       // for stack context. Leading context (section header, prior log
-      // lines, what the script was doing) carries more triage signal
-      // than 10 lines of Node-internal stack frames — flipside101's
+      // lines, intentional diagnostic-dump blocks the script printed
+      // before throwing) carries the most triage signal — flipside101's
       // #50 single-line "All promises were rejected" had no surrounding
-      // context, so we couldn't tell whether it was the login Promise.
-      // any, the claim-button race, or the DLC click. Marker `>>` flags
-      // the match line so the reader can find it in the captured block.
-      const startIdx = Math.max(0, i - 6);
-      const endIdx   = Math.min(lines.length, i + 15);
+      // context at all, and #72 oat1's AliExpress error truncated the
+      // page-snapshot JSON the script emits just above the throw (the
+      // old 6-before window caught only the tail of the block). 25
+      // pre-lines lets a typical diagnostic dump (~20 lines of JSON)
+      // arrive intact. Marker `>>` flags the match line so the reader
+      // can find it in the captured block. Final length is also capped
+      // at 6000 chars in _recordDiagnosticError so an extra-noisy stack
+      // can't blow out the diagnostics-state DB.
+      const startIdx = Math.max(0, i - 25);
+      const endIdx   = Math.min(lines.length, i + 16);
       const stack = lines.slice(startIdx, endIdx).map((l, idx) => {
         const cleaned = l.replace(/^\s*\d+:\d+:\d+\s+/, '');
         return (startIdx + idx === i) ? '>> ' + cleaned : '   ' + cleaned;
@@ -2533,6 +2616,7 @@ async function getState() {
           count: latest.count,
           firstSeen: latest.firstSeen,
           lastSeen: latest.lastSeen,
+          context: latest.context || null,
         },
       };
     })(),
@@ -4352,6 +4436,73 @@ async function diagBannerDecide(fingerprint, decision) {
     showToast('Failed to update error decision: ' + e.message, 'error');
   }
 }
+// Render the context object captured at error time into a readable
+// markdown <details> block. Server attaches non-sensitive scheduler /
+// service / runtime state to each diagnostic record; this turns it into
+// what the issue triager actually wants to see at a glance. Returns ''
+// if no context is available so old records (or future schema gaps)
+// degrade gracefully — the rest of the body still goes through.
+function renderDiagnosticContext(ctx) {
+  if (!ctx || typeof ctx !== 'object') return '';
+  const TICK = String.fromCharCode(96);
+  const lines = ['<details><summary>Config &amp; run state at error time</summary>', ''];
+  try {
+    const s = ctx.scheduler || {};
+    const schedBits = [s.mode || '?'];
+    if (s.dailyStartTime) schedBits.push('daily ' + s.dailyStartTime);
+    if (s.loopSeconds) schedBits.push('loop ' + s.loopSeconds + 's');
+    if (s.runOnStartup) schedBits.push('runOnStartup=' + s.runOnStartup);
+    lines.push('**Scheduler:** ' + schedBits.join(', '));
+    if (s.msWindow) {
+      const m = s.msWindow;
+      const ms = m.off
+        ? (m.runWithMainChain ? 'inline (MS_RUN_WITH_MAIN_CHAIN=1)' : 'off')
+        : (m.runWithMainChain ? 'inline (MS_RUN_WITH_MAIN_CHAIN=1)' : (m.startHour + ':00 + ' + m.hours + 'h window'));
+      lines.push('**MS:** ' + ms);
+    }
+    if (Array.isArray(ctx.activeServices) && ctx.activeServices.length) {
+      lines.push('**Active services:** ' + ctx.activeServices.join(', '));
+    }
+    const f = ctx.flags || {};
+    const flagBits = [];
+    flagBits.push('pg_redeem=' + !!f.pg_redeem + (f.pg_redeem ? ' (max ' + (f.pg_redeem_max_attempts || '?') + ' attempts)' : ''));
+    if (f.pg_baseUrl) flagBits.push('pg_base_url=' + f.pg_baseUrl);
+    flagBits.push('steam_skip_unrated=' + !!f.steam_skip_unrated + ', min_price=' + (f.steam_min_price ?? '?') + ', min_rating=' + (f.steam_min_rating ?? '?'));
+    flagBits.push('ms_search_delay_max=' + (f.ms_search_delay_max ?? '?') + ', ms_redeem_threshold=' + (f.ms_redeem_threshold ?? '?') + ', ms_run_with_main_chain=' + !!f.ms_run_with_main_chain);
+    const credsSet = [];
+    const credsMiss = [];
+    const credKeys = [['prime-gaming', 'pg_credsSet'], ['epic-games', 'eg_credsSet'], ['steam', 'steam_credsSet'], ['gog', 'gog_credsSet'], ['microsoft', 'ms_credsSet'], ['aliexpress', 'ae_credsSet']];
+    for (const [name, key] of credKeys) (f[key] ? credsSet : credsMiss).push(name);
+    flagBits.push('credentials set: ' + (credsSet.join(', ') || '(none)') + (credsMiss.length ? ' — missing: ' + credsMiss.join(', ') : ''));
+    flagBits.push('notify_level=' + (f.notify_level || '?') + ', base_path=' + (f.base_path_set ? 'set' : 'unset') + ', public_url=' + (f.public_url_set ? 'set' : 'unset') + ', novnc_url=' + (f.novnc_url_set ? 'set' : 'unset'));
+    lines.push('**Flags:**');
+    for (const b of flagBits) lines.push('- ' + b);
+    if (Array.isArray(ctx.recentRuns) && ctx.recentRuns.length) {
+      lines.push('**Recent runs:**');
+      for (const r of ctx.recentRuns) {
+        const stat = r.status || (r.exit === 0 ? 'success' : 'error');
+        const claim = (typeof r.claimed === 'number') ? ' (' + r.claimed + ' claimed)' : '';
+        lines.push('- ' + (r.at || '?') + ' — ' + stat + claim);
+      }
+    }
+    const r = ctx.runtime || {};
+    const rtBits = [];
+    if (r.node) rtBits.push('Node ' + r.node);
+    if (r.platform || r.arch) rtBits.push((r.platform || '?') + ' ' + (r.arch || '?'));
+    if (r.lang) rtBits.push('LANG=' + r.lang);
+    if (r.tz) rtBits.push('TZ=' + r.tz);
+    if (rtBits.length) lines.push('**Runtime:** ' + rtBits.join(', '));
+  } catch (e) {
+    lines.push('_(context render error: ' + (e && e.message || e) + ')_');
+  }
+  lines.push('');
+  lines.push('</details>');
+  // TICK reference to keep linter from flagging unused. (We don't need
+  // it in this block — kept here in case future fields need code spans.)
+  void TICK;
+  return lines.join('\\n');
+}
+
 async function diagBannerShare(fingerprint) {
   if (!state || !state.diagnostics || !state.diagnostics.pending) return;
   const p = state.diagnostics.pending;
@@ -4364,6 +4515,7 @@ async function diagBannerShare(fingerprint) {
   // Literal backticks would close the outer PANEL_HTML template literal at Node eval — use fromCharCode.
   const TICK = String.fromCharCode(96);
   const FENCE = TICK + TICK + TICK;
+  const ctxBlock = renderDiagnosticContext(p.context);
   const bodyLines = [
     '<!-- Auto-generated from the panel\\'s error-report banner. Review and edit anything you don\\'t want public before submitting. -->',
     '',
@@ -4376,13 +4528,17 @@ async function diagBannerShare(fingerprint) {
     '<details><summary>Stack / context</summary>',
     '',
     FENCE,
-    (p.stack || '').slice(0, 4000),
+    (p.stack || '').slice(0, 6000),
     FENCE,
     '',
     '</details>',
-    '',
-    '<!-- Add any additional context here, e.g. what you were doing when this happened, recent changes, etc. -->',
   ];
+  if (ctxBlock) {
+    bodyLines.push('');
+    bodyLines.push(ctxBlock);
+  }
+  bodyLines.push('');
+  bodyLines.push('<!-- Add any additional context here, e.g. what you were doing when this happened, recent changes, etc. -->');
   const body = bodyLines.join('\\n');
   const url = 'https://github.com/feldorn/free-games-claimer/issues/new?title=' +
     encodeURIComponent(title) + '&body=' + encodeURIComponent(body);
@@ -4564,6 +4720,7 @@ async function shareDiagnosticsEntry(fingerprint) {
   const title = '[diagnostics] ' + (p.errorClass || 'Error') + ' in ' + (p.script || 'unknown') + ': ' + (p.message || '').slice(0, 80);
   const TICK = String.fromCharCode(96);
   const FENCE = TICK + TICK + TICK;
+  const ctxBlock = renderDiagnosticContext(p.context);
   const bodyLines = [
     '<!-- Auto-generated from the Diagnostics tab. Review and edit anything you don\\'t want public before submitting. -->',
     '',
@@ -4576,13 +4733,17 @@ async function shareDiagnosticsEntry(fingerprint) {
     '<details><summary>Stack / context</summary>',
     '',
     FENCE,
-    (p.stack || '').slice(0, 4000),
+    (p.stack || '').slice(0, 6000),
     FENCE,
     '',
     '</details>',
-    '',
-    '<!-- Add any additional context here, e.g. what you were doing when this happened, recent changes, etc. -->',
   ];
+  if (ctxBlock) {
+    bodyLines.push('');
+    bodyLines.push(ctxBlock);
+  }
+  bodyLines.push('');
+  bodyLines.push('<!-- Add any additional context here, e.g. what you were doing when this happened, recent changes, etc. -->');
   const body = bodyLines.join('\\n');
   const url = 'https://github.com/feldorn/free-games-claimer/issues/new?title=' +
     encodeURIComponent(title) + '&body=' + encodeURIComponent(body);
@@ -8165,6 +8326,7 @@ const server = http.createServer(async (req, res) => {
           errorClass: e.errorClass || 'Error',
           message: e.message || '',
           stack: e.stack || '',
+          context: e.context || null,
           count: e.count || 1,
           firstSeen: e.firstSeen || '',
           lastSeen: e.lastSeen || '',
