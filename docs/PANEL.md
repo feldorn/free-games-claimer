@@ -209,6 +209,92 @@ Debug). Credentials are hidden behind an explicit "Reveal credentials" click
 with last-4-char masking. Separated from Settings so 40+ rows of
 env reference don't compete with the settings controls.
 
+### Diagnostics tab
+
+Error history with one-click sharing back to the project. When a run
+crashes, the panel scans the script's stderr for exception patterns
+(JS standard classes, Playwright/patchright protocol errors, the
+top-level `Exception:` line every claim script emits) and records each
+failure as a deduplicated **fingerprint** in `data/diagnostics-state.json`.
+The fingerprint is a hash over `(script, errorClass, message, normalized
+stack)` so the same failure across many runs collapses into a single
+row with `count`, `firstSeen`, `lastSeen`.
+
+The tab shows every captured fingerprint as a table row with:
+
+- **Script** (which claim flow failed)
+- **Error class + message** (the actionable summary)
+- **Count** + first/last seen (how often, when)
+- **Stack / context** (the captured log lines around the failure)
+- **Decided state** — `pending` (banner-eligible), `shared` (user clicked
+  Share), or `dismissed` (user clicked Don't Share). Per-fingerprint
+  sticky so the same error doesn't re-nag.
+- **🗑 Delete** + **Share** row actions
+
+#### Error-report banner
+
+While the Diagnostics tab is the full history view, day-to-day the user
+mostly sees the **banner** that surfaces on top of every panel tab when
+there's an undecided fingerprint. Three buttons:
+
+- **Share** — opens a pre-filled GitHub-issue URL in a new tab. The body
+  includes script name, error class + message, count + first/last seen,
+  app version, the captured log context (last ~25 lines before the
+  exception + 15 after, clamped to 6000 chars), and a **Config & run
+  state at error time** `<details>` block with:
+  - Scheduler mode (`legacy-combined` / `decoupled` / `loop-only` /
+    `manual`), `dailyStartTime`, loop seconds, `runOnStartup`
+  - MS scheduler shape: window (`startHour + hours`) or
+    `inline (MS_RUN_WITH_MAIN_CHAIN=1)` or off
+  - Active services list
+  - Per-service flags: `PG_REDEEM` + max attempts, Steam filters
+    (`skipUnrated` / `minPrice` / `minRating`), MS pacing
+    (`searchDelayMax` / `redeemThreshold`), notification level,
+    `BASE_PATH` / `PUBLIC_URL` / `NOVNC_URL` presence
+  - Credentials-set booleans per service (never the values)
+  - Last 3 runs from `data/runs.json` (timestamp, status, claimed count)
+  - Runtime: Node version, platform, arch, `LANG`, `TZ`
+
+  You review the body on GitHub before submitting — nothing is auto-posted.
+
+- **Don't Share** — marks this single fingerprint as `dismissed`. Banner
+  hides until the next *new* error.
+
+- **Never Share** — disables the banner entirely (writes
+  `diagnostics.enabled=false` in `data/diagnostics-state.json`). The full
+  Diagnostics tab still records errors and the toggle in
+  Settings → Notifications can re-enable.
+
+#### Redaction guarantee
+
+Before any fingerprint is hashed or persisted, message + stack go through
+a redaction pass that strips:
+
+- Apprise notifier URLs (`discord://<webhook>`, `pover://<apptokens>`,
+  `tgram://<bot:token>@<chat>`, `mailto://user:pass@host`, etc.) for all
+  26 supported apprise schemes — replaced with `<scheme>://<redacted>`.
+- URL-embedded credentials in any scheme (`https://user:pass@host` →
+  `https://<credentials-redacted>@host`).
+- Bearer tokens / `api_key=` / `token=` patterns of 8+ chars.
+
+This was tightened after [#66](https://github.com/feldorn/free-games-claimer/issues/66),
+where a Discord webhook leaked into a captured `Command failed:` line —
+the same redaction now applies before write, so the in-disk JSON
+(`data/diagnostics-state.json`) never holds live credentials either.
+
+#### When false-positives are suppressed
+
+Pressing the panel's **Stop** button gracefully terminates an in-flight
+run by sending SIGTERM. Playwright then throws
+`Target page, context or browser has been closed` from whatever
+navigation/click was in progress — which without the suppression would
+trip the diagnostics scanner and surface a banner for an error the user
+just caused. `log.exception()` in `src/util.js` checks the
+`shutdownRequested` flag set by our SIGTERM handler and rewrites the
+log prefix to `⏹ Aborted (stop requested):` (which doesn't match the
+diagnostics regex), so Stop-induced browser-closed errors stay off the
+banner.
+
 ### Notification deep-links
 
 When `PUBLIC_URL` is set (the panel's externally-reachable URL), Pushover /
