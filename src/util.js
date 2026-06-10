@@ -58,6 +58,22 @@ export const datetimeUTC = (d = new Date()) => d.toISOString().replace('T', ' ')
 export const datetime = (d = new Date()) => datetimeUTC(new Date(d.getTime() - d.getTimezoneOffset() * 60000));
 export const filenamify = s => s.replaceAll(':', '.').replace(/[^a-z0-9 _\-.]/gi, '_'); // alternative: https://www.npmjs.com/package/filenamify - On Unix-like systems, / is reserved. On Windows, <>:"/\|?* along with trailing periods are reserved.
 
+// Common Chromium launch flags every claim script should include. Force
+// English at the browser-process level (--lang + --accept-lang) and disable
+// Chrome's auto-translate so the DOM text our locators key off stays in
+// English regardless of the user's locale. Belt-and-suspenders with any
+// per-site URL-param locale forcing (e.g. Steam's ?l=english). Reported
+// originally as #68 (German Steam locale broke the "Add to Account"
+// locator) and #72 (Polish AliExpress broke the login-state detector) —
+// flag-level forcing fixes both in one place and covers every storefront
+// without per-site changes.
+export const localeArgs = () => [
+  '--lang=en-US',
+  '--accept-lang=en-US,en;q=0.9',
+  '--disable-translate',
+  '--disable-features=Translate,TranslateUI',
+];
+
 // Load a previously-saved fingerprint from <profileDir>/.fgc-fingerprint.json
 // or call the supplied generator function once and persist its output.
 // Used to keep the same browser fingerprint across runs so sites don't see

@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 const __panelDirname = path.dirname(fileURLToPath(import.meta.url));
 import { chromium } from 'patchright';
-import { datetime, notify, jsonDb, normalizeTitle, cleanProfileLocks } from './src/util.js';
+import { datetime, notify, jsonDb, normalizeTitle, cleanProfileLocks, localeArgs } from './src/util.js';
 import { cfg } from './src/config.js';
 import { describeConfig, patchConfig, describeEnv, getSchedulerConfig, CONFIG_FILE_PATH } from './src/app-config.js';
 import { SITES as SITE_REGISTRY, getLoginSitesById, getClaimScriptOrder, getLinkedActiveMap, getClaimDbFiles, getServiceRows } from './src/sites.js';
@@ -127,7 +127,7 @@ async function launchSite(siteId) {
     viewport: { width: cfg.width, height: cfg.height },
     locale: 'en-US',
     handleSIGINT: false,
-    args: ['--hide-crash-restore-bubble'],
+    args: ['--hide-crash-restore-bubble', ...localeArgs()],
     ...(site.contextOptions || {}),
   });
 
@@ -212,7 +212,7 @@ async function checkSiteStatus(siteId) {
       viewport: { width: cfg.width, height: cfg.height },
       locale: 'en-US',
       handleSIGINT: false,
-      args: ['--hide-crash-restore-bubble', '--no-sandbox', '--disable-gpu'],
+      args: ['--hide-crash-restore-bubble', '--no-sandbox', '--disable-gpu', ...localeArgs()],
       ...(site.contextOptions || {}),
     });
 
@@ -321,7 +321,7 @@ async function importSiteCookies(siteId, rawCookies) {
       viewport: { width: cfg.width, height: cfg.height },
       locale: 'en-US',
       handleSIGINT: false,
-      args: ['--hide-crash-restore-bubble'],
+      args: ['--hide-crash-restore-bubble', ...localeArgs()],
       ...(site.contextOptions || {}),
     });
     await context.addCookies(normalized);
@@ -1109,7 +1109,7 @@ async function startBatchRedeem() {
     viewport: { width: cfg.width, height: cfg.height },
     locale: 'en-US',
     handleSIGINT: false,
-    args: ['--hide-crash-restore-bubble'],
+    args: ['--hide-crash-restore-bubble', ...localeArgs()],
   });
   const page = context.pages()[0] || await context.newPage();
   try { await page.setViewportSize({ width: cfg.width, height: cfg.height }); } catch {}
@@ -1431,7 +1431,7 @@ async function startSteamRedeem() {
     viewport: { width: cfg.width, height: cfg.height },
     locale: 'en-US',
     handleSIGINT: false,
-    args: ['--hide-crash-restore-bubble'],
+    args: ['--hide-crash-restore-bubble', ...localeArgs()],
   });
   const page = context.pages()[0] || await context.newPage();
   try { await page.setViewportSize({ width: cfg.width, height: cfg.height }); } catch {}

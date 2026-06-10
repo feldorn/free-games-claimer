@@ -91,6 +91,13 @@ export const cfg = {
   gog_email: process.env.GOG_EMAIL || process.env.EMAIL,
   gog_password: process.env.GOG_PASSWORD || process.env.PASSWORD,
   gog_newsletter: gog.keepNewsletter ?? false, // do not unsubscribe from newsletter after claiming a game
+  // GOG 2FA backup codes — comma-separated, normalized to uppercase + no
+  // separators downstream. When the daily run hits GOG's two-step prompt,
+  // gog.js consumes one unused code from this list and records it in
+  // data/gog-used-otp-codes.txt so future runs skip it. Falls back to the
+  // existing interactive prompt / VNC wait when all listed codes are
+  // exhausted. Pattern modeled on P-Adamiec/Free-Games-Claimer-Remaster.
+  gog_otp_backup_codes: (gog.otpBackupCodes || process.env.GOG_OTP_BACKUP_CODES || '').toString(),
   // auth steam
   steam_email: process.env.STEAM_EMAIL || process.env.EMAIL,
   steam_password: process.env.STEAM_PASSWORD || process.env.PASSWORD,

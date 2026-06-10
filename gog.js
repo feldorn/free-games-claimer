@@ -1,9 +1,43 @@
 import { chromium } from 'patchright';
-import { resolve, jsonDb, datetime, filenamify, prompt, confirm, notify, html_game_list, handleSIGINT, log, normalizeTitle, awaitUserCaptchaSolve, cleanProfileLocks, matchKey, stripGpTail, getDiscoveryUserMarkedKeys, delay } from './src/util.js';
+import { existsSync, readFileSync, appendFileSync, mkdirSync } from 'node:fs';
+import path from 'node:path';
+import { resolve, jsonDb, datetime, filenamify, prompt, confirm, notify, html_game_list, handleSIGINT, log, normalizeTitle, awaitUserCaptchaSolve, cleanProfileLocks, matchKey, stripGpTail, getDiscoveryUserMarkedKeys, delay, localeArgs, dataDir } from './src/util.js';
 import { cfg } from './src/config.js';
 import { siteVersion } from './src/sites.js';
 import { fetchGamerPowerGiveaways, filterFor as filterGpFor, resolveGamerPowerHref } from './src/gamerpower.js';
 import { fetchFGFPosts, filterFor as filterFgfFor, cleanTitle as fgfClean } from './src/freegamefindings.js';
+
+// GOG 2FA backup-code consumption. Codes are configured comma-separated
+// via GOG_OTP_BACKUP_CODES; used codes are appended to
+// data/gog-used-otp-codes.txt and skipped on subsequent runs so a single
+// list survives many daily runs without manual bookkeeping. Falls back
+// to the existing interactive prompt when the list is empty or exhausted.
+const GOG_USED_OTP_FILE = dataDir('gog-used-otp-codes.txt');
+function _normalizeOtpCode(s) {
+  return String(s || '').replace(/[\s-]+/g, '').toUpperCase();
+}
+function _loadUsedOtpCodes() {
+  try {
+    if (!existsSync(GOG_USED_OTP_FILE)) return new Set();
+    return new Set(readFileSync(GOG_USED_OTP_FILE, 'utf8')
+      .split('\n').map(_normalizeOtpCode).filter(Boolean));
+  } catch { return new Set(); }
+}
+function pickNextOtpBackupCode() {
+  const raw = cfg.gog_otp_backup_codes || '';
+  if (!raw.trim()) return null;
+  const all = raw.split(',').map(_normalizeOtpCode).filter(Boolean);
+  const used = _loadUsedOtpCodes();
+  return all.find(c => !used.has(c)) || null;
+}
+function markOtpBackupCodeUsed(code) {
+  try {
+    mkdirSync(path.dirname(GOG_USED_OTP_FILE), { recursive: true });
+    appendFileSync(GOG_USED_OTP_FILE, _normalizeOtpCode(code) + '\n');
+  } catch (e) {
+    log.warn(`GOG OTP: failed to persist used code (${e.message}) — next run may retry it`);
+  }
+}
 
 const screenshot = (...a) => resolve(cfg.dir.screenshots, 'gog', ...a);
 
@@ -30,6 +64,7 @@ const context = await chromium.launchPersistentContext(cfg.dir.browser, {
   // https://peter.sh/experiments/chromium-command-line-switches/
   args: [
     '--hide-crash-restore-bubble',
+    ...localeArgs(),
   ],
 });
 
@@ -87,8 +122,50 @@ try {
       await page.waitForTimeout(2000); // TODO patchright waits forever for MFA locator otherwise
       // handle MFA, but don't await it
       iframe.locator('form[name=second_step_authentication]').waitFor().then(async () => {
-        log.info('Two-Step Verification — enter security code');
-        log.info(await iframe.locator('.form__description').innerText());
+        log.info('Two-Step Verification detected');
+        try { log.info(await iframe.locator('.form__description').innerText()); } catch {}
+        // Backup-code branch: if the user configured GOG_OTP_BACKUP_CODES,
+        // pick the first unused code, navigate to GOG's backup-code entry
+        // page, fill it, and mark it consumed. Falls through to the
+        // interactive prompt below if no codes are available / exhausted.
+        const backupCode = pickNextOtpBackupCode();
+        if (backupCode) {
+          log.info(`Using GOG backup code ${backupCode.slice(0, 3)}***** (${backupCode.length} chars)`);
+          try {
+            await page.goto('https://login.gog.com/login/two_factor/backup', { waitUntil: 'domcontentloaded' });
+            await page.waitForTimeout(2000);
+            // GOG splits backup codes across one input per character. Fill
+            // whatever inputs are present in order — matches both the
+            // 8-char backup format and any future shape change with the
+            // same per-character UX.
+            const filled = await page.evaluate((code) => {
+              const inputs = Array.from(document.querySelectorAll('input:not([type="hidden"])'))
+                .filter(el => el.offsetParent !== null);
+              if (!inputs.length) return 0;
+              const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+              for (let i = 0; i < Math.min(inputs.length, code.length); i++) {
+                setter.call(inputs[i], code[i]);
+                inputs[i].dispatchEvent(new Event('input', { bubbles: true }));
+              }
+              return Math.min(inputs.length, code.length);
+            }, backupCode);
+            log.info(`Filled ${filled} backup-code character(s); submitting`);
+            await page.locator('button[type="submit"], input[type="submit"]').first().click({ timeout: 5000 }).catch(_ => {});
+            await page.waitForTimeout(2000);
+            // Verify we left the login page (success heuristic — GOG
+            // redirects to www.gog.com on a valid code).
+            if (!String(page.url() || '').includes('login.gog')) {
+              markOtpBackupCodeUsed(backupCode);
+              log.info('GOG backup code accepted — marked as used in data/gog-used-otp-codes.txt');
+              return;
+            }
+            log.warn('GOG backup code did not advance past the login page — falling back to interactive prompt');
+          } catch (e) {
+            log.warn(`GOG backup-code flow failed (${e.message}) — falling back to interactive prompt`);
+          }
+        }
+        // Existing TOTP / SMS prompt path. Untouched when backup codes
+        // are unset or the backup branch above bailed out.
         const otp = await prompt({ type: 'text', message: 'Enter two-factor sign in code', validate: n => n.toString().length == 4 || 'The code must be 4 digits!' }); // can't use type: 'number' since it strips away leading zeros and codes sometimes have them
         await iframe.locator('#second_step_authentication_token_letter_1').pressSequentially(otp.toString(), { delay: 10 });
         await iframe.locator('#second_step_authentication_send').click();

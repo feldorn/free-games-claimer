@@ -4,6 +4,33 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.34
+
+**Two improvements adapted from [P-Adamiec/Free-Games-Claimer-Remaster](https://github.com/P-Adamiec/Free-Games-Claimer-Remaster) (an independent Python rewrite of the original) after auditing what they did that we don't.**
+
+### 1. Force English at the browser-process level (every storefront)
+
+We already force-English via URL param for Steam (`?l=english`, [#68](https://github.com/feldorn/free-games-claimer/issues/68)), but that's per-site, per-navigation. P-Adamiec's approach is broader: launch Chromium with `--lang=en-US --accept-lang=en-US,en;q=0.9 --disable-translate --disable-features=Translate,TranslateUI` so the entire browser process advertises English to every site. New helper `localeArgs()` in `src/util.js` exports the flag list; every script's `chromium.launchPersistentContext({ args: [...] })` now spreads it. Covers all 9 claim scripts (Prime, Epic, GOG, Steam, Microsoft, Humble, Fanatical, Lenovo, AliExpress) plus all 5 launch sites in the panel (interactive login, test runs).
+
+Belt-and-suspenders with the per-site URL-param fix — if either holds, the page renders English and our existing English-text locators match. Closes the root cause for the same family of failures as [#72](https://github.com/feldorn/free-games-claimer/issues/72) (Polish AliExpress) without needing per-site URL surgery for each storefront.
+
+### 2. GOG 2FA backup-code automation
+
+For users with GOG two-step verification enabled, previously the daily run would stall at the 2FA prompt and require interactive VNC. New env `GOG_OTP_BACKUP_CODES` (also Settings → Services → GOG → "GOG 2FA backup codes (comma-separated)") accepts your 8-character GOG backup codes — copy them from GOG → Account Settings → Security. When the 2FA prompt fires, the script:
+
+1. Picks the first unused code from the list
+2. Navigates to `https://login.gog.com/login/two_factor/backup`
+3. Fills the per-character inputs and submits
+4. On success, appends the consumed code to `data/gog-used-otp-codes.txt` so the next run picks the next code
+
+When all listed codes are exhausted, falls back to the existing interactive prompt / VNC wait — same behavior as before, just with N runs of unattended capability first. Code normalization tolerates dashes/whitespace/case (`AAAA-1111`, `aaaa 1111`, `AAAA1111` all parse the same way) so what you paste from GOG works regardless of formatting.
+
+Leave the env empty if you don't use GOG 2FA — the existing 4-digit TOTP/SMS code prompt is untouched.
+
+Modeled on `src/stores/gog.py` from P-Adamiec's remaster; their MIT-spirit codebase and explicit "fork-friendly" stance made the cross-pollination painless.
+
+---
+
 ## What's new in 2.8.33
 
 **Diagnostics submissions now carry the context I keep asking reporters for.** After auditing the round-trips on the last ~7 issues, two patterns stood out: (a) the pre-error log capture window was too small to include script-emitted diagnostic dumps (e.g. AliExpress's `JSON.stringify(snapshot, null, 2)` block that fires right before the throw in [#72](https://github.com/feldorn/free-games-claimer/issues/72)), and (b) every triage round eventually needed scheduler config + active-service list + locale + runtime info that I had to ask for separately. Both fixed.

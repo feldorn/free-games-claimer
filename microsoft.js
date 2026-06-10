@@ -1,7 +1,7 @@
 import { chromium, devices } from 'patchright';
 import { authenticator } from 'otplib';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
-import { delay, datetime, prompt, notify, log, dataDir, jsonDb, cleanProfileLocks } from './src/util.js';
+import { delay, datetime, prompt, notify, log, dataDir, jsonDb, cleanProfileLocks, localeArgs } from './src/util.js';
 import { cfg } from './src/config.js';
 import { siteVersion } from './src/sites.js';
 
@@ -297,6 +297,7 @@ async function createContext(isMobile) {
       '--enable-webgl',
       '--ignore-gpu-blocklist',
       '--enable-unsafe-webgpu',
+      ...localeArgs(),
     ],
     ...deviceSettings, // for mobile: overrides viewport, sets userAgent/isMobile/hasTouch
   });

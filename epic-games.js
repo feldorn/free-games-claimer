@@ -2,7 +2,7 @@ import { chromium } from 'patchright';
 import { authenticator } from 'otplib';
 import path from 'path';
 import { existsSync, writeFileSync } from 'fs';
-import { resolve, jsonDb, datetime, filenamify, prompt, confirm, notify, html_game_list, handleSIGINT, closeContextSafely, log, cleanProfileLocks } from './src/util.js';
+import { resolve, jsonDb, datetime, filenamify, prompt, confirm, notify, html_game_list, handleSIGINT, closeContextSafely, log, cleanProfileLocks, localeArgs } from './src/util.js';
 import { cfg } from './src/config.js';
 import { siteVersion } from './src/sites.js';
 import { getMobileGames } from './src/epic-games-mobile.js';
@@ -55,6 +55,7 @@ const context = await chromium.launchPersistentContext(cfg.dir.browser, {
     '--hide-crash-restore-bubble',
     '--ignore-gpu-blocklist', // required for OpenGL: Disabled -> Enabled & WebGL: Software only -> Hardware accelerated
     '--enable-unsafe-webgpu', // required for WebGPU: Disabled -> Hardware accelerated
+    ...localeArgs(),
   ],
   // The following makes the browser crash in docker with 'Chromium sandboxing failed!':
   // chromiumSandbox: true, // https://github.com/Kaliiiiiiiiii-Vinyzu/patchright/issues/52

@@ -1,6 +1,6 @@
 import { writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { chromium } from 'patchright';
-import { datetime, notify, log, dataDir, handleSIGINT, cleanProfileLocks } from './src/util.js';
+import { datetime, notify, log, dataDir, handleSIGINT, cleanProfileLocks, localeArgs } from './src/util.js';
 import { cfg } from './src/config.js';
 import { siteVersion } from './src/sites.js';
 
@@ -72,7 +72,7 @@ try {
     viewport: { width: cfg.width, height: cfg.height },
     locale: 'en-US',
     handleSIGINT: false,
-    args: ['--hide-crash-restore-bubble'],
+    args: ['--hide-crash-restore-bubble', ...localeArgs()],
   });
   page = context.pages()[0] || await context.newPage();
   context.setDefaultTimeout(30000);

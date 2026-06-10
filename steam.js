@@ -1,6 +1,6 @@
 import { chromium } from 'patchright';
 import { writeFileSync } from 'node:fs';
-import { resolve, jsonDb, datetime, filenamify, prompt, notify, html_game_list, handleSIGINT, log, dataDir, cleanProfileLocks, matchKey, stripGpTail, getDiscoveryUserMarkedKeys } from './src/util.js';
+import { resolve, jsonDb, datetime, filenamify, prompt, notify, html_game_list, handleSIGINT, log, dataDir, cleanProfileLocks, matchKey, stripGpTail, getDiscoveryUserMarkedKeys, localeArgs } from './src/util.js';
 import { cfg } from './src/config.js';
 import { siteVersion } from './src/sites.js';
 import { fetchGamerPowerGiveaways, filterFor as filterGpFor, resolveGamerPowerHref } from './src/gamerpower.js';
@@ -82,6 +82,7 @@ const context = await chromium.launchPersistentContext(cfg.dir.browser, {
   handleSIGINT: false,
   args: [
     '--hide-crash-restore-bubble',
+    ...localeArgs(),
   ],
 });
 

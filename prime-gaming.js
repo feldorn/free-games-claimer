@@ -1,6 +1,6 @@
 import { chromium } from 'patchright';
 import { authenticator } from 'otplib';
-import { resolve, jsonDb, datetime, filenamify, prompt, confirm, notify, html_game_list, handleSIGINT, log, cleanProfileLocks } from './src/util.js';
+import { resolve, jsonDb, datetime, filenamify, prompt, confirm, notify, html_game_list, handleSIGINT, log, cleanProfileLocks, localeArgs } from './src/util.js';
 import { cfg } from './src/config.js';
 import { siteVersion } from './src/sites.js';
 
@@ -47,6 +47,7 @@ const context = await chromium.launchPersistentContext(cfg.dir.browser, {
   handleSIGINT: false, // have to handle ourselves and call context.close(), otherwise recordings from above won't be saved
   args: [
     '--hide-crash-restore-bubble',
+    ...localeArgs(),
   ],
 });
 

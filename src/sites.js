@@ -224,6 +224,9 @@ export const SITES = [
     configFields: [
       { key: 'keepNewsletter', env: 'GOG_NEWSLETTER', type: 'boolean', default: false,
         label: 'Keep newsletter subscription after claiming' },
+      { key: 'otpBackupCodes', env: 'GOG_OTP_BACKUP_CODES', type: 'string', default: '',
+        label: 'GOG 2FA backup codes (comma-separated)',
+        hint: 'For users who have GOG two-step verification enabled on their account. Paste your 8-character backup codes from GOG → Account Settings → Security, comma-separated (e.g. "AAAA1111,BBBB2222,..."). When 2FA prompts during the daily run, the script will consume one code automatically and persist it as used in data/gog-used-otp-codes.txt so it is not retried. When all listed codes are exhausted, falls back to interactive VNC login. Leave empty if you don\'t use GOG 2FA — the existing TOTP / SMS flow is unaffected.' },
     ],
     async checkLogin(page) {
       try {
