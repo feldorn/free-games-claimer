@@ -4,6 +4,16 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.32
+
+**Clearer error when AliExpress can't authenticate.** Reported by HelpMePleasepls ([#73](https://github.com/feldorn/free-games-claimer/issues/73)): after importing cookies via the panel, the script crashed with `locator.fill: value: expected string, got undefined` at `aliexpress.js:129`. The actual problem was that the login-marker detector didn't recognize the post-cookie state (likely a locale or layout drift, the same family as [#68](https://github.com/feldorn/free-games-claimer/issues/68) for Steam), so the script fell through to the credential-based login flow — but with `AE_EMAIL` unset (user expected cookies to be sufficient), the `prompt()` resolved to `undefined` in the headless container and `fill()` got an opaque error.
+
+Now the script throws a clear, user-actionable error before the `fill()` call: explains that login wasn't detected, the credential flow was reached, no `AE_EMAIL` is configured, and lists the two ways to resolve (set credentials or re-import cookies). Same guard added for the password fallback after the email prompt succeeds. No behavior change for users with both cookies *and* credentials set, or for users running with an attached terminal.
+
+This is a diagnostics fix — it doesn't address the root cause (detector missing non-English / drifted page states). That's tracked separately in [#72](https://github.com/feldorn/free-games-claimer/issues/72) where a Polish-locale user's snapshot dump confirms the page shows "Zdobądź więcej monet" instead of the English "Earn more coins" the detector is matching against.
+
+---
+
 ## What's new in 2.8.31
 
 **Steam now forces store pages into English regardless of account locale.** Reported by truresma ([#68](https://github.com/feldorn/free-games-claimer/issues/68)): on a German Steam account, the claim flow logged `✗ no "Add to Account" button found` for Tell Me Why and Gravity Circuit even though both games were genuinely free-to-keep and not yet in the library. The screenshot they shared showed Steam rendering the store page in German — the actual button read "Hinzufügen" / "Zur Bibliothek hinzufügen" instead of "Add to Account", so our locator (which hardcodes the English text) never matched.

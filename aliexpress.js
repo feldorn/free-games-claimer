@@ -124,13 +124,23 @@ const auth = async url => {
     page.getByRole('button', { name: 'Accept cookies' }).click().then(_ => console.log('Accepted cookies')).catch(_ => { });
     page.locator('span:has-text("Switch account")').click().catch(_ => {});
     const login = page.locator('#root');
+    // In headless container the prompt() call resolves to undefined when the
+    // terminal isn't attached. Without this guard the later .fill(email)
+    // throws an opaque "value: expected string, got undefined" — the actual
+    // user-actionable problem is missing creds, surface that directly. #73.
     const email = cfg.ae_email || await prompt({ message: 'Enter email' });
+    if (!email) {
+      throw new Error('AliExpress login marker not detected and no AE_EMAIL configured. If you logged in via the panel (cookie import), the script should not have reached the credential flow — most likely the login-detector locators didn\'t match your locale. Either set AE_EMAIL+AE_PASSWORD in data/config.env for credential login, or re-import the cookies from a logged-in browser session and try again. (See aliexpress.js auth() for the detector logic.)');
+    }
     const emailInput = login.locator('input[label="Email or phone number"]');
     await emailInput.fill(email);
     await emailInput.blur();
     const continueButton = login.locator('button:has-text("Continue")');
     await continueButton.click({ force: true });
-    const password = email && (cfg.ae_password || await prompt({ type: 'password', message: 'Enter password' }));
+    const password = cfg.ae_password || await prompt({ type: 'password', message: 'Enter password' });
+    if (!password) {
+      throw new Error('AliExpress login: email entered but no AE_PASSWORD configured. Set AE_PASSWORD in data/config.env or run with an attached terminal that can prompt.');
+    }
     await login.locator('input[label="Password"]').fill(password);
     await login.locator('button:has-text("Sign in")').click();
     const error = login.locator('.nfm-login-input-error-text');
