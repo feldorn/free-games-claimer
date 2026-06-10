@@ -18,7 +18,7 @@ Services are grouped by what they actually do.
 |---|---|
 | <img alt="logo prime-gaming" src="https://github.com/user-attachments/assets/7627a108-20c6-4525-a1d8-5d221ee89d6e" width="24" align="middle" /> [Amazon Prime Gaming](https://gaming.amazon.com) | Free games + GOG / MS Store / Xbox keys delivered via Prime |
 | <img alt="logo epic-games" src="https://github.com/user-attachments/assets/82e9e9bf-b6ac-4f20-91db-36d2c8429cb6" width="24" align="middle" /> [Epic Games Store](https://www.epicgames.com/store/free-games) | Weekly free-game claim |
-| <img alt="logo gog" src="https://github.com/user-attachments/assets/49040b50-ee14-4439-8e3c-e93cafd7c3a5" width="24" align="middle" /> [GOG](https://www.gog.com) | Homepage giveaways + catalog watch for tag-flagged free items |
+| <img alt="logo gog" src="https://github.com/user-attachments/assets/49040b50-ee14-4439-8e3c-e93cafd7c3a5" width="24" align="middle" /> [GOG](https://www.gog.com) | Homepage giveaways + catalog watch for tag-flagged free items. 2FA-enabled accounts can paste `GOG_OTP_BACKUP_CODES` to auto-consume backup codes on prompt. |
 | <img alt="logo steam" src="https://store.steampowered.com/favicon.ico" width="24" align="middle" /> [Steam](https://store.steampowered.com) | Free-to-keep promotions only (not F2P or free weekends) |
 
 > **Discovery via community aggregators.** Epic and Steam claim eligible games surfaced by [gamerpower.com](https://www.gamerpower.com/) or [r/FreeGameFindings](https://www.reddit.com/r/FreeGameFindings/) that don't show up in the storefront's own feed. GOG entries from the same aggregators surface as notify-only items so you can claim them through the panel's noVNC view. See the [Discoveries tab](docs/PANEL.md#discoveries-tab) for the live list with AUTO / NOTIFY / CLAIMED / SKIP / MANUAL badges.
@@ -61,6 +61,7 @@ Uses [patchright](https://github.com/nicbarker/patchright) (Chromium with built-
 - **Cookie upload** — fallback when in-container login is fingerprint-blocked: paste a JSON cookie export from your desktop browser and the panel imports the session.
 - **Settings UI** — every `src/config.js` flag editable from the panel, with env-var precedence and revert-to-env for any field.
 - **Stats tab** — KPI tiles, per-service tables, 30-day chart, recent claims, Microsoft Rewards balance trend.
+- **Diagnostics banner** — when a run crashes, the panel surfaces a one-click *Share to GitHub* button that opens a pre-filled issue with the error fingerprinted, log context captured (last 25+ lines around the failure), and a config snapshot (scheduler mode, active services, per-service flags, Node/`LANG`/`TZ`) attached. Sensitive values (apprise webhooks, embedded credentials) are redacted before submission; nothing is sent without your explicit click.
 - **Cron / Sablier ready** — `RUN_ON_STARTUP=2` one-shot mode for scale-to-zero deployments.
 - **Reverse-proxy aware** — subdomain, split-subdomain, and subfolder shapes all supported.
 
@@ -95,7 +96,7 @@ Full details — Docker Compose, bare-metal Node, non-root mode — in [docs/INS
 
 - **[docs/INSTALL.md](docs/INSTALL.md)** — Docker, Docker Compose, bare-metal Node, and non-root (PUID/PGID) mode.
 - **[docs/CONFIGURATION.md](docs/CONFIGURATION.md)** — Environment variables, per-store credentials, notifications, and the two-track scheduler.
-- **[docs/PANEL.md](docs/PANEL.md)** — Walkthrough of all seven panel tabs and the in-app Settings reference.
+- **[docs/PANEL.md](docs/PANEL.md)** — Walkthrough of every panel tab and the in-app Settings reference.
 - **[docs/AUTH.md](docs/AUTH.md)** — Automatic login with 2FA, cookie upload, and the captcha-pause helper.
 - **[docs/NETWORKING.md](docs/NETWORKING.md)** — Reverse-proxy setups (subdomain, split-subdomain, subfolder) with SWAG / NPM examples.
 - **[docs/REFERENCE.md](docs/REFERENCE.md)** — Bot detection posture, data storage layout, HTTP API, and troubleshooting.
