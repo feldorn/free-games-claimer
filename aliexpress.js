@@ -60,14 +60,25 @@ const page = context.pages().length ? context.pages()[0] : await context.newPage
 
 const auth = async url => {
   console.log('auth', url);
-  const loginBtn = page.locator('button:has-text("Log in")');
-  const loggedIn = page.locator('h3:text-is("day streak")');
+  // Structural selectors (locale-blind) FIRST, English-text fallbacks
+  // SECOND. AliExpress emits a stable id ("signButton") + class-prefix
+  // ("aecoin-checkInButton-*" / "aecoin-taskButton-*") regardless of the
+  // page language; we then OR in the English text variants so this also
+  // works if AliExpress restructures the daily-check-in widget in the
+  // future. Reported in #72 (Polish locale broke the English-only
+  // matchers entirely — `Zdobądź więcej monet` / `Odbierz`) and #74
+  // (Collect button timeout, same root cause on a non-English account).
+  const STRUCT_LOGGED_IN_CLAIMABLE = '#signButton[class*="aecoin-checkInButton"], [id="signButton"][class*="checkInButton"]';
+  const STRUCT_LOGGED_IN_DONE      = '#signButton[class*="aecoin-taskButton"], [id="signButton"][class*="taskButton"]';
+  const STRUCT_LOGIN_LINK          = 'a[href*="/login"], a[href*="/signin" i], button[data-spm*="login" i]';
+  const loginBtn = page.locator(STRUCT_LOGIN_LINK + ', button:has-text("Log in")');
+  const loggedIn = page.locator(STRUCT_LOGGED_IN_CLAIMABLE + ', h3:text-is("day streak")');
   // Post-collect state: when the user has already collected today's coins
   // (manually on another device or earlier in the day), the "day streak"
   // h3 disappears and the page shows "Earn more coins" instead. Counts as
   // logged-in for the purpose of this race so we don't false-positive into
   // the login flow against an already-authenticated session.
-  const collectedToday = page.locator('button:has-text("Earn more coins")');
+  const collectedToday = page.locator(STRUCT_LOGGED_IN_DONE + ', button:has-text("Earn more coins")');
   // AliExpress mobile sometimes hangs on initial load — a manual F5 recovers it.
   // Auto-reload up to 3 times if neither the login button nor either logged-in
   // marker shows up within a short window. Track which marker resolved so we
@@ -246,8 +257,12 @@ const pre_auth = {
 const coins = async () => {
   console.log('Collecting coins...');
   page.locator('.hideDoubleButton').click().catch(_ => {});
-  const collectBtn = page.locator('button:has-text("Collect")');
-  const moreBtn = page.locator('button:has-text("Earn more coins")');
+  // Same locale-blind-with-fallback pattern as auth() above — match the
+  // structural #signButton id + state class first, English text second.
+  // #74 (Buddinski88) timed out on the English-text selector on a non-
+  // English account; this resolves the same root cause as #72.
+  const collectBtn = page.locator('#signButton[class*="aecoin-checkInButton"], button:has-text("Collect")');
+  const moreBtn = page.locator('#signButton[class*="aecoin-taskButton"], button:has-text("Earn more coins")');
   await Promise.race([
     collectBtn.click({ force: true }).then(_ => { collected = true; console.log('Collected coins for today!'); }),
     moreBtn.waitFor().then(_ => console.log('No more coins to collect today!')),

@@ -4,6 +4,18 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.35
+
+**Locale-blind AliExpress login + collect detection.** Reported by oat1 ([#72](https://github.com/feldorn/free-games-claimer/issues/72)) and Buddinski88 ([#74](https://github.com/feldorn/free-games-claimer/issues/74)): the AliExpress daily-coin script's three sentinel locators (`button:has-text("Log in")`, `h3:text-is("day streak")`, `button:has-text("Earn more coins")`) and the claim-time `button:has-text("Collect")` locator are all English-text matches. Polish-locale users hit `Zdobądź więcej monet` / `Odbierz` / etc., none of the locators matched, the page-load loop bailed out, and the script either errored as "page never finished loading" (#72) or timed out on a 60s `locator.click` waiting for an English button that was never going to appear (#74). v2.8.34's `--lang=en-US` flags didn't help because AliExpress treats locale as account/IP-sticky, not header-driven — oat1 confirmed `?_lang=en_US` doesn't force English either.
+
+oat1's diagnostic dump pinned the structural anchor we needed: AliExpress emits a stable `id="signButton"` plus class-prefix `aecoin-checkInButton-*` (claim-ready) or `aecoin-taskButton-*` (already-claimed-today) regardless of page language. Both `auth()` and `coins()` in `aliexpress.js` now race the structural selectors FIRST (`#signButton[class*="aecoin-checkInButton"]` / `#signButton[class*="aecoin-taskButton"]`) and the existing English-text matches SECOND so non-English locales work without changing anything for English users and the script also stays resilient if AliExpress restructures the widget around the same id.
+
+Login-button detection extended in the same shape: `a[href*="/login"], a[href*="/signin" i], button[data-spm*="login" i], button:has-text("Log in")` — the URL-anchor and `data-spm` (Alibaba's standard tracking attribute) anchors match across locales; the English text is the fallback.
+
+No config change. Existing AliExpress users on English locales see no behavior change; Polish/Spanish/Russian/etc. users should now have the daily check-in actually complete.
+
+---
+
 ## What's new in 2.8.34
 
 **Two improvements adapted from [P-Adamiec/Free-Games-Claimer-Remaster](https://github.com/P-Adamiec/Free-Games-Claimer-Remaster) (an independent Python rewrite of the original) after auditing what they did that we don't.**
