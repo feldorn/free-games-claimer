@@ -552,19 +552,46 @@ async function login(page) {
 // yields a plausible integer. Returns null if none match (we just skip
 // recording the run instead of failing it).
 async function readPointsBalance(page) {
-  try {
-    await page.goto(BING_REWARDS_URL, { waitUntil: 'load', timeout: 30000 });
-    await delay(2500);
-    const selectors = ['#id_rc', '[data-bi-id="userCounter"]', '#getPointsCounter', '.pointsValue'];
-    for (const sel of selectors) {
-      const loc = page.locator(sel).first();
-      if (await loc.count() === 0) continue;
-      const text = await loc.innerText({ timeout: 3000 }).catch(() => '');
-      const n = parseInt(String(text).replace(/[^\d]/g, ''), 10);
-      if (Number.isFinite(n) && n > 0) return n;
+  // Run a small retry loop because MS sometimes serves the dashboard
+  // slowly right after a heavy search session — kevindevm in #71 reported
+  // points crediting correctly per the manual browser check, but our
+  // dashboard goto consistently timed out at 30s, so the run summary
+  // logged "0 points earned" when the user had actually earned points.
+  // domcontentloaded (vs load) waits only for the DOM, not every asset
+  // and analytics ping; the counter is JS-injected and is reliably in
+  // the DOM by the time domcontentloaded fires + a short settle delay.
+  // Two attempts cover the common throttle case without ballooning total
+  // wait time — if MS is genuinely down or the account is locked, we
+  // still return null (existing behavior) and the run summary falls
+  // back to 0.
+  const selectors = ['#id_rc', '[data-bi-id="userCounter"]', '#getPointsCounter', '.pointsValue'];
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      await page.goto(BING_REWARDS_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
+      await delay(3000);
+      for (const sel of selectors) {
+        const loc = page.locator(sel).first();
+        if (await loc.count() === 0) continue;
+        const text = await loc.innerText({ timeout: 5000 }).catch(() => '');
+        const n = parseInt(String(text).replace(/[^\d]/g, ''), 10);
+        if (Number.isFinite(n) && n > 0) return n;
+      }
+      // Page loaded but no selector matched — MS may have changed the
+      // counter element again. One more attempt with a slightly longer
+      // settle delay in case the counter is rendered late by their JS.
+      if (attempt === 1) {
+        log.info('readPointsBalance: counter not found on first load; retrying after 5s');
+        await delay(5000);
+      }
+    } catch (e) {
+      const first = String(e?.message || e).split('\n')[0];
+      if (attempt === 1) {
+        log.info(`readPointsBalance: ${first} — retrying once`);
+        await delay(5000);
+      } else {
+        log.warn(`readPointsBalance: ${first}`);
+      }
     }
-  } catch (e) {
-    log.warn(`readPointsBalance: ${e.message}`);
   }
   return null;
 }

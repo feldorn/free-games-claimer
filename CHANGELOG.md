@@ -4,6 +4,19 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.36
+
+**`readPointsBalance()` no longer reports "0 points earned" when MS is actually crediting points.** Reported by kevindevm ([#71](https://github.com/feldorn/free-games-claimer/issues/71)): the post-search dashboard load was timing out at 30s — but a manual browser check showed the balance had actually moved, the points credit had landed, the script just couldn't read it back from the throttled dashboard load. Run summary logged `0 points earned` when the user had earned points.
+
+Two changes to `readPointsBalance()` in `microsoft.js`:
+
+- **`waitUntil: 'load'` → `'domcontentloaded'`** — MS keeps a long tail of analytics pings and tracker requests in flight after the visible page is rendered; waiting for `load` blocks on those even though the points counter is in the DOM well before then. `domcontentloaded` lets us read the counter as soon as the JS has injected it.
+- **Per-attempt timeout 30s → 60s + one retry with 5s gap** — for genuinely throttled accounts where the first dashboard load is slow, the second attempt usually clears. If both fail, we still return null (existing behavior) so the run completes; the "0 points" line then reflects "couldn't verify" rather than "MS didn't credit," with no functional difference to the user (points still landed).
+
+If you were seeing `0 points earned` in your MS run summary despite the dashboard balance actually moving, this should clear up. The script's behavior on accounts MS is genuinely throttling (e.g. Argentina-region) hasn't changed — searches still execute the same way, MS just doesn't credit them; that's an MS-side decision unrelated to the script.
+
+---
+
 ## What's new in 2.8.35
 
 **Locale-blind AliExpress login + collect detection.** Reported by oat1 ([#72](https://github.com/feldorn/free-games-claimer/issues/72)) and Buddinski88 ([#74](https://github.com/feldorn/free-games-claimer/issues/74)): the AliExpress daily-coin script's three sentinel locators (`button:has-text("Log in")`, `h3:text-is("day streak")`, `button:has-text("Earn more coins")`) and the claim-time `button:has-text("Collect")` locator are all English-text matches. Polish-locale users hit `Zdobądź więcej monet` / `Odbierz` / etc., none of the locators matched, the page-load loop bailed out, and the script either errored as "page never finished loading" (#72) or timed out on a 60s `locator.click` waiting for an English button that was never going to appear (#74). v2.8.34's `--lang=en-US` flags didn't help because AliExpress treats locale as account/IP-sticky, not header-driven — oat1 confirmed `?_lang=en_US` doesn't force English either.
