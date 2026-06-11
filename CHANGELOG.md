@@ -4,6 +4,14 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.37
+
+**Panel session check for AliExpress now uses the same locale-blind selectors as the daily-run script.** Follow-up to [#72](https://github.com/feldorn/free-games-claimer/issues/72) reported by oat1 in [#75](https://github.com/feldorn/free-games-claimer/issues/75): v2.8.35 fixed `aliexpress.js auth()` and `coins()` to match AliExpress's structural `#signButton` id + state-class prefix instead of English text — but I missed `src/sites.js checkLogin()`, the function the panel calls to verify session state after a cookie import. So a Polish-locale user could import cookies, be genuinely logged in on the page, and still see the panel's session check return "not logged in" because the English-text selectors here didn't match. Same fix in the same shape — structural-first, English-text fallback — applied to `checkLogin()` so the panel agrees with reality on non-English accounts.
+
+If you imported cookies for AliExpress on a non-English account and the panel kept saying "Login NOT detected" while the browser actually showed you logged in, this should now clear up.
+
+---
+
 ## What's new in 2.8.36
 
 **`readPointsBalance()` no longer reports "0 points earned" when MS is actually crediting points.** Reported by kevindevm ([#71](https://github.com/feldorn/free-games-claimer/issues/71)): the post-search dashboard load was timing out at 30s — but a manual browser check showed the balance had actually moved, the points credit had landed, the script just couldn't read it back from the throttled dashboard load. Run summary logged `0 points earned` when the user had earned points.

@@ -387,13 +387,23 @@ export const SITES = [
     features: [],
     configFields: [],
     async checkLogin(page) {
-      const loginBtn = page.locator('button:has-text("Log in")');
-      const streak = page.locator('h3:text-is("day streak")');
+      // Structural selectors (locale-blind) first, English-text fallback
+      // second — same pattern as aliexpress.js auth() / coins() shipped in
+      // v2.8.35. Caught here in v2.8.37 after oat1 reported in #75 that
+      // their Polish account was logged in on the actual coin page but
+      // the panel's session check still said "not logged in" — the
+      // session check uses *this* function, not the daily-run auth(),
+      // and this one was missed in the v2.8.35 sweep.
+      const STRUCT_LOGIN_LINK = 'a[href*="/login"], a[href*="/signin" i], button[data-spm*="login" i]';
+      const STRUCT_CLAIMABLE  = '#signButton[class*="aecoin-checkInButton"], [id="signButton"][class*="checkInButton"]';
+      const STRUCT_DONE       = '#signButton[class*="aecoin-taskButton"], [id="signButton"][class*="taskButton"]';
+      const loginBtn = page.locator(STRUCT_LOGIN_LINK + ', button:has-text("Log in")');
+      const streak = page.locator(STRUCT_CLAIMABLE + ', h3:text-is("day streak")');
       // Post-collect state — the "day streak" h3 disappears once the user has
       // claimed today's coins, but "Earn more coins" stays visible. Treat that
       // as logged-in too so users who already collected manually don't get a
       // false "session expired" report from the panel.
-      const collectedToday = page.locator('button:has-text("Earn more coins")');
+      const collectedToday = page.locator(STRUCT_DONE + ', button:has-text("Earn more coins")');
       // AliExpress mobile frequently hangs on initial load — same issue as in
       // aliexpress.js auth(). Auto-reload up to 3 times until either the login
       // button or either logged-in marker appears, then short-circuit.
