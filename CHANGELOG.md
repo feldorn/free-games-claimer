@@ -4,6 +4,24 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.38
+
+**Diagnostics scanner now buffers context across stderr chunk boundaries.** Reported by HelpMePleasepls's submission in [#78](https://github.com/feldorn/free-games-claimer/issues/78) — the auto-prefilled issue body's stack section contained only the throw line and four stack frames, even though v2.8.33 widened the pre-error capture window to 25 lines. Tracing the bug: each `child.stderr.on('data', ...)` event fires `_scanForErrors(chunk)` with just that chunk's text, and the 25-line lookback is bounded inside that single chunk. When a script prints a multi-line diagnostic dump (e.g. AliExpress's `JSON.stringify(snapshot, null, 2)` page-state block) and then throws on the next event-loop tick, the dump and the throw end up in *separate* `data` events — and the throw's per-chunk window has no visibility into the dump's chunk.
+
+Fix: maintain a per-stream rolling tail of the last 60 cleaned lines, prepend it to the next chunk before scanning, and only iterate the new section of the combined buffer (so dedup-by-fingerprint isn't bypassed by re-matching tail lines). `resetScanState()` clears the tails between runs so a previous run's tail can't bleed into the next run's first event. Streams keyed by `<stdout|stderr>:<child.pid>` so the two streams stay independent and concurrent processes (shouldn't happen but cheap insurance) can't collide.
+
+Verified with five focused tests of the new path:
+
+- ✓ Multi-line dump in chunk 1 + throw in chunk 2 → throw's captured stack now includes the dump verbatim (locale markers like `Zdobądź` survive intact)
+- ✓ stdout content does not bleed into stderr stack (per-stream isolation)
+- ✓ Tail re-scanning suppressed — the matched line in chunk 1 doesn't re-trigger when chunk 2 arrives
+- ✓ Tail bounded at 60 lines (memory cap on long-running runs)
+- ✓ `resetScanState()` correctly wipes tails + `_currentSection` between runs
+
+If you submit a fresh diagnostics-banner issue after upgrading, the *Stack / context* `<details>` block should now carry the surrounding log lines reliably — including any explicit `console.error('diagnostic dump…')` blocks the script printed just before the exception.
+
+---
+
 ## What's new in 2.8.37
 
 **Panel session check for AliExpress now uses the same locale-blind selectors as the daily-run script.** Follow-up to [#72](https://github.com/feldorn/free-games-claimer/issues/72) reported by oat1 in [#75](https://github.com/feldorn/free-games-claimer/issues/75): v2.8.35 fixed `aliexpress.js auth()` and `coins()` to match AliExpress's structural `#signButton` id + state-class prefix instead of English text — but I missed `src/sites.js checkLogin()`, the function the panel calls to verify session state after a cookie import. So a Polish-locale user could import cookies, be genuinely logged in on the page, and still see the panel's session check return "not logged in" because the English-text selectors here didn't match. Same fix in the same shape — structural-first, English-text fallback — applied to `checkLogin()` so the panel agrees with reality on non-English accounts.

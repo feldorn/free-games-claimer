@@ -747,7 +747,25 @@ const DIAG_PATTERNS = [
 ];
 const ANSI_RE = /\x1b\[[0-9;]*m/g;
 const LEADING_MARKERS_RE = /^\s*[✓✗!✅❌]\s+/;
-function _scanForErrors(buffer) {
+// Per-stream rolling tail of recent cleaned lines. Each invocation of
+// _scanForErrors prepends the tail of the matching stream to the new
+// chunk before scanning so the pre-error context window can reach
+// across stderr `data` event boundaries. Without this, a script that
+// prints a multi-line diagnostic dump and then throws on the next
+// event-loop tick lands the dump in one chunk and the throw in
+// another — the per-chunk 25-line window then captures only the throw
+// stack with no preceding context (HelpMePleasepls's #78 AliExpress
+// page-snapshot diagnostic dump was lost this way under v2.8.33).
+// Bounded at TAIL_KEEP lines per stream so a long-running run can't
+// accumulate unbounded memory. Reset between child processes via
+// resetScanState().
+const TAIL_KEEP = 60;
+const _scanTails = new Map(); // streamKey → string[] of cleaned lines
+function resetScanState() {
+  _scanTails.clear();
+  _currentSection = null;
+}
+function _scanForErrors(buffer, streamKey = 'default') {
   if (DIAGNOSTICS_BANNER_DISABLED_ENV) return;
   // Update the current section tracker from ─── headers.
   const sectionRe = /^─{3,}\s+(.+?)\s+(?:\(v[^)]+\))?\s*─{3,}\s*$/;
@@ -755,8 +773,16 @@ function _scanForErrors(buffer) {
   // Pre-clean each line: strip ANSI escape codes (chalk wraps the
   // status markers even when stdout isn't a TTY in some configs), then
   // strip the leading log marker so pattern anchors hold.
-  const lines = rawLines.map(l => l.replace(ANSI_RE, ''));
-  for (let i = 0; i < lines.length; i++) {
+  const newLines = rawLines.map(l => l.replace(ANSI_RE, ''));
+  const prevTail = _scanTails.get(streamKey) || [];
+  // `lines` = prior tail concatenated with the just-arrived chunk. We
+  // ONLY iterate i in [tailStart, lines.length) so old tail lines don't
+  // re-trigger matches (the scanner deduplicates on fingerprint anyway,
+  // but skipping re-scan is cheaper and avoids re-updating
+  // _currentSection from stale section headers).
+  const tailStart = prevTail.length;
+  const lines = prevTail.concat(newLines);
+  for (let i = tailStart; i < lines.length; i++) {
     const raw = lines[i];
     const sec = sectionRe.exec(raw);
     if (sec) { _currentSection = sec[1].trim(); continue; }
@@ -767,18 +793,17 @@ function _scanForErrors(buffer) {
       const cls = (m.groups && m.groups.cls) || 'Error';
       const msg = (m.groups && m.groups.msg) || '';
       // Capture 25 lines BEFORE + the match + 15 lines AFTER (cleaned)
-      // for stack context. Leading context (section header, prior log
-      // lines, intentional diagnostic-dump blocks the script printed
-      // before throwing) carries the most triage signal — flipside101's
-      // #50 single-line "All promises were rejected" had no surrounding
-      // context at all, and #72 oat1's AliExpress error truncated the
-      // page-snapshot JSON the script emits just above the throw (the
-      // old 6-before window caught only the tail of the block). 25
-      // pre-lines lets a typical diagnostic dump (~20 lines of JSON)
-      // arrive intact. Marker `>>` flags the match line so the reader
-      // can find it in the captured block. Final length is also capped
-      // at 6000 chars in _recordDiagnosticError so an extra-noisy stack
-      // can't blow out the diagnostics-state DB.
+      // for stack context. Now `lines` includes the prior chunk's tail,
+      // so the window can reach into earlier stderr events for the
+      // diagnostic-dump-then-throw pattern. Leading context carries
+      // the most triage signal — flipside101's #50 single-line "All
+      // promises were rejected" had no surrounding context at all, and
+      // HelpMePleasepls's #78 AliExpress page-snapshot dump was lost
+      // under v2.8.33 because the dump arrived in a separate stderr
+      // chunk from the throw. Marker `>>` flags the match line so the
+      // reader can find it. Final length is also capped at 6000 chars
+      // in _recordDiagnosticError so an extra-noisy stack can't blow
+      // out the diagnostics-state DB.
       const startIdx = Math.max(0, i - 25);
       const endIdx   = Math.min(lines.length, i + 16);
       const stack = lines.slice(startIdx, endIdx).map((l, idx) => {
@@ -789,6 +814,11 @@ function _scanForErrors(buffer) {
       break;
     }
   }
+  // Persist the last TAIL_KEEP lines as the new tail. Use the freshly-
+  // appended `lines` (combined buffer) so the next event sees the most
+  // recent context regardless of whether it came from the tail or the
+  // current chunk.
+  _scanTails.set(streamKey, lines.slice(-TAIL_KEEP));
 }
 // --- end diagnostics phase 1 ----------------------------------------------
 let startupAutoCheck = null; // { current, total, siteName } while auto-check is walking sites
@@ -1570,6 +1600,18 @@ function runAllScripts({ source = 'panel', sites = null, extraEnv = null } = {})
   });
 
   runProcess = child;
+  // Reset the diagnostics scanner's per-stream tail buffers so the
+  // previous run's tail can't bleed into this run's first-event window
+  // (would re-trigger fingerprints we already recorded). Also clears
+  // the section-header pointer so this run starts in `unknown` until
+  // it actually hits its first ─── header.
+  resetScanState();
+  // Per-stream keys for _scanForErrors's tail buffer — keeps stdout
+  // and stderr lookback independent. Including child.pid so two child
+  // processes can't collide if their lifetimes overlap (shouldn't
+  // happen in normal scheduler flow, but cheap insurance).
+  const scanStdoutKey = `stdout:${child.pid}`;
+  const scanStderrKey = `stderr:${child.pid}`;
 
   runDone = new Promise(resolve => {
     child.stdout.on('data', data => {
@@ -1579,7 +1621,7 @@ function runAllScripts({ source = 'panel', sites = null, extraEnv = null } = {})
       // exceptions and dedupe-record them to data/diagnostics-state.json.
       // Banner UI in phase 2 reads from there. No-op when env disables
       // the feature or the DB hasn't loaded yet.
-      _scanForErrors(text);
+      _scanForErrors(text, scanStdoutKey);
       // Captcha markers from src/util.js#awaitUserCaptchaSolve. Parsed here
       // (not in the per-line forEach below) so multi-line buffers still match.
       const startMatch = text.match(/\[CAPTCHA-START\] service=(\S+)\s+label=(.*?)(?:\r?\n|$)/);
@@ -1633,7 +1675,7 @@ function runAllScripts({ source = 'panel', sites = null, extraEnv = null } = {})
       // Diagnostics: uncaught exceptions land on stderr (node:internal/
       // modules/run_main:NN preamble), so scan stderr too. Same dedup +
       // fingerprint path as stdout — pattern set isn't stream-specific.
-      _scanForErrors(text);
+      _scanForErrors(text, scanStderrKey);
       const lines = text.split('\n').filter(l => l.length);
       lines.forEach(l => {
         runLog.push({ type: 'stderr', text: l, time: datetime() });
