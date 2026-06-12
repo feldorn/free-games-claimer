@@ -552,19 +552,40 @@ async function login(page) {
 // yields a plausible integer. Returns null if none match (we just skip
 // recording the run instead of failing it).
 async function readPointsBalance(page) {
-  // Run a small retry loop because MS sometimes serves the dashboard
-  // slowly right after a heavy search session — kevindevm in #71 reported
-  // points crediting correctly per the manual browser check, but our
-  // dashboard goto consistently timed out at 30s, so the run summary
-  // logged "0 points earned" when the user had actually earned points.
-  // domcontentloaded (vs load) waits only for the DOM, not every asset
-  // and analytics ping; the counter is JS-injected and is reliably in
-  // the DOM by the time domcontentloaded fires + a short settle delay.
-  // Two attempts cover the common throttle case without ballooning total
-  // wait time — if MS is genuinely down or the account is locked, we
-  // still return null (existing behavior) and the run summary falls
-  // back to 0.
-  const selectors = ['#id_rc', '[data-bi-id="userCounter"]', '#getPointsCounter', '.pointsValue'];
+  // Two attempts to cover MS throttling the dashboard load after a
+  // heavy search session (v2.8.36); domcontentloaded over load to
+  // avoid blocking on long-tail analytics pings.
+  //
+  // Selector strategy (v2.8.39): MS rebuilt the Rewards dashboard
+  // between when we wrote the original selectors and 2026-06. None
+  // of the original four match the new layout (kevindevm in #71, on
+  // a Spanish-locale account showing 3228 balance, all four selectors
+  // returned 0 count). Expanded the candidate list with the patterns
+  // MS uses on the new Premium dashboard and added a structural-text
+  // fallback (the balance is rendered as a visible 4-5-digit number
+  // in a top-bar element). On miss, emit a self-service diagnostic
+  // dump (top-of-DOM h1/h2/numeric-spans) so the next diagnostics
+  // submission tells us what the page actually renders.
+  const selectors = [
+    // Legacy selectors (pre-2026 dashboard).
+    '#id_rc',
+    '[data-bi-id="userCounter"]',
+    '#getPointsCounter',
+    '.pointsValue',
+    // Premium-dashboard candidates — multiple aria patterns MS has
+    // used in regional rollouts. The aria-labels often carry the
+    // localized "points" word so we match anywhere in the label.
+    '[aria-label*="points" i]',
+    '[aria-label*="puntos" i]',
+    '[aria-label*="punkte" i]',
+    '[aria-label*="punkty" i]',
+    '[aria-label*="balance" i]',
+    // Card-text patterns MS uses for the top-bar counter
+    'mee-rewards-counter-animation',
+    '.points-summary-balance',
+    '[data-testid="points-counter"]',
+    '[data-bi-name*="points" i]',
+  ];
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
       await page.goto(BING_REWARDS_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
@@ -576,12 +597,37 @@ async function readPointsBalance(page) {
         const n = parseInt(String(text).replace(/[^\d]/g, ''), 10);
         if (Number.isFinite(n) && n > 0) return n;
       }
-      // Page loaded but no selector matched — MS may have changed the
-      // counter element again. One more attempt with a slightly longer
-      // settle delay in case the counter is rendered late by their JS.
       if (attempt === 1) {
         log.info('readPointsBalance: counter not found on first load; retrying after 5s');
         await delay(5000);
+      } else {
+        // Final-attempt diagnostic dump on miss — modeled on the
+        // AliExpress detector pattern (#72 → #75). Captures top-of-
+        // DOM structure so future triage doesn't need a live noVNC
+        // session to see what MS rendered. Bounded to 1500 chars
+        // total to fit comfortably inside the 6000-char stack cap
+        // in _recordDiagnosticError.
+        try {
+          const snapshot = await page.evaluate(() => {
+            const grab = (sel, max = 6) => Array.from(document.querySelectorAll(sel))
+              .slice(0, max).map(el => (el.textContent || '').trim().slice(0, 80)).filter(Boolean);
+            const grabAttr = (sel, attr, max = 6) => Array.from(document.querySelectorAll(sel))
+              .slice(0, max).map(el => (el.getAttribute(attr) || '').trim().slice(0, 80)).filter(Boolean);
+            return {
+              url: location.href,
+              title: document.title.slice(0, 120),
+              h1: grab('h1'),
+              h2: grab('h2'),
+              ariaLabels: grabAttr('[aria-label]', 'aria-label', 12),
+              digitTexts: Array.from(document.querySelectorAll('span, div, h1, h2, h3'))
+                .map(el => (el.textContent || '').trim())
+                .filter(t => /^\d{1,6}$/.test(t))
+                .slice(0, 8),
+            };
+          });
+          console.error('MS Rewards readPointsBalance diagnostic dump (none of the counter selectors matched):');
+          console.error(JSON.stringify(snapshot, null, 2).slice(0, 1500));
+        } catch (e) { console.error(`(diagnostic dump failed: ${e.message})`); }
       }
     } catch (e) {
       const first = String(e?.message || e).split('\n')[0];
@@ -628,7 +674,30 @@ async function dismissDashboardPopup(page) {
 // (`mee-card:has(.mee-icon-AddMedium)`) doesn't match it, so before this
 // fix those points sat unclaimed until they actually expired.
 async function claimPendingBonusPoints(page) {
-  await page.goto(BING_REWARDS_URL, { waitUntil: 'load' });
+  // Defensive guard: between the preceding clickEveryPendingActivityCard()
+  // and this navigation, the browser context or tab can die — either
+  // because an activity-card click triggered a tab close, MS issued a
+  // forced sign-out, the container ran out of memory, or anything else
+  // that tears down Chromium mid-run. The old behavior was to let
+  // page.goto throw "Target page, context or browser has been closed"
+  // which crashed the entire MS run with a diagnostics-banner error
+  // (OFABLE in #67, Rick45 in #80 — same line, two reports). Bonus
+  // points are a side feature, not the main reward flow; degrade
+  // gracefully when the page is gone instead of failing the run.
+  if (page.isClosed()) {
+    log.info('claimPendingBonusPoints: page already closed, skipping bonus-points pass');
+    return;
+  }
+  try {
+    await page.goto(BING_REWARDS_URL, { waitUntil: 'load' });
+  } catch (e) {
+    const msg = String(e?.message || e).split('\n')[0];
+    if (/Target page, context or browser has been closed/i.test(msg)) {
+      log.info(`claimPendingBonusPoints: ${msg} — skipping bonus-points pass`);
+      return;
+    }
+    throw e;
+  }
   await dismissDashboardPopup(page);
   const banner = page.locator('mee-rewards-pointclaim-banner').first();
   try {

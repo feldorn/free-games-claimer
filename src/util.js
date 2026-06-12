@@ -282,6 +282,18 @@ export const notify = (html, opts = {}) => {
     if (cfg.debug) console.debug(`apprise ${args.map(a => `'${a}'`).join(' ')}`); // this also doesn't escape, but it's just for info
     execFile('apprise', args, (error, stdout, stderr) => {
       if (error) {
+        // Surface apprise's actual stderr alongside the exec-failure
+        // message so diagnostics submissions tell us WHY the
+        // notification failed (target rejected payload, token invalid,
+        // rate-limited, etc.) instead of just "Command failed: apprise
+        // pover://<redacted> -b …". Rick45's #81 was a Pushover-side
+        // failure on a Steam claim with HTML body; without apprise's
+        // own stderr there was no way to tell from the issue body
+        // whether it was a payload issue, an auth issue, or a
+        // transient network blip.
+        const stderrTrim = String(stderr || '').trim();
+        if (stderrTrim) console.error(`apprise stderr: ${stderrTrim}`);
+        if (stderrTrim) error.message = error.message + '\napprise stderr: ' + stderrTrim.slice(0, 500);
         console.log(`error: ${error.message}`);
         if (error.message.includes('command not found')) {
           console.info('Run `pip install apprise`. See https://github.com/vogler/free-games-claimer#notifications');

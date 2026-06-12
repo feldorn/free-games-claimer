@@ -4,6 +4,35 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.39
+
+**Three defensive fixes after a triage round** — none of them changes user-facing behavior on the happy path, all of them sharpen the failure mode.
+
+### 1. `claimPendingBonusPoints` no longer crashes the MS run when the page is dead ([#67](https://github.com/feldorn/free-games-claimer/issues/67), [#80](https://github.com/feldorn/free-games-claimer/issues/80))
+
+OFABLE (v2.8.29) and Rick45 (v2.8.38) both reported `page.goto: Target page, context or browser has been closed` at `microsoft.js:631` — the first navigation inside `claimPendingBonusPoints`. The browser had died between the preceding `clickEveryPendingActivityCard()` and this call (activity-card click triggered a tab close, MS forced a sign-out, container ran out of memory — there are several possible causes). The script then crashed the entire MS run with a diagnostics-banner error for what's really a side-feature (catching pending expiring points).
+
+`claimPendingBonusPoints` now checks `page.isClosed()` before the goto and wraps the navigation in a try/catch that recognizes the "browser closed" message specifically. On either signal, it logs and returns — the rest of the MS run completes normally instead of erroring out. The bonus-points pass is best-effort; the next daily run picks it up if the banner is still there.
+
+### 2. `readPointsBalance` selector list expanded + diagnostic dump on miss ([#71](https://github.com/feldorn/free-games-claimer/issues/71))
+
+kevindevm reported "0 points earned" persisting on v2.8.38 even though their balance is genuinely increasing per the manual browser check. Tracing it: the dashboard now renders correctly (no timeout), but none of our four counter selectors (`#id_rc`, `[data-bi-id="userCounter"]`, `#getPointsCounter`, `.pointsValue`) match the new Premium-dashboard layout MS has rolled out. The function returns null even when the counter is plainly visible.
+
+Two changes:
+
+- **Expanded selector list** with localized aria patterns (`[aria-label*="points" i]`, `[aria-label*="puntos" i]`, `[aria-label*="punkte" i]`, `[aria-label*="punkty" i]`), the `mee-rewards-counter-animation` custom element MS uses on the top-bar counter, and a few `data-testid` / `data-bi-name` candidates seen in regional rollouts.
+- **Diagnostic dump on final-attempt miss** — when the second attempt also fails to find a counter, the script now prints a JSON snapshot of the page's top-of-DOM structure (h1/h2 text, aria-labels, visible 1–6-digit numeric spans). Modeled on the AliExpress detector dump that pinned [#72](https://github.com/feldorn/free-games-claimer/issues/72)'s structural anchor in one round-trip. With v2.8.38's chunk-buffered scanner, the dump now lands in the captured stack of the next diagnostics-banner submission, so we can target the actual element MS is rendering without asking the reporter for DevTools-inspected HTML.
+
+(Side note still relevant to kevindevm's case: Bing serves the dashboard in your account's language preference, not browser locale. The "Spanish dashboard" thread is independent — fix via rewards.bing.com → ⚙️ Settings → Language to switch the account-level locale.)
+
+### 3. `notify()` apprise failure now carries apprise's stderr ([#81](https://github.com/feldorn/free-games-claimer/issues/81))
+
+Rick45's submission for a failing Pushover notification on a Steam claim. The auto-prefilled body showed `Command failed: apprise pover://<redacted> -i html -b steam (Rick45):<br>- ...` — but the actual reason apprise rejected the call was nowhere in the captured stack. We're using `execFile` so we always have `stderr`, but we threw away its contents before the diagnostics scanner saw them. Now apprise's `stderr` is appended to the error message (and logged separately to the run output), so the next failure surfaces the actual rejection reason — payload-too-long, token-invalid, target-unreachable, etc. — instead of just "Command failed."
+
+If you hit a Pushover / Discord / etc. notification error after upgrading, the issue body's stack will now name the underlying problem.
+
+---
+
 ## What's new in 2.8.38
 
 **Diagnostics scanner now buffers context across stderr chunk boundaries.** Reported by HelpMePleasepls's submission in [#78](https://github.com/feldorn/free-games-claimer/issues/78) — the auto-prefilled issue body's stack section contained only the throw line and four stack frames, even though v2.8.33 widened the pre-error capture window to 25 lines. Tracing the bug: each `child.stderr.on('data', ...)` event fires `_scanForErrors(chunk)` with just that chunk's text, and the 25-line lookback is bounded inside that single chunk. When a script prints a multi-line diagnostic dump (e.g. AliExpress's `JSON.stringify(snapshot, null, 2)` page-state block) and then throws on the next event-loop tick, the dump and the throw end up in *separate* `data` events — and the throw's per-chunk window has no visibility into the dump's chunk.
