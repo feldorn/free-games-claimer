@@ -4,6 +4,23 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.40
+
+**`readPointsBalance` now reads the points balance from MS's React Server Components stream instead of scraping the DOM.** Credit to [kevindevm](https://github.com/kevindevm) in [#71](https://github.com/feldorn/free-games-claimer/issues/71) for finding the approach: re-fetching `https://rewards.bing.com/dashboard` with header `rsc: 1` returns the RSC stream — a text blob carrying a literal `"balance":<N>,"level":<N>` pair — which sidesteps DOM scraping entirely.
+
+Why this is meaningfully better than the v2.8.39 selector expansion:
+
+- **Locale-blind.** No localized label text in the way (Spanish "Puntos disponibles", German "Punkte", etc. all return the same RSC pair).
+- **Layout-redesign-immune.** The field lives in MS's data layer, not in the rendered HTML, so dashboard redesigns can shuffle the visible counter element without breaking us.
+- **Cheap.** One extra `fetch()` from inside the page context, authenticated transparently by the existing session cookies. No extra navigation.
+- **Single-shot.** No 5s retry / 60s timeout / selector-iteration combinatorics — the response is the source of truth.
+
+DOM selector list is kept as a fallback for the case MS changes the RSC contract or returns an empty stream; the diagnostic dump on final-attempt miss also stays. So we gracefully degrade through three layers — RSC primary → expanded DOM selectors → diagnostic dump (which now lands in the captured stack thanks to v2.8.38's chunk-buffered scanner).
+
+If your `0 points earned` log was a `readPointsBalance` miss (counter visible in browser, script logged null), this should clear up.
+
+---
+
 ## What's new in 2.8.39
 
 **Three defensive fixes after a triage round** — none of them changes user-facing behavior on the happy path, all of them sharpen the failure mode.

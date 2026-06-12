@@ -590,6 +590,27 @@ async function readPointsBalance(page) {
     try {
       await page.goto(BING_REWARDS_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
       await delay(3000);
+      // RSC primary path (v2.8.40, from kevindevm's #71 finding): MS's
+      // dashboard is a React Server Components route, and re-fetching
+      // the same URL with header `rsc: 1` returns the RSC stream — a
+      // text blob that carries a literal `"balance":<N>,"level":<N>`
+      // pair. This sidesteps DOM scraping entirely: it's locale-blind
+      // (no localized label text), survives dashboard-layout redesigns
+      // (the field is in the data layer, not the rendered HTML), and
+      // costs one extra HTTP request that the browser context's
+      // cookies authenticate transparently. DOM selectors stay as a
+      // fallback in case MS changes the RSC contract.
+      try {
+        const rscText = await page.evaluate(async (url) => {
+          const r = await fetch(url, { headers: { rsc: '1' }, credentials: 'include' });
+          return await r.text();
+        }, BING_REWARDS_URL);
+        const m = String(rscText || '').match(/"balance"\s*:\s*(\d+)/);
+        if (m) {
+          const n = parseInt(m[1], 10);
+          if (Number.isFinite(n) && n > 0) return n;
+        }
+      } catch { /* fall through to DOM selectors */ }
       for (const sel of selectors) {
         const loc = page.locator(sel).first();
         if (await loc.count() === 0) continue;
