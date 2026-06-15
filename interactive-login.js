@@ -2014,6 +2014,26 @@ function computeMainWakeMs() {
 // Compute the next MS-only wake. Walks forward through the persisted state:
 // if today is fired/missed or the pending target is past, eagerly picks
 // tomorrow so getState() can always show a real upcoming timestamp.
+// True when a persisted MS target falls within the active window bounds
+// per the current config. Used by computeMsWakeMs to detect config-drift
+// — when the user changes MS_SCHEDULE_HOURS or MS_SCHEDULE_START via the
+// Settings UI, the previously-picked target may now lie completely
+// outside the new window. Before this check the stale pick was honored,
+// firing MS at the old time (Dr4w's #88). Validating against the live
+// config invalidates the pick the next time computeMsWakeMs runs (which
+// fireSchedulerWakeups already triggers on every config write), so no
+// extra plumbing needed in watchConfigForScheduler.
+function msTargetInWindow(st, c) {
+  if (!st || !st.target || !st.date) return false;
+  const target = new Date(st.target).getTime();
+  if (!Number.isFinite(target)) return false;
+  const [y, mo, d] = String(st.date).split('-').map(Number);
+  if (!y || !mo || !d) return false;
+  const windowStartMs = new Date(y, mo - 1, d, c.msStart, 0, 0, 0).getTime();
+  const windowEndMs = windowStartMs + c.msHours * 3600 * 1000;
+  return target >= windowStartMs && target < windowEndMs;
+}
+
 function computeMsWakeMs() {
   const c = getSchedulerConfig();
   const active = activeServices();
@@ -2025,9 +2045,19 @@ function computeMsWakeMs() {
   for (let safety = 0; safety < 14; safety++) {
     let st = readMsScheduleToday();
     const today = todayKey();
+    // Persisted pick is stale if: file missing, date rolled forward, today
+    // already fired/missed, OR the stored target now falls outside the
+    // window bounds (Dr4w's #88 — config change after pick wasn't
+    // invalidating the persisted target).
+    const outOfWindow = st && st.date === today && st.status === 'pending'
+      && !msTargetInWindow(st, c);
+    if (outOfWindow) {
+      console.log(`[${datetime()}] Scheduler (MS): persisted target ${st.target} is outside the current ${c.msStart}:00 + ${c.msHours}h window — repicking.`);
+    }
     const needsFresh = !st
       || st.date < today
-      || (st.date === today && (st.status === 'fired' || st.status === 'missed'));
+      || (st.date === today && (st.status === 'fired' || st.status === 'missed'))
+      || outOfWindow;
     if (needsFresh) {
       const day = (!st || st.date < today) ? today : nextDayKey(today);
       st = pickMsTargetFor(day, c);

@@ -4,6 +4,18 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.44
+
+**MS scheduler now invalidates the persisted daily pick when the window config changes.** Reported by Dr4w in [#88](https://github.com/feldorn/free-games-claimer/issues/88) with full repro + suggested fix location: changing `MS_SCHEDULE_HOURS` via the Settings UI didn't invalidate the previously-persisted `data/ms-schedule-today.json`, so the scheduler kept the stale pick — which could fall completely outside the new window. The only workaround was to manually delete the file and restart the container.
+
+Fix: a new `msTargetInWindow(st, c)` predicate in `computeMsWakeMs` validates the persisted target against the *current* config's window bounds. When the target lies outside the live window, the pick is marked stale and `pickMsTargetFor()` repicks within the new window. Logged as `Scheduler (MS): persisted target … is outside the current N:00 + Mh window — repicking.` so users see the invalidation happen.
+
+Implemented in `computeMsWakeMs` rather than `watchConfigForScheduler` because the validation catches every drift case (UI saves, direct file edits, boot-time env changes, container migrations across hosts with different time zones, manual `data/ms-schedule-today.json` edits) — not just the Settings-UI-write path. `fireSchedulerWakeups()` already triggers `computeMsWakeMs` on every config write, so the path-of-truth ordering is unchanged.
+
+8/8 truth-table tests pass including the exact #88 repro (24h window → 1h window from 08:00, pre-picked 02:12 target detected as out-of-window).
+
+---
+
 ## What's new in 2.8.43
 
 **Three Settings hint-copy fixes — no behavior change, just clearer UI text.**
