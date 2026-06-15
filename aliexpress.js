@@ -103,6 +103,26 @@ const auth = async url => {
       alreadyLoggedIn = which === 'loggedIn' || which === 'collectedToday';
       break;
     }
+    // Last-chance attached-but-not-visible check before retrying — the
+    // visible-race above defaults to state:'visible', which misses
+    // elements present in the DOM but transiently hidden (display:none,
+    // opacity:0, offscreen during a layout transition). jaimitus's #86
+    // diagnostic dump showed both `"day streak"` h3 and `"Collect"`
+    // button in the DOM after the visible-race failed all four
+    // attempts — but the dump grabs textContent, not visibility, so
+    // the markers were there just not paint-visible at the moment the
+    // race timed out. Use locator.count() (visibility-agnostic) to
+    // catch this case before throwing.
+    if (await loggedIn.count() > 0 || await collectedToday.count() > 0) {
+      console.log('Logged-in marker found in DOM but was not visible during the wait — counting as logged in');
+      alreadyLoggedIn = true;
+      break;
+    }
+    if (await loginBtn.count() > 0) {
+      console.log('Login button found in DOM but was not visible during the wait — counting as logged out');
+      alreadyLoggedIn = false;
+      break;
+    }
     if (attempt === MAX_RELOADS) {
       // Diagnostic dump on failure — none of the three sentinel selectors
       // resolved within the 15s window across all retries. AliExpress's

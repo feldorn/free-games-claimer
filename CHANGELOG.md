@@ -4,6 +4,26 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.41
+
+**Three small defensive fixes from this triage round.**
+
+### 1. `notify()` apprise failure now captures exit code + stdout + stderr ([#82](https://github.com/feldorn/free-games-claimer/issues/82))
+
+v2.8.39 added apprise's `stderr` to the error message. jzagata's #82 (Epic-Games Pushover failure on v2.8.40) showed the new capture didn't help — apprise had exited non-zero with **empty stderr**. The actual rejection info was either in stdout (Python's `print()` default routing) or implicit in the exit code only. v2.8.41 captures all three (`exit N | stderr | stdout`) so the next failure surfaces the actual reason regardless of how apprise routes the diagnostic.
+
+### 2. AliExpress detector last-chance attached-but-not-visible check ([#86](https://github.com/feldorn/free-games-claimer/issues/86))
+
+jaimitus's #86 was the first AliExpress submission where the v2.8.38 chunk-buffered scanner successfully captured the full diagnostic dump — and the dump showed `"day streak"` h3 + `"Collect"` button **both in the DOM** at the moment of failure. Our `loggedIn.waitFor()` race uses `state: 'visible'` (the Playwright default), which misses elements present in the DOM but transiently hidden (display:none, opacity:0, offscreen during a layout transition). Mobile AliExpress's coin-collection panel renders through a multi-step state machine where these markers are attached well before they become paint-visible.
+
+Before throwing, the detector now does a final `locator.count()` check on each marker (visibility-agnostic). If the logged-in marker is in the DOM but wasn't deemed visible during the race, we count it as logged-in. Same defense applied to the login-button marker on the logged-out side.
+
+### 3. Config-snapshot rendering: `MS: undefined:00 + 4h window` ([#85](https://github.com/feldorn/free-games-claimer/issues/85))
+
+Tiny bug surfaced by molotovah's #85 submission — when `msScheduleStart` is unset but `msScheduleHours` is configured, `_captureErrorContext` rendered `startHour` as `undefined` instead of falling back to the default 8 (which `src/config.js` uses for runtime behavior). The window string now reads `8:00 + 4h window` matching the actual runtime config.
+
+---
+
 ## What's new in 2.8.40
 
 **`readPointsBalance` now reads the points balance from MS's React Server Components stream instead of scraping the DOM.** Credit to [kevindevm](https://github.com/kevindevm) in [#71](https://github.com/feldorn/free-games-claimer/issues/71) for finding the approach: re-fetching `https://rewards.bing.com/dashboard` with header `rsc: 1` returns the RSC stream — a text blob carrying a literal `"balance":<N>,"level":<N>` pair — which sidesteps DOM scraping entirely.

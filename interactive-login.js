@@ -644,7 +644,7 @@ function _captureErrorContext() {
         loopSeconds: sched.loop || 0,
         runOnStartup: cfg.run_on_startup || 0,
         msWindow: sched.msHours > 0
-          ? { startHour: sched.msScheduleStart, hours: sched.msHours, runWithMainChain: !!cfg.ms_run_with_main_chain }
+          ? { startHour: (sched.msScheduleStart != null ? sched.msScheduleStart : 8), hours: sched.msHours, runWithMainChain: !!cfg.ms_run_with_main_chain }
           : { off: true, runWithMainChain: !!cfg.ms_run_with_main_chain },
       },
       activeServices: Array.from(active).sort(),
