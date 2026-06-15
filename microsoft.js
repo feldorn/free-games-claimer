@@ -899,8 +899,14 @@ process.on('SIGINT', async () => {
 });
 
 // Vary search counts slightly each run to avoid a fixed daily pattern
-const desktopSearchCount = 33 + Math.floor(Math.random() * 5); // 33–37
-const mobileSearchCount = 23 + Math.floor(Math.random() * 5);  // 23–27
+// Per-session search counts are configurable via cfg.ms_desktop_search_count
+// and cfg.ms_mobile_search_count (defaults 35 / 25 — the previously-hardcoded
+// midpoints). A ±2 random jitter is applied around the configured center to
+// keep the actual count human-varying: consistent counts day-after-day are a
+// bot tell. driftin8ez's #83.
+const _jitter = () => Math.floor(Math.random() * 5) - 2; // -2..+2
+const desktopSearchCount = Math.max(1, (cfg.ms_desktop_search_count || 35) + _jitter());
+const mobileSearchCount  = Math.max(1, (cfg.ms_mobile_search_count  || 25) + _jitter());
 const searchTerms = await buildSearchList(desktopSearchCount + mobileSearchCount);
 
 // Per-run point balance history used by the web panel's Stats tab.

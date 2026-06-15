@@ -116,6 +116,14 @@ export const cfg = {
   // that avoids MS bot detection; lowering it shortens runs at the user's own
   // risk. Lower bound stays 1s in randomMs().
   ms_search_delay_max: ms.searchDelayMaxSec ?? 180,
+  // Configurable per-session search counts (driftin8ez's #83). Defaults
+  // match the previously-hardcoded midpoints (35 desktop, 25 mobile);
+  // a ±2 random jitter is applied at runtime in microsoft.js to keep
+  // the actual count human-varying. Lower for accounts with smaller
+  // bonus-points daily caps; raise if needed for accounts that cap
+  // higher.
+  ms_desktop_search_count: ms.desktopSearchCount ?? 35,
+  ms_mobile_search_count: ms.mobileSearchCount ?? 25,
   ms_redeem_threshold: ms.redeemThreshold ?? 6500,
   ms_redeem_url:       ms.redeemUrl       ?? 'https://rewards.bing.com/redeem/000800000000',
   ms_redeem_label:     ms.redeemLabel     ?? '$5 Amazon GC',

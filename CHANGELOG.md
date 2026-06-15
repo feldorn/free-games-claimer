@@ -4,6 +4,19 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.42
+
+**Configurable MS Rewards per-session search counts.** Requested by driftin8ez in [#83](https://github.com/feldorn/free-games-claimer/issues/83): their account has a 100-point daily bonus cap and the hardcoded 60-searches-per-run was overshooting, leading them to run the claimer 2× per day and still leave points on the table. Two new configFields:
+
+- **`services.microsoft.desktopSearchCount`** (env `MS_DESKTOP_SEARCH_COUNT`, default 35)
+- **`services.microsoft.mobileSearchCount`** (env `MS_MOBILE_SEARCH_COUNT`, default 25)
+
+Defaults match the previously-hardcoded midpoints (33–37 desktop, 23–27 mobile) so existing deploys see no behavior change. A ±2 random jitter is applied around the configured center at runtime to keep the actual count human-varying — consistent counts day-after-day are a bot tell, so even at low values like 12 you'd see a 10–14 range.
+
+Settings UI surface in *Settings → Services → Microsoft Rewards → Desktop searches per run / Mobile searches per run*. No floor enforcement (a configured value of 1 produces 1–3 actual searches via Math.max(1, …)) — trust the user, document the trade-offs in the hint copy.
+
+---
+
 ## What's new in 2.8.41
 
 **Three small defensive fixes from this triage round.**
