@@ -55,6 +55,11 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
             type=ref,event=branch
             type=sha,prefix=
+            # Date tag (YYYYMMDD) on main branch only — gives users a
+            # stable pin target for watchtower/diun-style auto-update
+            # workflows that want "today's image" but don't pin to a
+            # specific semver. First-Non-Interesting-Username's #84.
+            type=raw,value={{date 'YYYYMMDD'}},enable={{is_default_branch}}
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
