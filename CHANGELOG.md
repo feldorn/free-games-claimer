@@ -4,6 +4,16 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.43
+
+**Three Settings hint-copy fixes — no behavior change, just clearer UI text.**
+
+- **MS schedule window width hint** ([#87](https://github.com/feldorn/free-games-claimer/issues/87)) — wielorzeczownik flagged that the hint reads "0 runs immediately without anchoring" but `MS_SCHEDULE_HOURS=0` actually **disables the dedicated MS scheduler entirely** (per `legacyCombinedMode()` / `computeMsWakeMs()` guards: `if (!msActive || c.msHours <= 0) ... return 0`). Hint now reads correctly and points the user at the `Run Microsoft inline with main chain` toggle below if they want MS to run via the main daily run instead.
+
+- **Desktop/mobile search count hints** ([#83](https://github.com/feldorn/free-games-claimer/issues/83)) — driftin8ez suggested a warning about high-volume per-run risk after sharing their setup (41 desktop + 31 mobile, split across 2 runs/day with 60-min jitter). Hints now note that values much higher than the defaults run many searches in rapid succession from one session and raise bot-detection risk — splitting the same total across 2 runs per day is safer.
+
+---
+
 ## What's new in 2.8.42
 
 **Configurable MS Rewards per-session search counts.** Requested by driftin8ez in [#83](https://github.com/feldorn/free-games-claimer/issues/83): their account has a 100-point daily bonus cap and the hardcoded 60-searches-per-run was overshooting, leading them to run the claimer 2× per day and still leave points on the table. Two new configFields:
