@@ -5578,25 +5578,19 @@ function setSettingValue(path, value) {
 
 async function setActiveService(id, nextActive) {
   const sites = LINKED_ACTIVE[id] || [id];
-  if (!nextActive) {
-    // Confirm deactivation only when ANY linked site has history to lose.
-    let hasHistory = false;
-    try {
-      const byService = await api('GET', '/stats/by-service');
-      hasHistory = sites.some(sid => {
-        const row = byService.find(r => r.id === sid);
-        return row && ((typeof row.allTime === 'number' && row.allTime > 0) || row.lastClaimAt);
-      });
-    } catch {}
-    if (hasHistory) {
-      const label = ({
-        'prime-gaming': 'Prime Gaming', 'epic-games': 'Epic Games', 'gog': 'GOG', 'steam': 'Steam',
-        'microsoft': 'Microsoft Rewards', 'aliexpress': 'AliExpress',
-      })[id] || id;
-      const ok = confirm('Deactivate ' + label + '?\\n\\nClaim history already on record will be preserved, but scheduled runs will skip this service until you reactivate it.');
-      if (!ok) { paintSettings(); return; }
-    }
-  }
+  // Previously gated deactivation behind a native confirm() dialog when
+  // the service had claim history. That dialog was informational-only
+  // ("history is preserved; scheduled runs will skip") and not a
+  // destructive-action gate — but native confirm() is fragile across
+  // browser contexts (silently auto-cancels under pop-up blocker
+  // settings, prior "block dialogs" choices, or noVNC-iframe contexts),
+  // and a silent auto-cancel produced exactly the symptom feldorn
+  // reported on a service with history (Microsoft Rewards): toggle
+  // visually shifts to off then reverts to on, Save button doesn't
+  // activate. The Save button is already the explicit commit gate —
+  // toggling off only stages a dirty patch, the user has to click
+  // Save to persist. So the confirm() was a redundant UI barrier
+  // that introduced a real failure mode. Dropped.
   for (const siteId of sites) setSettingValue('services.' + siteId + '.active', nextActive);
   paintSettings();
 }

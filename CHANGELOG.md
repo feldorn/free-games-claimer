@@ -4,6 +4,16 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.45
+
+**Removed a broken native-`confirm()` gate on service-deactivation that made the toggle look unresponsive.** Reported in-conversation by feldorn: toggling Microsoft Rewards off in Settings did nothing — the switch visually shifted to "off" then snapped back to "on", and the Save button never activated. Lenovo deactivation worked fine.
+
+The bug: `setActiveService()` called native `window.confirm()` when the service had claim history (preservation-notice dialog). Native `confirm()` is fragile across browser contexts — silently auto-cancels under pop-up blocker settings, prior site-level "block dialogs" choices, certain noVNC-iframe contexts, etc. A silent auto-cancel hit the `if (!ok) { paintSettings(); return; }` branch, which visually reverted the toggle and dropped the staged dirty patches before they reached `settingsDirty`. Save button stayed disabled because no patches were queued. Microsoft Rewards reproduced this 100% (has thousands of points of history); Lenovo didn't because the history check was false (it's a watch-only collector).
+
+The dialog was informational-only — it just clarified that claim history is preserved and scheduled runs will skip. Save is already the explicit commit gate, so the dialog was a redundant UI barrier that introduced a real failure mode. Dropped the dialog entirely; the toggle now stages the dirty patch on click, Save commits, no native-`confirm` involvement.
+
+---
+
 ## What's new in 2.8.44
 
 **MS scheduler now invalidates the persisted daily pick when the window config changes.** Reported by Dr4w in [#88](https://github.com/feldorn/free-games-claimer/issues/88) with full repro + suggested fix location: changing `MS_SCHEDULE_HOURS` via the Settings UI didn't invalidate the previously-persisted `data/ms-schedule-today.json`, so the scheduler kept the stale pick — which could fall completely outside the new window. The only workaround was to manually delete the file and restart the container.
