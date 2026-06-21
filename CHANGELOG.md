@@ -4,6 +4,16 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.46
+
+**One stuck Epic Games page no longer crashes the whole Epic claim run.** Reported by Abateman121in [#90](https://github.com/feldorn/free-games-claimer/issues/90): `page.waitForFunction: Timeout 60000ms exceeded.` fired during the per-game CTA-button readiness wait, propagated out of the `for (const url of urls)` loop, and killed the rest of the Epic run before remaining games got a chance. Their stack showed 4 free games found (Citizen Sleeper, ROBOBEAT, Construction Simulator 3 — all already-owned or already-claimed — plus a 4th title whose name was lost when the run crashed mid-iteration).
+
+Fix: wrapped `page.waitForFunction(...)` in a try/catch. On timeout the script logs `CTA button never loaded for <url> — skipping this game`, pushes a `failed: CTA never loaded` entry to the notification list so the run-summary surfaces the skip, and `continue`s to the next URL. The URL is in the log line specifically so future diagnostics submissions identify which page caused it without needing a `DEBUG=1` rerun.
+
+Epic occasionally serves a broken / variant page layout for specific titles (bundles, region-restricted offers, anti-bot slow-walks) — this is the failure mode to expect rather than something we can selector-around. Skipping cleanly + naming the offending URL is the right behavior.
+
+---
+
 ## What's new in 2.8.45
 
 **Removed a broken native-`confirm()` gate on service-deactivation that made the toggle look unresponsive.** Reported in-conversation by feldorn: toggling Microsoft Rewards off in Settings did nothing — the switch visually shifted to "off" then snapped back to "on", and the Save button never activated. Lenovo deactivation worked fine.

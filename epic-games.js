@@ -347,12 +347,28 @@ try {
     await page.goto(url); // , { waitUntil: 'domcontentloaded' });
     // when loading, the button text is empty -> need to wait for some text {'get', 'in library', 'requires base game'} -> just wait for e or i to not be too specific; :text-matches("\w+") somehow didn't work - https://github.com/vogler/free-games-claimer/issues/375
     // was using locator('...').first().waitFor(), but that at some point led to exception locator.waitFor: Error: Can't query n-th element
-    await page.waitForFunction(
-      () => {
-        const btn = document.querySelector('button[data-testid="purchase-cta-button"]');
-        return btn && /[ei]/i.test(btn.textContent) && btn.textContent != 'Loading';
-      }
-    );
+    //
+    // Wrapped in try/catch so a single stuck page (Epic occasionally
+    // serves a broken / variant layout for some titles — bundles,
+    // region-restricted offers, anti-bot slow-walks) doesn't crash the
+    // entire Epic claim run before later games in the loop get a
+    // chance. Reported by Abateman121's #90 (v2.8.45) — CTA-wait
+    // timeout on game #4 of 4 broke the whole Epic pass. URL is
+    // logged on failure so the next diagnostics submission identifies
+    // which page caused it without needing a debug rerun.
+    try {
+      await page.waitForFunction(
+        () => {
+          const btn = document.querySelector('button[data-testid="purchase-cta-button"]');
+          return btn && /[ei]/i.test(btn.textContent) && btn.textContent != 'Loading';
+        }
+      );
+    } catch (e) {
+      log.fail(`CTA button never loaded for ${url} (${e.message?.split('\n')[0] || e}) — skipping this game`);
+      notify_games.push({ title: skipId, url, status: 'failed: CTA never loaded' });
+      if (cfg.time) console.timeEnd('claim game');
+      continue;
+    }
     // Epic momentarily shows "Get" as the placeholder while the ownership
     // lookup resolves; the button flips to "In Library" 1-2s later if you
     // already own the game. Without a settle wait we'd misread "Get",
