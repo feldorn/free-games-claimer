@@ -4,6 +4,18 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.47
+
+**Stats tab's "Recent claims" list is now user-configurable (default 200, was hardcoded at 10).** Requested by reverendj1 in [#91](https://github.com/feldorn/free-games-claimer/issues/91): they check the panel weekly-or-less and the 10-entry cap meant they'd routinely miss titles claimed earlier in the week. Underlying per-service claim DBs always preserved everything indefinitely — only the panel display was capped.
+
+New setting in Settings → Advanced → Logs → **"Recent claims to show on Stats tab"** (env `RECENT_CLAIMS_LIMIT`, default 200, hard ceiling 500). Default 200 covers roughly 2–3 months of typical activity. Raise to 500 if you check the panel monthly or less; lower it if you want a tighter snapshot.
+
+Section title on the Stats tab also surfaces the count (`Recent claims · last 142`) so it's obvious at a glance whether the visible list is the full history or saturated at the configured limit.
+
+Plumbing: server-side `/api/activity` now reads the configured default when the client doesn't pass `?limit=`. The Stats tab makes a paramless request so the user's setting applies without the client needing to round-trip `/api/config` first. Explicit `?limit=N` requests still work (e.g. for future "Show more" buttons or programmatic callers), clamped to 500.
+
+---
+
 ## What's new in 2.8.46
 
 **One stuck Epic Games page no longer crashes the whole Epic claim run.** Reported by Abateman121in [#90](https://github.com/feldorn/free-games-claimer/issues/90): `page.waitForFunction: Timeout 60000ms exceeded.` fired during the per-game CTA-button readiness wait, propagated out of the `for (const url of urls)` loop, and killed the rest of the Epic run before remaining games got a chance. Their stack showed 4 free games found (Citizen Sleeper, ROBOBEAT, Construction Simulator 3 — all already-owned or already-claimed — plus a 4th title whose name was lost when the run crashed mid-iteration).

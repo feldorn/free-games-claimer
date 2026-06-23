@@ -149,6 +149,7 @@ export const CONFIG_SCHEMA = [
   { path: 'advanced.width',           env: 'WIDTH',         type: 'number',  default: 1920, coerce: v => Number(v) || 1920 },
   { path: 'advanced.height',          env: 'HEIGHT',        type: 'number',  default: 1080, coerce: v => Number(v) || 1080 },
   { path: 'advanced.runHistoryMax',   env: 'RUN_HISTORY_MAX', type: 'number', default: 200, coerce: v => Math.max(1, Number(v) || 200) },
+  { path: 'advanced.recentClaimsLimit', env: 'RECENT_CLAIMS_LIMIT', type: 'number', default: 200, coerce: v => Math.min(500, Math.max(1, Number(v) || 200)) },
   // per-service — derived from the registry (Phase 0 of #11). Each registry
   // entry contributes its configFields followed (in a second pass) by its
   // services.<id>.active row. Coerce descriptors on configFields are mapped

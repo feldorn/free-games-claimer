@@ -3798,7 +3798,7 @@ const PANEL_HTML = `<!DOCTYPE html>
       <div class="stats-chart-wrap" id="chartArea"></div>
     </div>
     <div class="stats-section">
-      <div class="stats-section-title">Recent claims</div>
+      <div class="stats-section-title" id="statsActivityTitle">Recent claims</div>
       <div class="stats-activity" id="statsActivity"></div>
     </div>
   </div>
@@ -5474,7 +5474,8 @@ function paintSettings() {
         fieldRow('advanced.height', 'Browser viewport height')
       ) +
       settingGroup('Logs',
-        fieldRow('advanced.runHistoryMax', 'Past runs to retain', { unit: 'runs', hint: 'How many completed runs to keep in data/runs.json for the Logs tab Past-runs picker. Older entries are trimmed when this limit is exceeded. Higher = longer history but bigger file (~50 KB per run on average).' })
+        fieldRow('advanced.runHistoryMax', 'Past runs to retain', { unit: 'runs', hint: 'How many completed runs to keep in data/runs.json for the Logs tab Past-runs picker. Older entries are trimmed when this limit is exceeded. Higher = longer history but bigger file (~50 KB per run on average).' }) +
+        fieldRow('advanced.recentClaimsLimit', 'Recent claims to show on Stats tab', { unit: 'claims', hint: 'How many entries to load into the Stats tab\\'s Recent claims list. Underlying per-service claim DBs always retain everything — this only controls how many surface in the panel. Default 200 covers ~2-3 months of typical activity; raise to 500 (the hard ceiling) if you check the panel monthly or less.' })
       );
   }
 
@@ -5826,7 +5827,12 @@ async function renderStatsTab() {
       api('GET', '/stats/summary'),
       api('GET', '/stats/by-service'),
       api('GET', '/stats/daily?days=30'),
-      api('GET', '/activity?limit=10'),
+      // No explicit limit so the server applies the user-configured
+      // advanced.recentClaimsLimit (default 200, max 500). Settings →
+      // Advanced → Logs → "Recent claims to show on Stats tab" lets
+      // the user tune. Was hardcoded limit=10 before v2.8.47 (#91
+      // reverendj1).
+      api('GET', '/activity'),
     ]);
     const fmt = n => (n == null ? '—' : new Intl.NumberFormat().format(n));
     const msPending = summary.msPointsBalance == null;
@@ -5887,6 +5893,16 @@ async function renderStatsTab() {
     chartSectionTitle.textContent = 'Claims over the last 30 days · ' + totalInRange + ' total';
     chartArea.innerHTML = renderDailyChart(daily);
 
+    // Surface the count next to the section title — easier to tell at a
+    // glance whether the visible list is the full claim history or
+    // saturated at the limit. Hidden when the list is empty (the
+    // empty-state copy already explains).
+    const activityTitle = document.getElementById('statsActivityTitle');
+    if (activityTitle) {
+      activityTitle.textContent = (recent && recent.length)
+        ? 'Recent claims · last ' + recent.length
+        : 'Recent claims';
+    }
     if (!recent || !recent.length) {
       activity.innerHTML = '<div class="stats-empty">No claims recorded yet. The activity log will populate after your first successful claim run.</div>';
     } else {
@@ -7893,7 +7909,20 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === 'GET' && req.url.startsWith('/api/activity')) {
       const url = new URL(req.url, `http://${req.headers.host}`);
-      const limit = Math.min(100, Math.max(1, parseInt(url.searchParams.get('limit') || '10', 10)));
+      // Client may omit ?limit= to fall back to the user-configured
+      // advanced.recentClaimsLimit (default 200). Explicit ?limit=N
+      // still wins, clamped at 500. Lets the Stats tab show the
+      // config-driven default without the client needing to round-trip
+      // /api/config first.
+      const raw = url.searchParams.get('limit');
+      let limit;
+      if (raw != null) {
+        limit = Math.min(500, Math.max(1, parseInt(raw, 10) || 200));
+      } else {
+        const eff = describeConfig().effective;
+        limit = (eff && eff.advanced && Number(eff.advanced.recentClaimsLimit)) || 200;
+        limit = Math.min(500, Math.max(1, limit));
+      }
       sendJson(res, await getActivity(limit));
       return;
     }
