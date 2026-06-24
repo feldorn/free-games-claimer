@@ -206,6 +206,73 @@ export const SITES = [
     },
   },
   {
+    id: 'fab',
+    name: 'FAB',
+    version: '0.1',
+    subtitle: 'Claims the monthly "Limited-Time Free" assets on fab.com (Epic\'s 3D content marketplace) using your existing Epic Games session. Opt-in. Scaffolded — fab.com\'s DOM/selectors may need iteration as Epic updates the store.',
+    script: 'fab.js',
+    // Runs right after Epic so the shared browser profile already holds a
+    // warm Epic session — FAB authenticates via Epic SSO, so no second
+    // login is needed in the common case. 3.5 slots between epic-games (3)
+    // and steam (4) in the claim chain ordering.
+    claimOrder: 3.5,
+    // FAB sign-in redirects to Epic's OAuth. Point the interactive-login
+    // target at the free-assets page; an unauthenticated visit surfaces the
+    // Sign In control, and an authenticated one lands where the user wants.
+    loginUrl: 'https://www.fab.com/limited-time-free',
+    homeUrl: 'https://www.fab.com/limited-time-free',
+    // Same persistent profile as Epic Games — the Epic SSO cookies that FAB
+    // relies on live here, so sharing the dir means a single Epic login
+    // covers both services.
+    get browserDir() { return cfg.dir.browser; },
+    contextOptions: null,
+    // Opt-in: not everyone wants Unreal/3D marketplace assets, and the flow
+    // is newly scaffolded. Mirrors AliExpress's opt-in default.
+    defaultActive: false,
+    activeEnv: 'FAB_ACTIVE',
+    linkedWith: null,
+    claimDbFile: 'fab.json',
+    scheduleKind: 'daily-chain',
+    features: [],
+    configFields: [],
+    async checkLogin(page) {
+      try {
+        await page.goto('https://www.fab.com/', { waitUntil: 'domcontentloaded', timeout: 20000 });
+        await page.waitForTimeout(3000);
+        // FAB (page + /i/ API) sits behind Cloudflare, so a non-OK response
+        // from the session endpoint can be a bot-challenge rather than a
+        // real auth signal. Treat the API as a POSITIVE-ONLY source (confirm
+        // a name, never deny login) and let the DOM make the logged-out
+        // decision. page.request inherits the context's Cloudflare clearance
+        // + cookies the live browser already earned via the goto above.
+        let user = null;
+        try {
+          const res = await page.request.get('https://www.fab.com/i/users/me', { timeout: 10000 });
+          if (res.ok()) {
+            const data = await res.json().catch(() => null);
+            const name = data && (data.username || data.sellerName || data.name || data.email);
+            if (name) user = String(name).trim();
+          }
+        } catch { /* fall through to DOM check */ }
+        // DOM decision: a *visible* Sign In control means not authenticated.
+        // FAB's sign-in is an icon-only avatar button (aria-label="Sign in",
+        // no text), so match the aria-label, not just visible text. Count
+        // visible matches only — FAB keeps hidden auth nodes in the DOM that
+        // would trip a plain .count() into a false "logged out".
+        const sel = '[aria-label="Sign in" i], a[href*="/login" i], a:has-text("Sign In"), button:has-text("Sign In")';
+        const n = await page.locator(sel).count();
+        let visible = 0;
+        for (let i = 0; i < n; i++) if (await page.locator(sel).nth(i).isVisible().catch(() => false)) visible++;
+        if (visible > 0) return { loggedIn: false };
+        return { loggedIn: true, user: user || 'Epic account' };
+      } catch (e) {
+        // Surface the error so postRunSessionCheck can distinguish "page
+        // rendered, said not logged in" from "couldn't check at all".
+        return { loggedIn: false, error: (e && e.message ? e.message.split('\n')[0] : String(e)).slice(0, 200) };
+      }
+    },
+  },
+  {
     id: 'gog',
     name: 'GOG',
     version: '2.2',
