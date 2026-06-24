@@ -6021,7 +6021,7 @@ function renderScheduleTab() {
   // exhibit on the next scheduled fire. Inactive services don't appear —
   // users deactivate to have them stop, so the schedule reflects reality.
   // microsoft-mobile is linked to microsoft in the UI, so we skip it here.
-  const GAME_IDS = new Set(['prime-gaming', 'epic-games', 'gog', 'steam']);
+  const GAME_IDS = new Set(['prime-gaming', 'epic-games', 'fab', 'gog', 'steam']);
   const sites = state.sites || [];
   const activeGames = sites.filter(s => s.active && GAME_IDS.has(s.id));
   const hasAE = sites.some(s => s.active && s.id === 'aliexpress');
