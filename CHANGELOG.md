@@ -4,6 +4,26 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.48
+
+**New opt-in service: FAB (Epic's 3D content marketplace).** Contributed by [@ABilevich](https://github.com/ABilevich) ([#94](https://github.com/feldorn/free-games-claimer/issues/94) → [#95](https://github.com/feldorn/free-games-claimer/pull/95)). Claims the monthly "Limited-Time Free" assets on [fab.com](https://www.fab.com/limited-time-free) — formerly Unreal Engine Marketplace + Quixel + Sketchfab, now Epic's unified content marketplace.
+
+Key architectural notes:
+
+- **Reuses the existing Epic browser profile.** FAB authenticates via Epic SSO, so when FAB runs after Epic Games in the claim chain the session is already warm — no second login, no second set of credentials, one cookie store.
+- **`claimOrder: 3.5`** slots FAB right after Epic Games (3) and before the rest of the chain. No existing entries renumbered.
+- **Opt-in (`FAB_ACTIVE=1`).** Default off, so existing deploys see no behavior change. Same opt-in shape as AliExpress and Lenovo Gaming Key Drops. Activate via Settings → Services → FAB.
+- **Handles both free flows** seen on FAB: the standard permanent-free "Add to My Library" one-click path, and the Limited-Time-Free "Buy now" purchase discounted -100% to €0. Ownership detection keys off the "Saved in My Library" / "View in Launcher" state, with a per-asset try/catch so one bad listing can't sink the whole run.
+- **Cloudflare-resilient login detection.** Both the page and the `/i/users/me` API sit behind Cloudflare, so the API is treated as a positive-only signal (confirm a name, never deny) and the rendered DOM makes the logged-out decision via visibility-checked `[aria-label="Sign in"]` matches. Same pattern oat1 / jaimitus's #72-#86 series taught us for AliExpress.
+- **`fab.json` claim DB** records owned assets so the script skips re-checking them on subsequent runs.
+- **Registry-driven** — the new `sites.js` entry auto-wires FAB into the panel's Sessions / Schedule / Discoveries / Stats tabs, the scheduler's claim-chain ordering, the session-check probes, and the run-summary aggregator. No engine code touched.
+
+Scaffolded as v0.1 — fab.com is a React SPA and selectors may need iteration as Epic updates the store; per-asset try/catch + failure screenshots under `data/screenshots/fab/failed/` make the next iteration straightforward.
+
+**Also: `docker-compose.yml` validation fix.** Same contributor, [PR #96](https://github.com/feldorn/free-games-claimer/pull/96). Newer Docker Compose versions reject the file as-is — the `environment:` key had only commented-out entries (null mapping error) and the `fgc` named volume was referenced but never declared at the top level. Both fixed. If you got `docker compose: services.free-games-claimer.environment must be a mapping` on a fresh install, this is the fix.
+
+---
+
 ## What's new in 2.8.47
 
 **Stats tab's "Recent claims" list is now user-configurable (default 200, was hardcoded at 10).** Requested by reverendj1 in [#91](https://github.com/feldorn/free-games-claimer/issues/91): they check the panel weekly-or-less and the 10-entry cap meant they'd routinely miss titles claimed earlier in the week. Underlying per-service claim DBs always preserved everything indefinitely — only the panel display was capped.
