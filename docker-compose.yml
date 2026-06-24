@@ -16,7 +16,10 @@ services:
     volumes:
       - fgc:/fgc/data
     # command: bash -c "node epic-games; node gog; node steam"  # override CLAIM_CMD below instead
-    environment:
+    # To set env vars, uncomment `environment:` below AND at least one entry
+    # (an `environment:` key with only comments under it is null, which newer
+    # Docker Compose rejects with "environment must be a mapping").
+    # environment:
       # - EMAIL=foo@bar.org
       # - NOTIFY='tgram://...'
       # - LOOP=28800 # scheduler interval in seconds (e.g., 28800 = 8 hours); omit to disable scheduler
@@ -30,3 +33,9 @@ services:
       # - MS_PASSWORD=yourpassword # Microsoft account password (defaults to PASSWORD)
       # - MS_OTPKEY=yourotpsecret # Microsoft 2FA TOTP secret (optional)
       # Note: LOGIN_MODE is deprecated — the panel is always running on port 7080.
+
+# Named volume that persists the browser profile (logins), claim DBs, config,
+# and screenshots. Newer Docker Compose requires the top-level declaration;
+# in this project it resolves to the existing `free-games-claimer_fgc` volume.
+volumes:
+  fgc:
