@@ -4,6 +4,20 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.49
+
+**Reddit-403 log wording is no longer misleading.** Reported in-chat by feldorn after seeing `! FreeGameFindings discovery skipped — Reddit API rate-limited (HTTP 403)` on a run that had only fired once that day — "rate-limited" implied their traffic volume had tripped a per-user quota, when in reality Reddit blanket-blocks the public JSON endpoint for unauthenticated clients on datacenter / container egress IPs by default. They started this in 2023 as a general anti-scraper measure; the 403 hits the first request regardless of volume.
+
+Log line now reads:
+
+> `Reddit API returned 403 — Reddit blocks their public JSON endpoint for unauthenticated container/datacenter traffic by default, not a user-specific rate limit. Supplementary discovery skipped; GamerPower coverage still applies.`
+
+Same fingerprint, same no-action-required behavior (GamerPower already covers most of the same freebies). Just stops giving the impression that something on the user's side caused it.
+
+OAuth would bypass the block but requires per-user Reddit app registration — too heavy a lift for a supplementary discovery source when GamerPower coverage is already comprehensive. The 403 is documented as the expected steady state on container egress, not a transient.
+
+---
+
 ## What's new in 2.8.48
 
 **New opt-in service: FAB (Epic's 3D content marketplace).** Contributed by [@ABilevich](https://github.com/ABilevich) ([#94](https://github.com/feldorn/free-games-claimer/issues/94) → [#95](https://github.com/feldorn/free-games-claimer/pull/95)). Claims the monthly "Limited-Time Free" assets on [fab.com](https://www.fab.com/limited-time-free) — formerly Unreal Engine Marketplace + Quixel + Sketchfab, now Epic's unified content marketplace.

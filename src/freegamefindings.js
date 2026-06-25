@@ -97,15 +97,21 @@ export async function fetchFGFPosts({ maxAgeHours = 72 } = {}) {
     headers: { 'User-Agent': USER_AGENT },
     signal: AbortSignal.timeout(15000),
   });
-  // 403 in particular is Reddit's unauthenticated rate-limit response —
-  // commonly hit on container egress IPs. We log this as a warn in the
-  // caller and continue with GamerPower-only discovery (which covers
-  // most of the same freebies), so it's non-fatal. The error string is
-  // user-facing in the warn log; make it self-explanatory so users don't
-  // wonder if the run failed.
+  // 403 to the unauthenticated public-JSON API is Reddit's blanket
+  // anti-scraper response — applied to ALL unauthenticated clients
+  // from datacenter / container egress IPs since 2023, regardless of
+  // whether the caller has made any prior requests. This is NOT a
+  // user-specific quota; the previous "rate-limited" wording was
+  // misleading (it implied the user's traffic volume tripped a
+  // threshold). The right framing is "Reddit's public JSON endpoint
+  // doesn't serve unauthenticated container egress." OAuth would
+  // bypass it but requires per-user Reddit app registration — too
+  // heavy a lift for a supplementary discovery source when
+  // GamerPower covers most of the same content. Logged as warn,
+  // run continues with GamerPower-only discovery.
   if (!res.ok) {
     const detail = res.status === 403
-      ? 'Reddit API rate-limited (HTTP 403) — supplementary discovery skipped; GamerPower coverage still applies'
+      ? 'Reddit API returned 403 — Reddit blocks their public JSON endpoint for unauthenticated container/datacenter traffic by default, not a user-specific rate limit. Supplementary discovery skipped; GamerPower coverage still applies.'
       : `Reddit API HTTP ${res.status} — supplementary discovery skipped; GamerPower coverage still applies`;
     throw new Error(detail);
   }
