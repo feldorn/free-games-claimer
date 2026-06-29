@@ -741,6 +741,48 @@ async function claimPendingBonusPoints(page) {
   }
 }
 
+// The post-2026 dashboard surfaces pending bonus points as a "Ready to
+// claim" card in the top-bar (next to the "Available points" card) rather
+// than the legacy mee-rewards-pointclaim-banner that claimPendingBonusPoints
+// above handles. The card has a small SVG arrow with text "Claim" — clicking
+// it opens a modal whose CTA is "Claim points". Found by kevindevm in
+// https://github.com/feldorn/free-games-claimer/issues/99 — the same user
+// who found the RSC-stream balance trick (v2.8.40, #71).
+//
+// Defensive: wrapped in try/catch so a layout drift or missing card returns
+// quietly. The legacy banner path stays in place; this just adds coverage
+// for the new surface. No-op if no "Ready to claim" SVG appears.
+async function claimReadyToClaimCard(page) {
+  if (page.isClosed()) {
+    log.info('claimReadyToClaimCard: page already closed, skipping');
+    return;
+  }
+  try {
+    // Iterate every SVG matching the dashboard's small-arrow class chain
+    // and pick the one whose preceding `<p>` reads "Claim". The class chain
+    // is Tailwind utility classes (`size-3.5 -rotate-90 rtl:rotate-90`) —
+    // they're stable on the redesigned dashboard but bypassed in our locale
+    // flags via --accept-lang=en-US so the "Claim" text matches.
+    const SVG_SELECTOR = 'svg.size-3\\.5.-rotate-90.rtl\\:rotate-90';
+    await page.waitForSelector(SVG_SELECTOR, { timeout: 3000 }).catch(() => {});
+    const svgs = await page.locator(SVG_SELECTOR).all();
+    for (const svg of svgs) {
+      const labelText = await svg.locator('xpath=preceding-sibling::p[1]')
+        .innerText({ timeout: 1500 }).catch(() => '');
+      if (labelText.trim() !== 'Claim') continue;
+      await svg.click({ timeout: 5000 });
+      const claimBtn = page.locator('button:has-text("Claim points")');
+      await claimBtn.waitFor({ state: 'visible', timeout: 10000 });
+      await claimBtn.click({ timeout: 5000 });
+      log.info('Clicked "Ready to claim" card — bonus points credited.');
+      await page.waitForTimeout(2000);
+      return; // one card per run is the realistic shape; bail after success
+    }
+  } catch (e) {
+    log.info(`claimReadyToClaimCard: ${e.message?.split('\n')[0] || e} — skipping`);
+  }
+}
+
 async function clickEveryPendingActivityCard(page) {
   await page.goto(BING_REWARDS_URL, { waitUntil: 'load' });
   await dismissDashboardPopup(page);
@@ -952,6 +994,7 @@ log.section('Desktop');
       if (before != null) log.status('Points before', before);
       await clickEveryPendingActivityCard(page);
       await claimPendingBonusPoints(page);
+      await claimReadyToClaimCard(page);
       await executeBingSearches(page, searchTerms.slice(0, desktopSearchCount));
       after = await readPointsBalance(page);
       if (after != null) log.status('Points after', after + (before != null ? ` (+${after - before})` : ''));
@@ -998,6 +1041,7 @@ log.section('Mobile');
       if (before != null) log.status('Points before', before);
       await clickEveryPendingActivityCard(page);
       await claimPendingBonusPoints(page);
+      await claimReadyToClaimCard(page);
       await executeBingSearches(page, searchTerms.slice(-mobileSearchCount));
       after = await readPointsBalance(page);
       if (after != null) log.status('Points after', after + (before != null ? ` (+${after - before})` : ''));

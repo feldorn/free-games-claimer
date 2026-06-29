@@ -4,6 +4,25 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.50
+
+**MS Rewards now auto-claims the "Ready to claim" card on the post-2026 dashboard.** Found and instrumented by [kevindevm](https://github.com/feldorn/free-games-claimer/issues/99) — the same contributor who supplied the RSC-stream balance trick in v2.8.40.
+
+What was happening: Microsoft's redesigned Rewards dashboard surfaces pending bonus points as a card in the top-bar ("Ready to claim: 3") rather than the legacy `mee-rewards-pointclaim-banner` that `claimPendingBonusPoints()` (shipped earlier) handles. The card uses a small SVG arrow + "Claim" text, and clicking it opens a modal whose CTA is "Claim points". Users on the new dashboard would see pending points pile up without auto-claim — same loss-of-credit pattern that drove the original `claimPendingBonusPoints` work, just against a different DOM surface.
+
+New function `claimReadyToClaimCard()` in `microsoft.js` is called right after `claimPendingBonusPoints()` in both desktop and mobile run loops. Implementation matches kevindevm's working test:
+
+1. Iterate every SVG with the dashboard's small-arrow utility-class chain (`.size-3.5.-rotate-90.rtl:rotate-90`)
+2. Inspect the preceding `<p>` element for each — match exact `"Claim"`
+3. On match, click the SVG, wait for the modal's "Claim points" button to render, click it
+4. One card per run is the realistic shape; bail after the first successful claim
+
+Defensive throughout: `page.isClosed()` check up front, try/catch around the whole iteration, `.catch()` on each per-element call so a missing card or single-element transient doesn't crash anything. The legacy banner path stays in place — this is additive coverage for the new surface, not a replacement.
+
+The Tailwind class chain is stable on MS's current redesign but could drift if Microsoft does another rebuild. Our `--accept-lang=en-US` browser flag (shipped in v2.8.34's `localeArgs`) ensures the "Claim" text match works regardless of the user's account locale.
+
+---
+
 ## What's new in 2.8.49
 
 **Reddit-403 log wording is no longer misleading.** Reported in-chat by feldorn after seeing `! FreeGameFindings discovery skipped — Reddit API rate-limited (HTTP 403)` on a run that had only fired once that day — "rate-limited" implied their traffic volume had tripped a per-user quota, when in reality Reddit blanket-blocks the public JSON endpoint for unauthenticated clients on datacenter / container egress IPs by default. They started this in 2023 as a general anti-scraper measure; the 403 hits the first request regardless of volume.
