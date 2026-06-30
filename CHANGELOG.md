@@ -4,6 +4,22 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.51
+
+**Network blips during the MS Desktop session no longer crash the whole run.** Reported by TheDevRo in [#100](https://github.com/feldorn/free-games-claimer/issues/100): a network hiccup mid-`page.goto('https://rewards.bing.com/')` caused Chromium to navigate to `chrome-error://chromewebdata/` (its built-in error page), which Playwright surfaced as `Navigation to "https://rewards.bing.com/" is interrupted by another navigation to "chrome-error://chromewebdata/"`. The throw came from `clickEveryPendingActivityCard()` and propagated out of the desktop session — skipping the **entire Bing search loop** and the **mobile session** that follow. The activity-card pass is a small extra; the search loop is the actual reward path, so it must not die for a transient.
+
+New helper `isRecoverableMsNavError(e)` returns `true` for the family of "page/network disappeared mid-flight" errors:
+
+- `Target page, context or browser has been closed` (browser teardown — #67 OFABLE, #80 Rick45)
+- `interrupted by another navigation` (chrome-error redirect — #100 TheDevRo)
+- `ERR_ADDRESS_UNREACHABLE` / `ERR_INTERNET_DISCONNECTED` / `ERR_NAME_NOT_RESOLVED` / `ERR_NETWORK_CHANGED` / `ERR_CONNECTION_RESET` / `ERR_TIMED_OUT` (DNS / connectivity failures)
+
+`claimPendingBonusPoints` (existing) + `clickEveryPendingActivityCard` (newly wrapped) both use the helper now: try the dashboard goto, on a recoverable error log + return from the function so the rest of the MS run continues. Non-recoverable errors (real bugs, locator timeouts, etc.) still throw as before. 9/9 truth-table tests pass distinguishing the two classes.
+
+If you saw a one-off MS run failure with a `chrome-error://chromewebdata/` or `ERR_*`-class error in the captured stack, this is the fix.
+
+---
+
 ## What's new in 2.8.50
 
 **MS Rewards now auto-claims the "Ready to claim" card on the post-2026 dashboard.** Found and instrumented by [kevindevm](https://github.com/feldorn/free-games-claimer/issues/99) — the same contributor who supplied the RSC-stream balance trick in v2.8.40.

@@ -694,17 +694,29 @@ async function dismissDashboardPopup(page) {
 // banner> with its own Claim button — the activity-card scraper above
 // (`mee-card:has(.mee-icon-AddMedium)`) doesn't match it, so before this
 // fix those points sat unclaimed until they actually expired.
+// Patterns that should NOT crash an MS run — they're either transient
+// network blips (chrome-error redirect interception, ERR_*-class DNS /
+// connectivity failures, navigation aborted mid-flight) or the browser
+// tearing down between steps. Each MS sub-pass (activity cards, bonus
+// banner, ready-to-claim card) handles its own goto failures via this
+// helper so one step's transient doesn't kill the search loop or the
+// mobile session that follow. Reports that drove this list: #67 OFABLE,
+// #80 Rick45 (page closed), #100 TheDevRo (chrome-error interruption).
+function isRecoverableMsNavError(err) {
+  const msg = String(err?.message || err);
+  return /Target page, context or browser has been closed/i.test(msg)
+      || /interrupted by another navigation/i.test(msg)
+      || /ERR_ADDRESS_UNREACHABLE|ERR_INTERNET_DISCONNECTED|ERR_NAME_NOT_RESOLVED|ERR_NETWORK_CHANGED|ERR_CONNECTION_RESET|ERR_TIMED_OUT/i.test(msg);
+}
+
 async function claimPendingBonusPoints(page) {
   // Defensive guard: between the preceding clickEveryPendingActivityCard()
   // and this navigation, the browser context or tab can die — either
   // because an activity-card click triggered a tab close, MS issued a
   // forced sign-out, the container ran out of memory, or anything else
-  // that tears down Chromium mid-run. The old behavior was to let
-  // page.goto throw "Target page, context or browser has been closed"
-  // which crashed the entire MS run with a diagnostics-banner error
-  // (OFABLE in #67, Rick45 in #80 — same line, two reports). Bonus
-  // points are a side feature, not the main reward flow; degrade
-  // gracefully when the page is gone instead of failing the run.
+  // that tears down Chromium mid-run. Bonus points are a side feature,
+  // not the main reward flow; degrade gracefully so the search loop and
+  // mobile session still run. (#67 OFABLE, #80 Rick45.)
   if (page.isClosed()) {
     log.info('claimPendingBonusPoints: page already closed, skipping bonus-points pass');
     return;
@@ -712,9 +724,8 @@ async function claimPendingBonusPoints(page) {
   try {
     await page.goto(BING_REWARDS_URL, { waitUntil: 'load' });
   } catch (e) {
-    const msg = String(e?.message || e).split('\n')[0];
-    if (/Target page, context or browser has been closed/i.test(msg)) {
-      log.info(`claimPendingBonusPoints: ${msg} — skipping bonus-points pass`);
+    if (isRecoverableMsNavError(e)) {
+      log.info(`claimPendingBonusPoints: ${String(e.message || e).split('\n')[0]} — skipping bonus-points pass`);
       return;
     }
     throw e;
@@ -784,7 +795,26 @@ async function claimReadyToClaimCard(page) {
 }
 
 async function clickEveryPendingActivityCard(page) {
-  await page.goto(BING_REWARDS_URL, { waitUntil: 'load' });
+  // Same defensive shape as claimPendingBonusPoints — a transient at the
+  // initial dashboard goto (chrome-error redirect, DNS blip, browser
+  // teardown) used to crash the desktop session, which propagated out
+  // and skipped the search loop AND the mobile session that follow.
+  // The activity-card pass is a small extra; the search loop is the
+  // main reward path, so it must not die for a transient here.
+  // (#100 TheDevRo: chrome-error://chromewebdata/ navigation interrupt.)
+  if (page.isClosed()) {
+    log.info('clickEveryPendingActivityCard: page already closed, skipping activity-card pass');
+    return;
+  }
+  try {
+    await page.goto(BING_REWARDS_URL, { waitUntil: 'load' });
+  } catch (e) {
+    if (isRecoverableMsNavError(e)) {
+      log.info(`clickEveryPendingActivityCard: ${String(e.message || e).split('\n')[0]} — skipping activity-card pass`);
+      return;
+    }
+    throw e;
+  }
   await dismissDashboardPopup(page);
   const cards = await page.locator(BING_REWARDS_ACTIVITY_CARD_SELECTOR).elementHandles();
   log.info(`Clicking pending activity cards (${cards.length} found)`);
