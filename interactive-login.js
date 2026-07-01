@@ -2496,11 +2496,17 @@ async function fireLenovoWake(wake) {
 
 // Compute ms until the next digest fire (next occurrence of the
 // configured local hour). Returns 0 when digest mode is off so the
-// caller can park until config changes flip it on.
+// caller can park until config changes flip it on. Reads via
+// describeConfig() rather than the module-scoped cfg so Settings-
+// tab changes take effect on the next scheduler wake without a
+// panel restart — matches the pattern getSchedulerConfig / activeServices
+// use for the other loops.
 function computeDigestWakeMs() {
-  const level = String(cfg.notify_level || 'all').toLowerCase();
+  const notif = describeConfig().effective.notifications || {};
+  const level = String(notif.notifyLevel || 'all').toLowerCase();
   if (level !== 'digest') return 0;
-  const targetHour = cfg.notify_digest_hour ?? 8;
+  const targetHour = (typeof notif.digestHour === 'number' && notif.digestHour >= 0 && notif.digestHour < 24)
+    ? notif.digestHour : 8;
   const now = new Date();
   const target = new Date(now.getFullYear(), now.getMonth(), now.getDate(), targetHour, 0, 0, 0);
   if (target.getTime() <= now.getTime()) target.setDate(target.getDate() + 1);
@@ -2595,11 +2601,12 @@ async function digestSchedulerLoop() {
     console.log(`[${datetime()}] Scheduler (digest): next flush at ${new Date(Date.now() + sleepMs).toISOString()}.`);
     const how = await sleepUntilWakeup(sleepMs);
     if (how === 'reload') continue;
-    // Guard: if config changed to 'digest' → 'other' during sleep,
+    // Guard: if config changed 'digest' → other during sleep,
     // computeDigestWakeMs on next iteration parks us; but we still
-    // want to skip firing this iteration. Re-check level here.
-    const level = String(cfg.notify_level || 'all').toLowerCase();
-    if (level !== 'digest') continue;
+    // want to skip firing THIS iteration. Re-check level here via
+    // describeConfig() so we see the live value.
+    const currentLevel = String(describeConfig().effective.notifications?.notifyLevel || 'all').toLowerCase();
+    if (currentLevel !== 'digest') continue;
     await flushDigest();
   }
 }

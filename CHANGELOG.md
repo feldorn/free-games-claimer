@@ -4,6 +4,14 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.56
+
+**Fix: digest scheduler now honors Settings-tab changes without a panel restart.** `computeDigestWakeMs()` and the post-wake guard in `digestSchedulerLoop()` were reading `cfg.notify_level` and `cfg.notify_digest_hour` — module-load snapshots that don't pick up in-app Settings edits. Switched to `describeConfig().effective.notifications.notifyLevel / .digestHour` (same live-read pattern the main + MS + Lenovo loops already use). Toggling verbosity or the digest hour from the panel now takes effect on the next scheduler wake instead of requiring a container restart.
+
+No user-visible change under env-var-only configuration.
+
+---
+
 ## What's new in 2.8.55
 
 **New notification verbosity tier: `digest`.** For users with many active services who don't want a Pushover ping per claim run per service — buffers all per-run summaries into a single aggregated notification dispatched daily at a configurable local hour.
