@@ -4,6 +4,20 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.57
+
+**Defensive guard on the Epic per-game claim loop against Chromium tear-down.** JLMael's [#104](https://github.com/feldorn/free-games-claimer/issues/104) hit the exact `page.goto: Target page, context or browser has been closed` shape that `microsoft.js` got a guard for in v2.8.39 (via #67 / #80 / #100) — but on the Epic side, where a single bad goto took down the whole claim loop instead of degrading to one skipped game.
+
+Same pattern applied to `epic-games.js` now:
+
+1. `page.isClosed()` check before each per-game `page.goto` — if the tab is gone, break out of the loop cleanly. Remaining games get picked up on the next scheduled run.
+2. `page.goto` wrapped in a try/catch that recognizes the "target closed" family plus the `ERR_ADDRESS_UNREACHABLE / ERR_INTERNET_DISCONNECTED / ERR_NAME_NOT_RESOLVED / ERR_NETWORK_CHANGED / ERR_CONNECTION_RESET / ERR_TIMED_OUT / interrupted by another navigation` transients. Recoverable failures log the URL that was in flight (so the next diagnostics submission tells us which game triggered the tear-down) and continue with the next game; genuine unexpected exceptions still rethrow to the outer handler.
+3. If a recoverable failure leaves `page.isClosed()` true, the loop breaks instead of continuing (no goto after this will succeed anyway).
+
+The retry loop for captcha-failed games (L627) already had a per-iteration try/catch, so it degrades correctly. The top-level `URL_CLAIM` / `URL_LOGIN` gotos at run start stay unguarded — if they fail we genuinely can't do anything (distinct from mid-run tear-down after discovery succeeded).
+
+---
+
 ## What's new in 2.8.56
 
 **Fix: digest scheduler now honors Settings-tab changes without a panel restart.** `computeDigestWakeMs()` and the post-wake guard in `digestSchedulerLoop()` were reading `cfg.notify_level` and `cfg.notify_digest_hour` — module-load snapshots that don't pick up in-app Settings edits. Switched to `describeConfig().effective.notifications.notifyLevel / .digestHour` (same live-read pattern the main + MS + Lenovo loops already use). Toggling verbosity or the digest hour from the panel now takes effect on the next scheduler wake instead of requiring a container restart.

@@ -319,6 +319,22 @@ try {
   // a missing game).
   let dedupedVariants = 0;
 
+  // Chromium can tear down the tab or context mid-run — either from a
+  // click on the previous game's page triggering a close, container OOM,
+  // network layer disconnection, or a forced sign-out. The exception
+  // shape is `page.goto: Target page, context or browser has been closed`
+  // (plus a small family of ERR_* transients that mean the same thing:
+  // the underlying transport went away between iterations). Modeled after
+  // microsoft.js/isRecoverableMsNavError from #67 / #80 / #100 — same
+  // pattern surfaced in JLMael's #104 on the Epic side, where the whole
+  // claim loop died on one bad goto.
+  const isRecoverableEpicNavError = (err) => {
+    const msg = String(err?.message || err);
+    return /Target (page|context|browser) has been closed/i.test(msg)
+        || /interrupted by another navigation/i.test(msg)
+        || /ERR_ADDRESS_UNREACHABLE|ERR_INTERNET_DISCONNECTED|ERR_NAME_NOT_RESOLVED|ERR_NETWORK_CHANGED|ERR_CONNECTION_RESET|ERR_TIMED_OUT/i.test(msg);
+  };
+
   for (const url of urls) {
     if (cfg.time) console.time('claim game');
     const skipId = url.split('/').pop();
@@ -344,7 +360,33 @@ try {
       if (cfg.time) console.timeEnd('claim game');
       continue;
     }
-    await page.goto(url); // , { waitUntil: 'domcontentloaded' });
+    // Defensive: if the tab/context died since the last iteration, no
+    // point trying subsequent gotos in this loop — bail out cleanly so
+    // the run summary reflects what got processed instead of crashing
+    // the whole Epic pass. (#104 JLMael on 2.8.55.)
+    if (page.isClosed()) {
+      log.warn('Page closed mid-run — ending Epic claim loop early (remaining games will be picked up on the next scheduled run)');
+      break;
+    }
+    try {
+      await page.goto(url); // , { waitUntil: 'domcontentloaded' });
+    } catch (e) {
+      // Recoverable navigation-transport failure: log with the URL that
+      // was in flight (so the next diagnostics submission tells us
+      // which game triggered the tear-down) and skip this game. If it's
+      // a genuine exception unrelated to browser tear-down, rethrow so
+      // the outer error handler still surfaces it as a diagnostic.
+      if (isRecoverableEpicNavError(e)) {
+        log.fail(`page.goto ${url} — ${String(e.message || e).split('\n')[0]} — skipping this game`);
+        notify_games.push({ title: skipId, url, status: 'failed: browser closed / network transient during navigation' });
+        if (cfg.time) console.timeEnd('claim game');
+        // If the whole page is gone, no subsequent goto in this loop
+        // will succeed either — break instead of continue.
+        if (page.isClosed()) break;
+        continue;
+      }
+      throw e;
+    }
     // when loading, the button text is empty -> need to wait for some text {'get', 'in library', 'requires base game'} -> just wait for e or i to not be too specific; :text-matches("\w+") somehow didn't work - https://github.com/vogler/free-games-claimer/issues/375
     // was using locator('...').first().waitFor(), but that at some point led to exception locator.waitFor: Error: Can't query n-th element
     //
