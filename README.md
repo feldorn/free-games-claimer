@@ -90,7 +90,9 @@ Uses [patchright](https://github.com/nicbarker/patchright) (Chromium with built-
 | [Show browser](assets/panel-show-browser.png) | Embedded noVNC view of an active claim run with cards collapsed to mini-tiles. |
 | [Stats tab](assets/panel-stats.png) | KPI tiles, per-service table, 30-day chart, recent claims list. |
 | [Schedule tab](assets/panel-schedule.png) | Next-run wall times, intervals, last-run status — separate rows for Claimers and MS Rewards. |
+| [Logs tab](assets/panel-logs.png) | Live scheduler + per-service run streams, with a past-runs picker for completed run buffers. |
 | [Discoveries tab](assets/panel-discoveries.png) | Community aggregator listings with coverage badges (AUTO / CLAIMED / NOTIFY / SKIP / MANUAL). |
+| [Alerts tab](assets/panel-alerts.png) | Pending redeems, stale sessions, unread Discoveries, and Share-to-GitHub error reports. |
 | [Settings tab](assets/panel-settings.png) | Services accordion with per-service flags and a sticky save footer. |
 
 ---
