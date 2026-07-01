@@ -3084,7 +3084,33 @@ const PANEL_HTML = `<!DOCTYPE html>
   .diag-banner button.db-never   { background: #2a2540; color: #b3a0e0; border-color: #463a6a; }
   .diag-banner button.db-never:hover   { background: #463a6a; color: #d8c5ff; }
   body[data-tab="diagnostics"] .tab-panel[data-panel="diagnostics"] { display: block; overflow-y: auto; padding: 24px 32px; }
-  .diag-head { display: flex; align-items: center; gap: 16px; margin-bottom: 14px; flex-wrap: wrap; }
+  .alerts-head { margin-bottom: 20px; }
+  .alerts-head h3 { font-size: 18px; color: #e0e0e0; margin-bottom: 6px; }
+  .alerts-head .alerts-sub { font-size: 12px; color: #a0b4d4; max-width: 720px; line-height: 1.5; }
+  .alerts-section { border: 1px solid #2c4068; border-radius: 6px; margin-bottom: 16px; overflow: hidden; }
+  .alerts-section-head { background: #1a2540; padding: 10px 14px; display: flex; align-items: center; gap: 10px; }
+  .alerts-section-head h4 { font-size: 14px; color: #e0e0e0; font-weight: 600; }
+  .alerts-section-head .as-count { background: #2c4068; color: #ffb84d; padding: 2px 10px; border-radius: 10px; font-size: 11px; font-weight: 700; letter-spacing: 0.03em; }
+  .alerts-section-head .as-hint { color: #8aa0c2; font-size: 11px; margin-left: auto; }
+  .alerts-section-body { padding: 4px 0; }
+  .alert-row { padding: 10px 14px; border-bottom: 1px solid #1c2c4a; display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+  .alert-row:last-child { border-bottom: none; }
+  .alert-row:hover { background: #161f33; }
+  .alert-row .ar-main { flex: 1; min-width: 260px; }
+  .alert-row .ar-title { font-size: 13px; color: #c8d4eb; font-weight: 600; }
+  .alert-row .ar-meta { font-size: 11px; color: #8aa0c2; margin-top: 2px; }
+  .alert-row .ar-meta a { color: #6fa0d4; text-decoration: none; }
+  .alert-row .ar-meta a:hover { text-decoration: underline; }
+  .alert-row .ar-code { font-family: 'Menlo', 'Consolas', monospace; font-size: 12px; color: #ffb84d; background: #2a2416; padding: 2px 8px; border-radius: 3px; margin-left: 4px; user-select: all; }
+  .alert-row .ar-actions { display: flex; gap: 6px; }
+  .alert-row .ar-actions button { padding: 5px 12px; font-size: 12px; border-radius: 3px; cursor: pointer; border: 1px solid; font-family: inherit; }
+  .alert-row .ar-actions button.ar-btn-mark { background: #1f3d2f; color: #6fd49a; border-color: #2c5a45; }
+  .alert-row .ar-actions button.ar-btn-mark:hover { background: #2a4f3c; }
+  .alert-row .ar-actions button.ar-btn-dismiss { background: #1c2c4a; color: #a0b4d4; border-color: #2c4068; }
+  .alert-row .ar-actions button.ar-btn-dismiss:hover { background: #263a5e; }
+  .alerts-pointer { padding: 14px 16px; display: flex; align-items: center; gap: 12px; }
+  .alerts-pointer button { padding: 6px 14px; font-size: 12px; border-radius: 3px; cursor: pointer; border: 1px solid #2c5a45; background: #1f3d2f; color: #6fd49a; font-family: inherit; }
+  .diag-head { display: flex; align-items: center; gap: 16px; margin-bottom: 14px; flex-wrap: wrap; margin-top: 24px; }
   .diag-head h3 { font-size: 18px; color: #e0e0e0; }
   .diag-head .diag-sub { font-size: 12px; color: #a0b4d4; max-width: 720px; line-height: 1.5; }
   .diag-status { padding: 4px 12px; border-radius: 12px; font-size: 11px; font-weight: 600; letter-spacing: 0.02em; }
@@ -3753,7 +3779,7 @@ const PANEL_HTML = `<!DOCTYPE html>
       <button class="tab" data-tab="schedule" onclick="switchTab('schedule')">Schedule</button>
       <button class="tab" data-tab="discoveries" onclick="switchTab('discoveries')" title="Free-game listings from gamerpower.com and r/FreeGameFindings — click any link to claim manually">Discoveries</button>
       <button class="tab" data-tab="logs" onclick="switchTab('logs')">Logs</button>
-      <button class="tab" data-tab="diagnostics" onclick="switchTab('diagnostics')" title="Errors detected during runs. Decide per-error whether to share with the project.">Diagnostics</button>
+      <button class="tab" data-tab="diagnostics" onclick="switchTab('diagnostics')" title="Outstanding items that need your attention — pending code redemptions, stale sessions, unshared errors, new items to review in Discoveries.">Alerts</button>
       <button class="tab" data-tab="settings" onclick="switchTab('settings')">Settings</button>
       <button class="tab" data-tab="environment" onclick="switchTab('environment')">Environment</button>
     </nav>
@@ -3876,9 +3902,16 @@ const PANEL_HTML = `<!DOCTYPE html>
     <div class="env-view-body" id="envView">Loading…</div>
   </div>
   <div class="tab-panel" data-panel="diagnostics">
+    <div class="alerts-head">
+      <h3>Alerts</h3>
+      <div class="alerts-sub">Outstanding items that need your attention. Everything on this tab either surfaces a specific action (redeem a code, log back in, share an error) or points you at where to take one (unread items in Discoveries). Empty sections hide themselves.</div>
+    </div>
+    <div id="alertsRedeems"></div>
+    <div id="alertsSessions"></div>
+    <div id="alertsDiscoveries"></div>
     <div class="diag-head">
       <div>
-        <h3>Diagnostics</h3>
+        <h3 style="margin-top:24px">Errors</h3>
         <div class="diag-sub">Errors detected during runs (ReferenceError, TypeError, apprise/Playwright failures, …). Each error is fingerprinted so duplicates are counted, not re-stored. Nothing leaves your host without an explicit <b>Share</b> click — Share opens a pre-filled GitHub issue you can review and edit before submitting.</div>
       </div>
       <span class="diag-status" id="diagStatus">…</span>
@@ -4639,7 +4672,153 @@ async function diagBannerNever() {
 // /api/diagnostics/list and renders a table. The toolbar toggle drives
 // the same enable/disable endpoints the Never Share banner button uses.
 let diagListCache = null;
+// Renders the top-of-Alerts sections (Pending redeems, Stale sessions,
+// Discoveries pointer) above the existing errors table. Each section
+// hides itself when empty so an all-clear tab is genuinely blank
+// except for the header text and the errors section (which stays
+// visible with its own empty state — that has its own toggle UX).
+async function renderAlertsSections() {
+  const redeemsEl = document.getElementById('alertsRedeems');
+  const sessionsEl = document.getElementById('alertsSessions');
+  const discEl = document.getElementById('alertsDiscoveries');
+  if (!redeemsEl || !sessionsEl || !discEl) return;
+  try {
+    const r = await fetch(BASE_PATH + '/api/alerts/summary');
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const j = await r.json();
+    // Pending redeems section — Prime + Steam merged into one list,
+    // grouped by source label so users see which service they came
+    // from without a second scan-and-parse.
+    const allPending = [
+      ...j.pendingPrime.map(p => ({ ...p, source: 'prime', sourceLabel: 'Prime Gaming → ' + (p.store || 'unknown store') })),
+      ...j.pendingSteam.map(p => ({ ...p, source: 'steam', sourceLabel: 'Steam key (from ' + (p.dbFile || 'unknown').replace(/\\.json$/, '') + ')' })),
+    ];
+    if (allPending.length === 0) {
+      redeemsEl.innerHTML = '';
+    } else {
+      const rows = allPending.map(p => {
+        const dfAttrs = 'data-source="' + escapeHtml(p.source) + '"' +
+          (p.dbFile ? ' data-dbfile="' + escapeHtml(p.dbFile) + '"' : '') +
+          ' data-user="' + escapeHtml(p.user) + '"' +
+          ' data-title="' + escapeHtml(p.title) + '"';
+        return '<div class="alert-row" ' + dfAttrs + '>' +
+          '<div class="ar-main">' +
+            '<div class="ar-title">' + escapeHtml(p.title) + '</div>' +
+            '<div class="ar-meta">' +
+              escapeHtml(p.sourceLabel) + ' · ' +
+              '<a href="' + encodeURI(p.url) + '" onclick="return openSiteUrl(this)" target="_blank" rel="noopener">' + escapeHtml(p.url) + '</a>' +
+              '<span class="ar-code">' + escapeHtml(p.code) + '</span>' +
+            '</div>' +
+          '</div>' +
+          '<div class="ar-actions">' +
+            '<button class="ar-btn-mark" data-alert-act="redeemed" title="You already entered this code externally. Marks the entry as redeemed so it stops surfacing.">Mark redeemed</button>' +
+            '<button class="ar-btn-dismiss" data-alert-act="dismissed" title="Stop reminding me about this one without confirming it was redeemed (e.g. offer expired, wrong region, code invalid).">Dismiss</button>' +
+          '</div>' +
+        '</div>';
+      }).join('');
+      const hint = j.pendingPrime.length && j.pendingSteam.length
+        ? j.pendingPrime.length + ' Prime + ' + j.pendingSteam.length + ' Steam'
+        : (j.pendingPrime.length ? 'Prime Gaming' : 'Steam keys');
+      redeemsEl.innerHTML =
+        '<div class="alerts-section">' +
+          '<div class="alerts-section-head">' +
+            '<h4>Pending redeems</h4>' +
+            '<span class="as-count">' + allPending.length + '</span>' +
+            '<span class="as-hint">' + hint + '</span>' +
+          '</div>' +
+          '<div class="alerts-section-body">' + rows + '</div>' +
+        '</div>';
+    }
+    // Stale sessions — pointer only, no action from within Alerts.
+    if (j.staleSessions.length === 0) {
+      sessionsEl.innerHTML = '';
+    } else {
+      const rows = j.staleSessions.map(s => {
+        const checked = s.checkedAt ? formatTimestamp(s.checkedAt, 'relative') : 'never';
+        return '<div class="alert-row">' +
+          '<div class="ar-main">' +
+            '<div class="ar-title">' + escapeHtml(s.name) + '</div>' +
+            '<div class="ar-meta">Session expired · last checked ' + escapeHtml(checked) + '</div>' +
+          '</div>' +
+          '<div class="ar-actions">' +
+            '<button class="ar-btn-mark" onclick="switchTab(\\'sessions\\'); loginSite(\\'' + escapeHtml(s.id) + '\\')" title="Open the Sessions tab and start the login flow for this service.">Log in</button>' +
+          '</div>' +
+        '</div>';
+      }).join('');
+      sessionsEl.innerHTML =
+        '<div class="alerts-section">' +
+          '<div class="alerts-section-head">' +
+            '<h4>Stale sessions</h4>' +
+            '<span class="as-count">' + j.staleSessions.length + '</span>' +
+            '<span class="as-hint">Log in via the panel to restore</span>' +
+          '</div>' +
+          '<div class="alerts-section-body">' + rows + '</div>' +
+        '</div>';
+    }
+    // Discoveries pointer — count only, links to the Discoveries tab.
+    if (j.discoveriesCount === 0) {
+      discEl.innerHTML = '';
+    } else {
+      discEl.innerHTML =
+        '<div class="alerts-section">' +
+          '<div class="alerts-section-head">' +
+            '<h4>New in Discoveries</h4>' +
+            '<span class="as-count">' + j.discoveriesCount + '</span>' +
+          '</div>' +
+          '<div class="alerts-section-body">' +
+            '<div class="alerts-pointer">' +
+              '<span>' + j.discoveriesCount + ' item' + (j.discoveriesCount === 1 ? '' : 's') + ' available in the Discoveries tab. GamerPower and r/FreeGameFindings picks that don\\'t auto-claim — worth a glance for iOS giveaways, Itch.io drops, GOG promos, etc.</span>' +
+              '<button onclick="switchTab(\\'discoveries\\')">Go check</button>' +
+            '</div>' +
+          '</div>' +
+        '</div>';
+    }
+    // Wire up the redeem-action click handlers via delegation on the
+    // whole redeems element — avoids adding N inline listeners.
+    if (allPending.length) {
+      redeemsEl.onclick = handleRedeemActionClick;
+    }
+  } catch (e) {
+    // Alerts-section failures are non-fatal — the errors table still
+    // renders below, so silence the failure rather than blocking the
+    // whole tab. Refresh will retry.
+    redeemsEl.innerHTML = ''; sessionsEl.innerHTML = ''; discEl.innerHTML = '';
+    console.warn('renderAlertsSections failed:', e);
+  }
+}
+
+async function handleRedeemActionClick(ev) {
+  const btn = ev.target.closest('button[data-alert-act]');
+  if (!btn) return;
+  const row = btn.closest('.alert-row');
+  if (!row) return;
+  const action = btn.dataset.alertAct;
+  const source = row.dataset.source;
+  const dbFile = row.dataset.dbfile || undefined;
+  const user = row.dataset.user;
+  const title = row.dataset.title;
+  btn.disabled = true;
+  try {
+    const r = await api('POST', '/alerts/redeem-action', { source, dbFile, user, title, action });
+    if (r && r.success === false) {
+      showToast('Failed: ' + (r.error || 'unknown'), 'error');
+      btn.disabled = false;
+      return;
+    }
+    // Optimistic remove — cheaper than re-fetching the whole summary.
+    row.style.opacity = '0.4';
+    setTimeout(() => renderAlertsSections(), 500);
+    showToast(action === 'redeemed' ? 'Marked as redeemed.' : 'Dismissed.', 'success');
+  } catch (e) {
+    showToast('Failed: ' + (e && e.message || 'unknown'), 'error');
+    btn.disabled = false;
+  }
+}
+
 async function renderDiagnosticsTab() {
+  // Render the new Alerts sections in parallel with the existing
+  // errors table so the two halves don't block each other visually.
+  renderAlertsSections();
   const body = document.getElementById('diagBody');
   const status = document.getElementById('diagStatus');
   const toggleBtn = document.getElementById('btnDiagToggle');
@@ -8507,6 +8686,163 @@ const server = http.createServer(async (req, res) => {
         diagnosticsDb.data.enabled = true;
         delete diagnosticsDb.data.disabledAt;
         await diagnosticsDb.write();
+        sendJson(res, { success: true });
+      } catch (e) {
+        sendJson(res, { success: false, error: e.message }, 500);
+      }
+      return;
+    }
+
+    // GET /api/alerts/summary — one-shot fetch for the Alerts tab's
+    // top sections (Pending redeems + Stale sessions + Discoveries
+    // count). The Errors section keeps using /api/diagnostics/list
+    // since it has its own decided-state actions. Bundled here so the
+    // Alerts tab makes one call per section-group instead of three
+    // fanned-out fetches.
+    if (req.method === 'GET' && req.url === '/api/alerts/summary') {
+      try {
+        // Pending Prime Gaming manual redeems (MS Store / Xbox / etc.
+        // codes needing user action). Mirrors the shape prime-gaming.js
+        // uses when building notify_pending.
+        const primeManualStores = new Set(['microsoft store', 'xbox', 'microsoft', 'origin', 'ea app']);
+        const gogRedeemBase = 'https://redeem.gog.com';
+        const primeRedeemBases = {
+          'microsoft store': 'https://account.microsoft.com/billing/redeem',
+          'xbox': 'https://account.microsoft.com/billing/redeem',
+          'microsoft': 'https://account.microsoft.com/billing/redeem',
+          'origin': 'https://www.origin.com/redeem',
+          'ea app': 'https://www.origin.com/redeem',
+          'gog.com': gogRedeemBase,
+        };
+        const terminalRx = /claimed|redeemed|expired|invalid|dismissed|retries exhausted/i;
+        const pendingPrime = [];
+        try {
+          const pgDb = await jsonDb('prime-gaming.json', {});
+          for (const [user, games] of Object.entries(pgDb.data || {})) {
+            if (!games || typeof games !== 'object') continue;
+            for (const [title, entry] of Object.entries(games)) {
+              if (!entry || typeof entry !== 'object') continue;
+              if (!entry.code) continue;
+              const storeLower = String(entry.store || '').toLowerCase();
+              // Include GOG pending (they auto-retry across daily runs
+              // via the redeemAttempts counter, but if that path is
+              // exhausted or the user wants to nudge one manually, it's
+              // useful to see them alongside the MS Store ones).
+              const isManual = primeManualStores.has(storeLower) || storeLower === 'gog.com';
+              if (!isManual) continue;
+              if (terminalRx.test(String(entry.status || ''))) continue;
+              const base = primeRedeemBases[storeLower] || primeRedeemBases['microsoft store'];
+              const redeemUrl = storeLower === 'gog.com' ? `${base}/${entry.code}` : base;
+              pendingPrime.push({
+                user, title, code: entry.code,
+                store: entry.store,
+                url: redeemUrl,
+                time: entry.time || null,
+                status: entry.status || null,
+                redeemAttempts: entry.redeemAttempts || 0,
+              });
+            }
+          }
+        } catch {}
+        // Pending Steam keys — any DB with entries where store is
+        // 'steampowered.com'. Reuses the existing collectPendingSteamCodes
+        // shape.
+        const pendingSteam = [];
+        try {
+          const dbs = {};
+          for (const file of Object.values(getClaimDbFiles())) {
+            try { dbs[file] = await jsonDb(file, {}); } catch {}
+          }
+          for (const p of collectPendingSteamCodes(dbs)) {
+            pendingSteam.push({
+              dbFile: p.dbFile,
+              user: p.user,
+              title: p.title,
+              code: p.entry.code,
+              url: 'https://store.steampowered.com/account/registerkey',
+              time: p.entry.time || null,
+              status: p.entry.status || null,
+            });
+          }
+        } catch {}
+        // Stale sessions — active services whose last session-check
+        // reports not_logged_in. Excludes services that errored on the
+        // check (r.error) since those are ambiguous (probe failed vs
+        // session actually expired).
+        const activeSet = activeServices();
+        const staleSessions = [];
+        for (const s of SITE_REGISTRY) {
+          if (!activeSet.has(s.id)) continue;
+          const r = siteStatus[s.id];
+          if (!r || r.status !== 'not_logged_in') continue;
+          staleSessions.push({
+            id: s.id,
+            name: s.name,
+            checkedAt: r.checkedAt || null,
+          });
+        }
+        // Discoveries pointer — count of items the user hasn't triaged
+        // yet (i.e. no user-state entry marking as ignored/manually-
+        // claimed). Uses the cached response body if available so this
+        // endpoint stays snappy.
+        let discoveriesCount = 0;
+        try {
+          if (discResponseCache && discResponseCache.body && Array.isArray(discResponseCache.body.items)) {
+            discoveriesCount = discResponseCache.body.items.filter(i => {
+              const badge = String(i.status || i.badge || '').toUpperCase();
+              return badge === 'NOTIFY' || badge === 'MANUAL' || badge === 'NEW';
+            }).length;
+          }
+        } catch {}
+        sendJson(res, {
+          pendingPrime,
+          pendingSteam,
+          staleSessions,
+          discoveriesCount,
+        });
+      } catch (e) {
+        sendJson(res, { error: e.message }, 500);
+      }
+      return;
+    }
+
+    // POST /api/alerts/redeem-action — { source, dbFile?, user, title, action }
+    // action ∈ 'redeemed' | 'dismissed'. Writes the terminal status to
+    // the entry so the pending-redeem loop stops surfacing it and the
+    // Alerts tab drops it from the pending list. source='prime' writes
+    // to prime-gaming.json; source='steam' requires dbFile since Steam
+    // keys are stored across multiple service DBs.
+    if (req.method === 'POST' && req.url === '/api/alerts/redeem-action') {
+      if (!isAuthenticated(req)) { sendJson(res, { error: 'Unauthorized' }, 401); return; }
+      try {
+        const body = await parseBody(req);
+        const { source, dbFile, user, title, action } = body || {};
+        if (!['redeemed', 'dismissed'].includes(action)) {
+          sendJson(res, { success: false, error: 'action must be "redeemed" or "dismissed"' }, 400);
+          return;
+        }
+        if (!user || !title) {
+          sendJson(res, { success: false, error: 'user + title required' }, 400);
+          return;
+        }
+        let targetFile;
+        if (source === 'prime') targetFile = 'prime-gaming.json';
+        else if (source === 'steam') {
+          if (!dbFile) { sendJson(res, { success: false, error: 'dbFile required for Steam source' }, 400); return; }
+          targetFile = dbFile;
+        } else {
+          sendJson(res, { success: false, error: 'source must be "prime" or "steam"' }, 400);
+          return;
+        }
+        const db = await jsonDb(targetFile, {});
+        const entry = db.data?.[user]?.[title];
+        if (!entry || typeof entry !== 'object') {
+          sendJson(res, { success: false, error: 'entry not found: ' + user + '/' + title }, 404);
+          return;
+        }
+        entry.status = action;
+        entry.actionedAt = new Date().toISOString();
+        await db.write();
         sendJson(res, { success: true });
       } catch (e) {
         sendJson(res, { success: false, error: e.message }, 500);

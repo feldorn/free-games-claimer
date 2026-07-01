@@ -62,6 +62,7 @@ Uses [patchright](https://github.com/nicbarker/patchright) (Chromium with built-
 - **Cookie upload** — fallback when in-container login is fingerprint-blocked: paste a JSON cookie export from your desktop browser and the panel imports the session.
 - **Settings UI** — every `src/config.js` flag editable from the panel, with env-var precedence and revert-to-env for any field.
 - **Stats tab** — KPI tiles, per-service tables, 30-day chart, recent claims, Microsoft Rewards balance trend.
+- **Alerts tab** — single place to see everything that needs your attention: pending manual code redemptions (Prime Gaming + Steam) with Mark redeemed / Dismiss actions, stale-session warnings with one-click re-login, a pointer to unread items in Discoveries, and the diagnostics banner's error-share flow. Each section hides itself when empty, so a healthy run leaves the tab visibly blank.
 - **Diagnostics banner** — when a run crashes, the panel surfaces a one-click *Share to GitHub* button that opens a pre-filled issue with the error fingerprinted, log context captured (last 25+ lines around the failure), and a config snapshot (scheduler mode, active services, per-service flags, Node/`LANG`/`TZ`) attached. Sensitive values (apprise webhooks, embedded credentials) are redacted before submission; nothing is sent without your explicit click.
 - **Cron / Sablier ready** — `RUN_ON_STARTUP=2` one-shot mode for scale-to-zero deployments.
 - **Reverse-proxy aware** — subdomain, split-subdomain, and subfolder shapes all supported.

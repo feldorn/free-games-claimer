@@ -4,6 +4,28 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.54
+
+**Diagnostics tab → Alerts tab.** Same tab slot in the panel, expanded scope: pending code redemptions, stale sessions, and unread Discoveries items now surface alongside the existing error-report flow. Direct answer to timothe's #101 ("I can't tell what the codes are and can't clear them") and the general observation that the panel had no single place to see "everything that needs my attention right now."
+
+Four sections, each hiding itself when empty (a healthy run leaves the tab visibly blank except for the header):
+
+- **Pending redeems** — Prime Gaming manual redemptions (MS Store / Xbox / GOG codes) plus Steam keys collected from any service DB. Each row shows title, source, redeem URL, and the code as a monospace `user-select: all` copy target. Two action buttons: **Mark redeemed** (sets `status: 'redeemed'` on the DB entry — use after entering the code externally) and **Dismiss** (sets `status: 'dismissed'` — for expired offers or codes you've decided not to redeem). Either terminal status stops the pending-redeem notification loop from surfacing the entry on future runs.
+- **Stale sessions** — active services whose latest session check reports `not_logged_in`. Each row has a **Log in** button deep-linking to the Sessions tab's login flow for that service. Uses cached status — for a fresh probe, use the Sessions-tab Check button.
+- **New in Discoveries** — count-only pointer to unread aggregator items. **Go check** switches to the Discoveries tab.
+- **Errors** — the existing diagnostics banner flow, unchanged. Same table, same Share / Don't Share / Never Share buttons per fingerprint, same GitHub-issue pre-fill.
+
+New server endpoints:
+
+- `GET /api/alerts/summary` — one-shot fetch for the top three sections (Errors keeps its existing `/api/diagnostics/list`)
+- `POST /api/alerts/redeem-action` — `{ source, dbFile?, user, title, action }` writes `status: 'redeemed' | 'dismissed'` + `actionedAt` timestamp to the underlying DB entry. Auth-gated (same as other write endpoints).
+
+Internal tab id stayed as `diagnostics` for backwards compat — URL deep-links like `?focus=diagnostics` and existing `switchTab('diagnostics')` calls continue to work, they just land on a bigger tab. Users bookmarked to the Diagnostics tab see it renamed to Alerts with the errors table still present at the bottom.
+
+Second of three planned integration adds. HA sensors shipped in v2.8.53; notification digest mode is queued next.
+
+---
+
 ## What's new in 2.8.53
 
 **New endpoint `/api/hass/sensors` for Home Assistant integration.** Returns a flat JSON snapshot of the values HA users typically surface on their dashboards — MS Rewards balance, weekly / monthly / all-time claim counts, pending redeems (Prime + Steam), stale sessions, last-claim, last-run status, captcha-pending, and a per-service breakdown. HA users configure a single stock REST sensor pointing at this URL and derive template sensors for each field. No add-on or custom component needed.

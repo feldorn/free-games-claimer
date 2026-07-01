@@ -209,7 +209,28 @@ Debug). Credentials are hidden behind an explicit "Reveal credentials" click
 with last-4-char masking. Separated from Settings so 40+ rows of
 env reference don't compete with the settings controls.
 
-### Diagnostics tab
+### Alerts tab
+
+The single place to see everything that needs your attention. Four sections, each hiding itself when empty:
+
+#### Pending redeems
+
+Prime Gaming manual-redemption codes (MS Store / Xbox / GOG) plus Steam keys collected from any service (Prime, Fanatical, etc.) that haven't been activated yet. Each row shows the game title, the source (Prime Gaming → MS Store / Steam key from `<service>`), the redeem URL, the code (styled as a monospace copy target with `user-select: all`), and two action buttons:
+
+- **Mark redeemed** — sets `status: 'redeemed'` on the entry. Use this after you've entered the code externally.
+- **Dismiss** — sets `status: 'dismissed'`. Use this when the offer expired, the code was invalid, region-locked, or you just want to stop being reminded without confirming an actual redemption.
+
+Both actions write the terminal status back to the underlying JSON DB (`data/prime-gaming.json` for Prime entries; the per-service DB the code was collected from for Steam entries) so the pending-redeem notification loop stops surfacing them on future runs.
+
+#### Stale sessions
+
+Active services whose most recent session check reported `not_logged_in`. Each row has a **Log in** button that deep-links to the Sessions tab's login flow for that service. Uses the panel's cached session-status — for a fresh probe, use the **Check** button on the site's Sessions-tab card.
+
+#### New in Discoveries
+
+Count-only pointer to unread items in the Discoveries tab (GamerPower + r/FreeGameFindings picks not currently auto-claimed — iOS giveaways, Itch.io drops, GOG promos, etc.). Clicking **Go check** switches to the Discoveries tab so you can triage.
+
+#### Errors (formerly the standalone Alerts tab)
 
 Error history with one-click sharing back to the project. When a run
 crashes, the panel scans the script's stderr for exception patterns
@@ -233,7 +254,7 @@ The tab shows every captured fingerprint as a table row with:
 
 #### Error-report banner
 
-While the Diagnostics tab is the full history view, day-to-day the user
+While the Alerts tab is the full history view, day-to-day the user
 mostly sees the **banner** that surfaces on top of every panel tab when
 there's an undecided fingerprint. Three buttons:
 
@@ -262,7 +283,7 @@ there's an undecided fingerprint. Three buttons:
 
 - **Never Share** — disables the banner entirely (writes
   `diagnostics.enabled=false` in `data/diagnostics-state.json`). The full
-  Diagnostics tab still records errors and the toggle in
+  Alerts tab still records errors and the toggle in
   Settings → Notifications can re-enable.
 
 #### Redaction guarantee
