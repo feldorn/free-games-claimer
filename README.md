@@ -54,18 +54,31 @@ Uses [patchright](https://github.com/nicbarker/patchright) (Chromium with built-
 
 ## Features at a glance
 
-- **Always-on control panel** at `http://localhost:7080` — log in via embedded noVNC, check session health, trigger Run Now, edit settings in-app.
-- **Two-track scheduler** with hot-reload — main claim chain on its own cadence, Microsoft Rewards on a separate random-window schedule so its 30-45 min run doesn't block the rest.
+### 🎮 Collection automation *(what the tool does when you're not looking)*
+
+- **Two-track scheduler with hot-reload** — main claim chain (Prime / Epic / GOG / Steam / FAB) and Microsoft Rewards run on independent schedules so the 30-45 min MS window doesn't block the rest.
+- **Captcha pause + noVNC handoff** — when a script can't solve a challenge, it pauses for 10 min, fires a deep-link push notification, and resumes when you solve it via the embedded noVNC viewer.
+- **Cookie upload fallback** — for accounts fingerprint-blocked from in-container login: paste a JSON cookie export from your desktop browser and the panel imports the session.
+
+### 🎛 Control panel & UI *(where you spend your time when you do look)*
+
+- **Always-on panel at `http://localhost:7080`** — log in via embedded noVNC, check session health, trigger Run Now.
+- **Sessions tab** — per-service login state, one-click login flows, batch key redemption for Steam / GOG.
+- **Settings UI** — every runtime flag `src/config.js` reads is editable in-app, with env-var precedence and revert-to-env for any field.
 - **Discoveries aggregator** — live view of [gamerpower.com](https://www.gamerpower.com/) + [r/FreeGameFindings](https://www.reddit.com/r/FreeGameFindings/) listings, badged against your auto-claim coverage (AUTO / CLAIMED / NOTIFY / SKIP / MANUAL).
-- **Captcha pause** — when a script can't solve a challenge, it pauses for 10 min, fires a deep-link push notification, and resumes when you solve it via noVNC.
-- **Run history** — last 200 runs persisted with full log buffers and summary counters, browsable from the Logs tab.
-- **Cookie upload** — fallback when in-container login is fingerprint-blocked: paste a JSON cookie export from your desktop browser and the panel imports the session.
-- **Settings UI** — every `src/config.js` flag editable from the panel, with env-var precedence and revert-to-env for any field.
-- **Stats tab** — KPI tiles, per-service tables, 30-day chart, recent claims, Microsoft Rewards balance trend.
-- **Alerts tab** — single place to see everything that needs your attention: pending manual code redemptions (Prime Gaming + Steam) with Mark redeemed / Dismiss actions, stale-session warnings with one-click re-login, a pointer to unread items in Discoveries, and the diagnostics banner's error-share flow. Each section hides itself when empty, so a healthy run leaves the tab visibly blank.
-- **Diagnostics banner** — when a run crashes, the panel surfaces a one-click *Share to GitHub* button that opens a pre-filled issue with the error fingerprinted, log context captured (last 25+ lines around the failure), and a config snapshot (scheduler mode, active services, per-service flags, Node/`LANG`/`TZ`) attached. Sensitive values (apprise webhooks, embedded credentials) are redacted before submission; nothing is sent without your explicit click.
+
+### 📊 Alerts, logs & history *(what happened, what needs attention)*
+
+- **Alerts tab** — single place to see everything that needs your attention: pending code redemptions (Prime + Steam) with Mark redeemed / Dismiss actions, stale-session warnings with one-click re-login, unread items in Discoveries, and one-click *Share to GitHub* for any error caught during a run. Diagnostic submissions carry auto-redacted webhooks/tokens, a config snapshot (scheduler mode, active services, per-service flags, `LANG`, `TZ`), and 25+ lines of surrounding log context — nothing leaves your host without your explicit click. Sections hide when empty, so a healthy run leaves the tab visibly blank.
+- **Stats tab** — KPI tiles, per-service tables, 30-day claim chart, recent claims (configurable — default 200, up to 500), Microsoft Rewards balance trend.
+- **Run history** — completed runs persisted with full log buffers and summary counters (default 200, configurable up to 500), browsable from the Logs tab.
+
+### 🔔 Integrations & deployment *(how it fits into your stack)*
+
+- **Notifications via [apprise](https://github.com/caronc/apprise)** — 26+ targets (Pushover, Telegram, Discord, Gotify, ntfy, mailto, Slack, …) with four verbosity tiers: `all` (every event), `actions` (silence uneventful summaries), `digest` (buffer per-run summaries into one daily aggregated notification at your configured hour), `off`.
+- **Home Assistant integration** — `/api/hass/sensors` endpoint returns a flat JSON snapshot (MS balance, claim counts, pending redeems, stale sessions, captcha state, last-run status) that HA's stock REST integration consumes with a single config block. Example template sensors, binary sensors, and automations in [`docs/HOMEASSISTANT.md`](docs/HOMEASSISTANT.md).
 - **Cron / Sablier ready** — `RUN_ON_STARTUP=2` one-shot mode for scale-to-zero deployments.
-- **Reverse-proxy aware** — subdomain, split-subdomain, and subfolder shapes all supported.
+- **Reverse-proxy aware** — subdomain, split-subdomain, and subfolder shapes via `BASE_PATH` / `NOVNC_URL`. Multi-arch Docker images (`linux/amd64` + `linux/arm64`) published to ghcr.io with both semver (`:v2.8.55`) and date (`:20260701`) tags for watchtower / diun-style auto-update workflows.
 
 ---
 
