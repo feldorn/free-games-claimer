@@ -213,6 +213,56 @@ const findLatestScreenshot = async () => {
   return files[0].path;
 };
 
+// Digest buffer helpers. Buffered summary notifications land here
+// during runs; the panel's dedicated digest scheduler (interactive-
+// login.js) drains this file at notify_digest_hour local time, builds
+// one aggregated notification body, and dispatches it via the normal
+// apprise path. Persistent (JSON on disk) rather than in-memory so a
+// mid-day container restart doesn't lose accumulated entries.
+const DIGEST_BUFFER_FILE = () => dataDir('notification-digest.json');
+async function _appendDigest(entry) {
+  try {
+    let db;
+    try { db = JSON.parse(readFileSync(DIGEST_BUFFER_FILE(), 'utf8')); }
+    catch { db = { buffer: [], lastFlushedAt: null }; }
+    if (!Array.isArray(db.buffer)) db.buffer = [];
+    db.buffer.push(entry);
+    // Cap the buffer at 500 entries to guard against pathological
+    // notification storms (e.g. every-minute LOOP producing thousands
+    // of summaries between flushes). Drop the oldest first so the most
+    // recent context wins in the eventual digest.
+    if (db.buffer.length > 500) db.buffer = db.buffer.slice(-500);
+    mkdirSync(path.dirname(DIGEST_BUFFER_FILE()), { recursive: true });
+    writeFileSync(DIGEST_BUFFER_FILE(), JSON.stringify(db, null, 2));
+  } catch (e) {
+    // Buffer write failure is non-fatal — degrade to just logging the
+    // notification to stdout. Users on notify_level=digest lose that
+    // one entry from tomorrow's summary but the run itself continues.
+    console.warn(`[digest] failed to append to buffer: ${e.message}`);
+  }
+  return Promise.resolve();
+}
+// Read-only accessor for interactive-login.js's digest scheduler.
+// Returns { buffer, lastFlushedAt } or an empty shape if the file
+// doesn't exist yet.
+export function readDigestBuffer() {
+  try { return JSON.parse(readFileSync(DIGEST_BUFFER_FILE(), 'utf8')); }
+  catch { return { buffer: [], lastFlushedAt: null }; }
+}
+// Clear-and-timestamp after a successful flush. Called by the digest
+// scheduler after the aggregated notification has been dispatched.
+export function markDigestFlushed() {
+  try {
+    const now = new Date().toISOString();
+    mkdirSync(path.dirname(DIGEST_BUFFER_FILE()), { recursive: true });
+    writeFileSync(DIGEST_BUFFER_FILE(), JSON.stringify({ buffer: [], lastFlushedAt: now }, null, 2));
+    return now;
+  } catch (e) {
+    console.warn(`[digest] failed to reset buffer after flush: ${e.message}`);
+    return null;
+  }
+}
+
 export const notify = (html, opts = {}) => {
   if (!cfg.notify) {
     if (cfg.debug) console.debug('notify: NOTIFY is not set!');
@@ -228,6 +278,22 @@ export const notify = (html, opts = {}) => {
   const level = cfg.notify_level || 'all';
   if (level === 'off') return Promise.resolve();
   if (level === 'actions' && kind === 'summary') return Promise.resolve();
+  // Digest tier: buffer per-run summaries into a persistent file that
+  // the panel's dedicated digest scheduler (interactive-login.js)
+  // drains at notify_digest_hour local time each day. Action-kind
+  // notifications (captchas, stale sessions, apprise errors, watcher
+  // new-items) still fire real-time — the whole point of the digest
+  // is to reduce SUMMARY noise, not to delay user-actionable events.
+  // Buffer is a JSON file rather than in-memory so restarts don't
+  // lose accumulated entries.
+  if (level === 'digest' && kind === 'summary') {
+    return _appendDigest({
+      at: datetime(),
+      title: opts.title || cfg.notify_title || null,
+      body: html,
+      attachPath: opts.screenshot || null,
+    });
+  }
   // Resolve attachment path (if any) before invoking apprise. Explicit
   // opts.screenshot always wins; attachLatestScreenshot is the autopilot
   // path and is gated by cfg.notify_attach_screenshots so users can opt

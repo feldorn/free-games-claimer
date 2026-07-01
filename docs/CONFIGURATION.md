@@ -132,17 +132,22 @@ See [apprise documentation](https://github.com/caronc/apprise#supported-notifica
 
 ### Verbosity (`NOTIFY_LEVEL`)
 
-Three levels, settable via env or **Settings → Notifications → Verbosity**:
+Four levels, settable via env or **Settings → Notifications → Verbosity**:
 
 | Level | Per-run summaries (claim list, points, coins) | Action-required (login issues, captchas, errors, watcher new-items, redeem reminders) |
 |---|---|---|
 | `all` (default) | ✓ fires | ✓ fires |
 | `actions` | ✗ silenced (when nothing in the summary needs attention) | ✓ fires |
+| `digest` | 📅 buffered → one aggregated notification per day at `NOTIFY_DIGEST_HOUR` local time | ✓ fires real-time |
 | `off` | ✗ silenced | ✗ silenced |
 
-Per-run game-list notifications on Prime / Epic / GOG / Steam are automatically promoted from "summary" to "action" when any game in the list has `failed` or `action` status — so failures still notify under `actions`. The summary suppression only fires for the boring "0 claimed, 24 already owned" case.
+Per-run game-list notifications on Prime / Epic / GOG / Steam are automatically promoted from "summary" to "action" when any game in the list has `failed` or `action` status — so failures still notify under `actions` and `digest`. The summary buffering only applies to the boring "0 claimed, 24 already owned" case.
 
 Watcher notifications (Humble, Fanatical, Ubisoft, Lenovo, GOG-catalog) and the [captcha-pause](AUTH.md#captcha-pause) helper always fire under `actions` because their notifications are by definition asking the user to do something. `off` silences everything globally — captchas and login errors included — so use it deliberately.
+
+**Digest mode specifics:** The summary buffer lives in `data/notification-digest.json` so a mid-day container restart doesn't lose accumulated entries. The daily aggregated notification body includes the list of buffered run summaries plus a top-line hint of any outstanding items on the Alerts tab (pending redeems, stale sessions) so noise-reduction doesn't hide items that actually need your attention.
+
+Configure the flush time via `NOTIFY_DIGEST_HOUR` (env) or **Settings → Notifications → Verbosity → Digest hour**. Default is `8` (08:00 local — arrives at breakfast for most schedules). Valid range 0-23. Only consulted when `NOTIFY_LEVEL=digest`.
 
 ---
 

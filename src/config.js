@@ -56,6 +56,10 @@ export const cfg = {
   // everything that requires user action (login issues, captchas, errors,
   // watcher new-item alerts, redeem reminders).
   notify_level: notif.notifyLevel || 'all',
+  // Hour-of-day (0-23) when the daily digest fires. Only consulted when
+  // notify_level === 'digest'. Default 8:00 lands at breakfast for most
+  // schedules; users can shift via Settings → Notifications.
+  notify_digest_hour: (typeof notif.digestHour === 'number' && notif.digestHour >= 0 && notif.digestHour < 24) ? notif.digestHour : 8,
   // Priority for time-sensitive captcha notifications. Default high so it
   // breaks through DnD; user can dial down via Settings → Notifications.
   captcha_notify_priority: notif.captchaPriority || 'high',

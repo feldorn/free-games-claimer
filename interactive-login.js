@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 const __panelDirname = path.dirname(fileURLToPath(import.meta.url));
 import { chromium } from 'patchright';
-import { datetime, notify, jsonDb, normalizeTitle, cleanProfileLocks, localeArgs } from './src/util.js';
+import { datetime, notify, jsonDb, normalizeTitle, cleanProfileLocks, localeArgs, readDigestBuffer, markDigestFlushed } from './src/util.js';
 import { cfg } from './src/config.js';
 import { describeConfig, patchConfig, describeEnv, getSchedulerConfig, CONFIG_FILE_PATH } from './src/app-config.js';
 import { SITES as SITE_REGISTRY, getLoginSitesById, getClaimScriptOrder, getLinkedActiveMap, getClaimDbFiles, getServiceRows } from './src/sites.js';
@@ -2492,6 +2492,116 @@ async function fireLenovoWake(wake) {
   drop.notifications[wake.kind] = datetime();
   fresh.drops[wake.dropId] = drop;
   saveLenovoState(fresh);
+}
+
+// Compute ms until the next digest fire (next occurrence of the
+// configured local hour). Returns 0 when digest mode is off so the
+// caller can park until config changes flip it on.
+function computeDigestWakeMs() {
+  const level = String(cfg.notify_level || 'all').toLowerCase();
+  if (level !== 'digest') return 0;
+  const targetHour = cfg.notify_digest_hour ?? 8;
+  const now = new Date();
+  const target = new Date(now.getFullYear(), now.getMonth(), now.getDate(), targetHour, 0, 0, 0);
+  if (target.getTime() <= now.getTime()) target.setDate(target.getDate() + 1);
+  return target.getTime() - now.getTime();
+}
+
+// Build the aggregated digest body from the buffer and hand off to
+// the normal apprise notify path (as 'action' kind so it fires
+// regardless of notify_level — otherwise the digest itself would be
+// swallowed by the digest gate). Returns true on successful dispatch.
+async function flushDigest() {
+  const db = readDigestBuffer();
+  const buffer = Array.isArray(db.buffer) ? db.buffer : [];
+  if (!buffer.length) {
+    // No content to flush; still update the timestamp so the next
+    // computeDigestWakeMs anchors from now (avoids a tight-loop of
+    // "flush → nothing to do → immediately re-wake" on a slow day).
+    markDigestFlushed();
+    return true;
+  }
+  try {
+    const dayLabel = new Date().toISOString().slice(0, 10);
+    // Count outstanding alerts to include as a top-line hint so users
+    // in digest mode don't miss action items pooling in the Alerts tab.
+    let alertCount = 0;
+    let alertBreakdown = '';
+    try {
+      const primeDb = await jsonDb('prime-gaming.json', {});
+      const terminalRx = /claimed|redeemed|expired|invalid|dismissed|retries exhausted/i;
+      const manualStores = new Set(['microsoft store', 'xbox', 'microsoft', 'origin', 'ea app', 'gog.com']);
+      let primePending = 0;
+      for (const user of Object.values(primeDb.data || {})) {
+        if (!user || typeof user !== 'object') continue;
+        for (const e of Object.values(user)) {
+          if (!e || !e.code) continue;
+          if (!manualStores.has(String(e.store || '').toLowerCase())) continue;
+          if (terminalRx.test(String(e.status || ''))) continue;
+          primePending++;
+        }
+      }
+      const steamPending = await countPendingSteamCodes().catch(() => 0);
+      const stale = SITE_REGISTRY
+        .filter(s => activeServices().has(s.id))
+        .filter(s => siteStatus[s.id] && siteStatus[s.id].status === 'not_logged_in').length;
+      const parts = [];
+      if (primePending) parts.push(`${primePending} pending Prime redeem${primePending === 1 ? '' : 's'}`);
+      if (steamPending) parts.push(`${steamPending} pending Steam key${steamPending === 1 ? '' : 's'}`);
+      if (stale)        parts.push(`${stale} stale session${stale === 1 ? '' : 's'}`);
+      alertCount = primePending + steamPending + stale;
+      alertBreakdown = parts.join(' · ');
+    } catch {}
+    const lines = [
+      `Free Games Claimer — daily digest for ${dayLabel}`,
+      `${buffer.length} run summary/summaries buffered:`,
+    ];
+    for (const entry of buffer) {
+      lines.push(`— [${entry.at || '?'}] ${entry.title || ''}`);
+      if (entry.body) lines.push(entry.body);
+      lines.push('');
+    }
+    if (alertCount) {
+      lines.push('');
+      lines.push(`⚠ Outstanding: ${alertBreakdown} — check the Alerts tab.`);
+      if (cfg.public_url) lines.push(cfg.public_url + '/?focus=diagnostics');
+    }
+    const body = lines.join('<br>');
+    // Fire via a fresh notify() call — but we want it dispatched even
+    // though notify_level is 'digest'. Bypass the digest gate by using
+    // kind: 'action' and passing a marker attribute the notify() gate
+    // doesn't look at. Simpler: temporarily reset the level for this
+    // one call by dispatching directly through execFile? Cleanest is
+    // to use kind: 'action' which is already excluded from the digest
+    // buffer path (only 'summary' buffers).
+    await notify(body, { kind: 'action', priority: 'normal' });
+    markDigestFlushed();
+    console.log(`[${datetime()}] Digest: flushed ${buffer.length} entr${buffer.length === 1 ? 'y' : 'ies'} (${alertCount} outstanding alerts).`);
+    return true;
+  } catch (e) {
+    console.error(`[${datetime()}] Digest flush failed:`, e && e.message || e);
+    return false;
+  }
+}
+
+async function digestSchedulerLoop() {
+  while (true) {
+    const sleepMs = computeDigestWakeMs();
+    if (sleepMs <= 0) {
+      // notify_level != 'digest' — park until config change wakes us.
+      await sleepUntilWakeup(2 ** 31 - 1);
+      continue;
+    }
+    console.log(`[${datetime()}] Scheduler (digest): next flush at ${new Date(Date.now() + sleepMs).toISOString()}.`);
+    const how = await sleepUntilWakeup(sleepMs);
+    if (how === 'reload') continue;
+    // Guard: if config changed to 'digest' → 'other' during sleep,
+    // computeDigestWakeMs on next iteration parks us; but we still
+    // want to skip firing this iteration. Re-check level here.
+    const level = String(cfg.notify_level || 'all').toLowerCase();
+    if (level !== 'digest') continue;
+    await flushDigest();
+  }
 }
 
 async function lenovoSchedulerLoop() {
@@ -5584,9 +5694,12 @@ function paintSettings() {
           { options: [
               { value: 'all',     label: 'All — every claim, captcha, error, and watcher event' },
               { value: 'actions', label: 'Actions Required — login issues, captchas, errors, watcher new-items, redeem reminders (silences per-run summaries when nothing needed your attention)' },
+              { value: 'digest',  label: 'Digest — buffer per-run summaries into one daily message; actions still fire real-time' },
               { value: 'off',     label: 'Off — silence all notifications' },
             ],
-            hint: 'Default is All. Choose Actions Required to skip the per-run "X claimed, Y already owned" summary on uneventful runs while keeping anything that asks you to do something. Off silences everything globally — captchas + login errors included.' }) +
+            hint: 'Default is All. Choose Actions Required to skip the per-run "X claimed, Y already owned" summary on uneventful runs while keeping anything that asks you to do something. Digest goes further: it buffers those per-run summaries in data/notification-digest.json and dispatches one aggregated notification per day at the hour you set below — noise-reducer for users with many active services running daily. Off silences everything globally — captchas + login errors included.' }) +
+        fieldRow('notifications.digestHour', 'Digest hour (local 0-23)',
+          { hint: 'Only consulted when Notification level = Digest. Hour of the local day when the aggregated summary fires. Default 8 (breakfast). Buffer persists across container restarts, so a mid-day restart does not lose accumulated summaries. If you also want the outstanding-Alerts hint appended, the digest body pulls that count from the Alerts tab at flush time.' }) +
         fieldRow('notifications.captchaPriority', 'Captcha priority',
           { options: [
               { value: 'low',       label: 'Low' },
@@ -9246,6 +9359,9 @@ server.listen(PANEL_PORT, async () => {
   });
   lenovoSchedulerLoop().catch(err => {
     console.error(`[${datetime()}] Scheduler (Lenovo) crashed:`, err);
+  });
+  digestSchedulerLoop().catch(err => {
+    console.error(`[${datetime()}] Scheduler (digest) crashed:`, err);
   });
   watchConfigForScheduler();
   watchLenovoStateForScheduler();

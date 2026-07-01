@@ -115,13 +115,27 @@ export const CONFIG_SCHEMA = [
     validate: v => ['low','moderate','normal','high','emergency'].includes(v) ? null : 'expected low, moderate, normal, high, or emergency' },
   // Notification verbosity (#31): 'all' (default — current behavior),
   // 'actions' (suppress per-run summaries; keep login issues, captchas,
-  // errors, watcher new-item alerts, redeem reminders), 'off' (silent).
+  // errors, watcher new-item alerts, redeem reminders), 'digest' (buffer
+  // per-run summaries into one daily message at notifications.digestHour;
+  // actions still fire real-time), 'off' (silent).
   { path: 'notifications.notifyLevel',       env: 'NOTIFY_LEVEL',               type: 'string',  default: 'all',
     coerce: v => {
       const s = String(v || '').toLowerCase().trim();
-      return (s === 'actions' || s === 'off' || s === 'all') ? s : 'all';
+      return (s === 'actions' || s === 'off' || s === 'all' || s === 'digest') ? s : 'all';
     },
-    validate: v => (v === 'all' || v === 'actions' || v === 'off') ? null : 'expected all, actions, or off' },
+    validate: v => (v === 'all' || v === 'actions' || v === 'off' || v === 'digest') ? null : 'expected all, actions, digest, or off' },
+  // Hour of the day (local time, 0-23) when the daily digest fires. Only
+  // consulted when notifyLevel === 'digest'. Default 8:00 lands the digest
+  // at breakfast for most schedules; users on evening cadences can move
+  // it to e.g. 20 (8pm). Buffer persists across container restarts via
+  // data/notification-digest.json so a mid-day restart doesn't lose
+  // accumulated summaries.
+  { path: 'notifications.digestHour',        env: 'NOTIFY_DIGEST_HOUR',         type: 'number',  default: 8,
+    coerce: v => {
+      const n = Number(v);
+      return Number.isFinite(n) && n >= 0 && n < 24 ? Math.floor(n) : 8;
+    },
+    validate: v => (typeof v === 'number' && v >= 0 && v < 24) ? null : 'expected 0-23' },
   { path: 'panel.publicUrl',                 env: 'PUBLIC_URL',                 type: 'string',  default: '' },
   // External-link target mode. Controls how the Discoveries-tab and
   // similar off-site links open. Three values:

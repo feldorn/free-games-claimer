@@ -4,6 +4,36 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.55
+
+**New notification verbosity tier: `digest`.** For users with many active services who don't want a Pushover ping per claim run per service — buffers all per-run summaries into a single aggregated notification dispatched daily at a configurable local hour.
+
+Third and final of the three planned integration adds (HA sensors landed in 2.8.53, Alerts tab in 2.8.54, this closes it).
+
+**How to enable**
+
+Settings → Notifications → Verbosity → **Digest**, or `NOTIFY_LEVEL=digest` in env. Second setting: **Digest hour** (env `NOTIFY_DIGEST_HOUR`, default `8`, valid 0-23) — the local hour when the aggregated notification fires each day.
+
+**What it does**
+
+- Per-run "N claimed, M already owned" summary notifications get **buffered to `data/notification-digest.json`** instead of dispatching immediately.
+- Every day at the configured hour, the panel's new digest scheduler drains the buffer, builds one aggregated notification body (per-run entries, MS Rewards balance context, outstanding-Alerts hint), and dispatches via the normal apprise path.
+- The buffer file is persisted so a mid-day container restart doesn't lose accumulated entries.
+- **Action-required notifications still fire real-time**: captchas, stale-session warnings, apprise errors, watcher new-items, redeem reminders. The digest is a noise-reducer for the summary noise, not a delay-mechanism for anything that needs your attention now.
+- The digest body includes a top-line "⚠ Outstanding: N pending Prime redeems · M pending Steam keys · K stale sessions — check the Alerts tab" hint (with a deep-link to the panel if `PUBLIC_URL` is set) so items pooling in the Alerts tab don't get missed by users on digest mode.
+
+**Implementation notes**
+
+- `src/util.js` — `notify()` gate now branches on `level === 'digest' && kind === 'summary'` → append to buffer; all other paths unchanged.
+- `src/util.js` exports `readDigestBuffer()` and `markDigestFlushed()` for the scheduler.
+- `interactive-login.js` — new `digestSchedulerLoop()` runs alongside the main + MS + Lenovo loops. Wakes at the next occurrence of the configured hour, flushes the buffer, sleeps to the next occurrence. Reacts to config changes via `sleepUntilWakeup(sleepMs)`'s reload signal, same pattern as the other schedulers.
+- Buffer capped at 500 entries to guard against pathological notification storms (e.g. every-minute LOOP producing thousands of summaries between flushes). Drops oldest first.
+- `docs/CONFIGURATION.md` updated with the new level in the verbosity table plus a section on digest specifics.
+
+Existing deploys see no behavior change — `all` remains the default.
+
+---
+
 ## What's new in 2.8.54
 
 **Diagnostics tab → Alerts tab.** Same tab slot in the panel, expanded scope: pending code redemptions, stale sessions, and unread Discoveries items now surface alongside the existing error-report flow. Direct answer to timothe's #101 ("I can't tell what the codes are and can't clear them") and the general observation that the panel had no single place to see "everything that needs my attention right now."
