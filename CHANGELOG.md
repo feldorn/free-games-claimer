@@ -4,6 +4,36 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.52
+
+**Two fixes reported today, both small.**
+
+### Prime Gaming pending-redeem notification now includes the code ([#101](https://github.com/feldorn/free-games-claimer/issues/101))
+
+Reported by timothe: recurring daily Telegram pings saying `- DOOM Eternal → https://account.microsoft.com/billing/redeem` and `- Fallout 76 (PC) → https://account.microsoft.com/billing/redeem` — same two games every day, no way to figure out what the actual redemption codes were. The MS Store / Xbox redeem URL is generic (no code prefill in the URL like GOG has), so the notification pointed at *where* to redeem but not *what* to enter. The codes were sitting in `data/prime-gaming.json` all along.
+
+Notification body now includes the code inline when present:
+
+> `- DOOM Eternal → https://account.microsoft.com/billing/redeem (code: ABCD-1234)`
+
+For GOG (whose URL already embeds the code) the suffix is redundant-but-harmless copy target. For MS Store / Xbox / any future generic-redeem-URL store, users can now redeem straight from the notification without digging into the DB.
+
+### MS Rewards activity-card selector: fallback for the post-2026 Premium dashboard ([#102](https://github.com/feldorn/free-games-claimer/issues/102))
+
+Reported by [kevindevm](https://github.com/feldorn/free-games-claimer/issues/102) — the same contributor whose finds shipped as v2.8.40 (RSC balance) and v2.8.50 (Ready-to-claim card). On their account the legacy `mee-card:has(.mee-icon-AddMedium)` matches zero cards because Microsoft's Premium dashboard rebuild dropped `<mee-card>` in favor of plain HTML + Tailwind. Their working proposal: match the point-value `<p>` inside each new-shape card via its Tailwind class chain (`p.text-metadata.leading-none.text-statusInformativeTintFg`).
+
+`BING_REWARDS_ACTIVITY_CARD_SELECTOR` is now comma-unioned so Playwright's locator matches either variant:
+
+```
+mee-card:has(.mee-icon-AddMedium), p.text-metadata.leading-none.text-statusInformativeTintFg
+```
+
+Existing users still on the legacy Angular dashboard see no regression; users migrated to the Premium dashboard finally get their activity cards clicked.
+
+kevindevm's third-in-a-row leverage-heavy MS Rewards find — the sustained pattern is now: they surface working code in the issue thread, we ship it same day.
+
+---
+
 ## What's new in 2.8.51
 
 **Network blips during the MS Desktop session no longer crash the whole run.** Reported by TheDevRo in [#100](https://github.com/feldorn/free-games-claimer/issues/100): a network hiccup mid-`page.goto('https://rewards.bing.com/')` caused Chromium to navigate to `chrome-error://chromewebdata/` (its built-in error page), which Playwright surfaced as `Navigation to "https://rewards.bing.com/" is interrupted by another navigation to "chrome-error://chromewebdata/"`. The throw came from `clickEveryPendingActivityCard()` and propagated out of the desktop session — skipping the **entire Bing search loop** and the **mobile session** that follow. The activity-card pass is a small extra; the search loop is the actual reward path, so it must not die for a transient.

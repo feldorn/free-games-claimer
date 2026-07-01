@@ -181,7 +181,15 @@ try {
       const base = redeemBaseUrls[entry.store];
       const redeem_url = entry.store === 'gog.com' ? `${base}/${entry.code}` : base;
       log.warn(`${dbTitle} — pending manual redeem on ${entry.store}`);
-      notify_pending.push({ title: dbTitle, url: redeem_url });
+      // Include the code so the notification is self-sufficient — the
+      // MS Store / Xbox redeem URL is generic (no code prefill), so
+      // without this the notification tells the user WHERE to redeem
+      // but not WHAT to enter. Reported by timothe in #101 (recurring
+      // Telegram pings for DOOM Eternal / Fallout 76 MS Store codes,
+      // no way to look up what the codes actually are without opening
+      // data/prime-gaming.json). For GOG the code is already embedded
+      // in the URL but including it as a copy-target is still useful.
+      notify_pending.push({ title: dbTitle, url: redeem_url, code: entry.code });
     }
   } else if (hiddenByAge || hiddenByRetry) {
     const notes = [];
@@ -612,7 +620,7 @@ try {
     for (let i = 0; i < chunks.length; i++) {
       const partLabel = chunks.length > 1 ? ` (${i + 1}/${chunks.length})` : '';
       const header = `prime-gaming (${user}) — ${total} pending redeem${total === 1 ? '' : 's'}${partLabel}:`;
-      const lines = chunks[i].map(g => `- ${g.title} → ${g.url}`);
+      const lines = chunks[i].map(g => `- ${g.title} → ${g.url}${g.code ? ` (code: ${g.code})` : ''}`);
       const parts = [header];
       if (i === 0 && batchLink) parts.push(batchLink);
       parts.push(lines.join('<br>'));

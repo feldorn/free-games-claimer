@@ -7,7 +7,20 @@ import { siteVersion } from './src/sites.js';
 
 const BING_REWARDS_URL = 'https://rewards.bing.com';
 const BING_URL = 'https://www.bing.com';
-const BING_REWARDS_ACTIVITY_CARD_SELECTOR = 'mee-card:has(.mee-icon-AddMedium)';
+// Two selectors comma-unioned so we match both dashboard variants MS
+// currently ships:
+//   - Legacy Angular dashboard: <mee-card> with an "AddMedium" plus-icon
+//     inside marks an unfinished activity — click the card to claim.
+//   - Post-2026 Premium dashboard: no more <mee-card>; the pending-activity
+//     tile is standard HTML with a <p> point-value badge like "+10" whose
+//     class chain is the Tailwind utility set below. Contributed by
+//     kevindevm in #102 after they noticed the legacy selector matched
+//     zero cards on their account (third clever find in a row from the
+//     same contributor — see #71 RSC balance, #99 Ready-to-claim card).
+// Comma union means Playwright's `.locator()` matches either variant, so
+// existing users on the legacy dashboard see no regression and users on
+// the new dashboard finally get their cards clicked.
+const BING_REWARDS_ACTIVITY_CARD_SELECTOR = 'mee-card:has(.mee-icon-AddMedium), p.text-metadata.leading-none.text-statusInformativeTintFg';
 
 // Force stdout to flush immediately — Node.js buffers writes to non-TTY pipes
 // (e.g. Docker), which causes log lines to appear in bursts instead of live.
