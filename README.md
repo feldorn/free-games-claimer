@@ -101,6 +101,7 @@ Full details — Docker Compose, bare-metal Node, non-root mode — in [docs/INS
 - **[docs/AUTH.md](docs/AUTH.md)** — Automatic login with 2FA, cookie upload, and the captcha-pause helper.
 - **[docs/NETWORKING.md](docs/NETWORKING.md)** — Reverse-proxy setups (subdomain, split-subdomain, subfolder) with SWAG / NPM examples.
 - **[docs/REFERENCE.md](docs/REFERENCE.md)** — Bot detection posture, data storage layout, HTTP API, and troubleshooting.
+- **[docs/HOMEASSISTANT.md](docs/HOMEASSISTANT.md)** — Home Assistant REST-sensor integration with example template sensors, binary sensors, and automations.
 
 ---
 

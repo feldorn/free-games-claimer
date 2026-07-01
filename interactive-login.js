@@ -7688,6 +7688,110 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    // Home Assistant integration endpoint — flat JSON of the values HA
+    // users typically want to surface on their dashboards. Intentionally
+    // unauthenticated (same policy as /api/health) so HA's stock REST
+    // sensor works with zero config; users who need this locked down can
+    // put SWAG/nginx/Traefik in front. Data exposed mirrors what's already
+    // visible on the Stats + Sessions tabs — MS balance, claim counts,
+    // pending redeems, stale sessions, last run — nothing sensitive.
+    // Consumer pattern documented in docs/HOMEASSISTANT.md.
+    if (req.method === 'GET' && req.url === '/api/hass/sensors') {
+      try {
+        const [summary, byService, activity] = await Promise.all([
+          getStatsSummary().catch(() => ({})),
+          getStatsByService().catch(() => []),
+          getActivity(1).catch(() => []),
+        ]);
+        // Pending Prime Gaming manual redeems (MS Store / Xbox / etc.
+        // codes that need user action). Mirrors the shape prime-gaming.js
+        // uses when building notify_pending.
+        const primeManualStores = new Set(['microsoft store', 'xbox', 'microsoft', 'origin', 'ea app', 'gog.com']);
+        let pendingPrime = 0;
+        try {
+          const pgDb = await jsonDb('prime-gaming.json', {});
+          const terminalRx = /claimed|redeemed|expired|invalid|dismissed|retries exhausted/i;
+          for (const user of Object.values(pgDb.data || {})) {
+            if (!user || typeof user !== 'object') continue;
+            for (const entry of Object.values(user)) {
+              if (!entry || typeof entry !== 'object') continue;
+              if (!entry.code) continue;
+              if (!primeManualStores.has(String(entry.store || '').toLowerCase())) continue;
+              if (terminalRx.test(String(entry.status || ''))) continue;
+              pendingPrime++;
+            }
+          }
+        } catch {}
+        const pendingSteam = await countPendingSteamCodes().catch(() => 0);
+        // Stale sessions: sites the user opted into that report status
+        // not-logged-in (siteStatus is the module-level cache populated
+        // by session probes; matches what /api/state's sites[] surfaces).
+        const activeSet = activeServices();
+        const staleSessions = [];
+        for (const [siteId, r] of Object.entries(siteStatus || {})) {
+          if (!activeSet.has(siteId)) continue;
+          if (r && r.status === 'not_logged_in') staleSessions.push(siteId);
+        }
+        // Diagnostics undecided error count — matches what the Alerts
+        // banner surfaces at the top of every panel tab.
+        let pendingErrors = 0;
+        try {
+          const errors = (diagnosticsDb && diagnosticsDb.data && diagnosticsDb.data.errors) || {};
+          for (const e of Object.values(errors)) if (e && !e.decided) pendingErrors++;
+        } catch {}
+        const last = activity[0] || null;
+        const body = {
+          ms_balance: summary.msPointsBalance ?? null,
+          ms_balance_at: summary.msPointsBalanceAt ?? null,
+          ms_points_this_week: summary.msPointsThisWeek ?? null,
+          games_this_week: summary.gamesThisWeek ?? 0,
+          games_this_month: summary.gamesThisMonth ?? 0,
+          games_all_time: summary.gamesAllTime ?? 0,
+          last_claim_at: last ? last.at : null,
+          last_claim_title: last ? last.title : null,
+          last_claim_service: last ? last.service : null,
+          last_run_at: (lastRun && lastRun.at) || null,
+          last_run_status: (lastRun && lastRun.status) || 'unknown',
+          last_run_source: (lastRun && lastRun.source) || null,
+          last_run_duration_sec: (lastRun && lastRun.durationSec) || null,
+          pending_prime_redeems: pendingPrime,
+          pending_steam_keys: pendingSteam,
+          stale_sessions: staleSessions.length,
+          stale_session_ids: staleSessions,
+          pending_errors: pendingErrors,
+          captcha_pending: !!captchaPending,
+          captcha_pending_service: captchaPending ? captchaPending.service : null,
+          captcha_pending_label: captchaPending ? captchaPending.label : null,
+          active_services: Array.from(activeSet).sort(),
+          app_version: APP_VERSION || null,
+          panel_url: cfg.public_url || null,
+        };
+        // Optional per-service detail for users who want to break out
+        // individual sensors — e.g. sensor.fgc_epic_lastclaim reading
+        // .services.epic-games.last_claim_at.
+        const services = {};
+        for (const row of byService) {
+          if (!row || !row.id) continue;
+          services[row.id] = {
+            name: row.name,
+            unit: row.unit,
+            this_week: row.thisWeek ?? 0,
+            this_month: row.thisMonth ?? 0,
+            all_time: row.allTime ?? 0,
+            last_claim_at: row.lastClaimAt ?? null,
+          };
+        }
+        body.services = services;
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+        res.end(JSON.stringify(body));
+      } catch (e) {
+        console.error(`[${datetime()}] /api/hass/sensors error:`, e);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'internal error', detail: (e && e.message) || String(e) }));
+      }
+      return;
+    }
+
     if (req.method === 'POST' && req.url === '/api/auth') {
       const { password } = await parseBody(req);
       if (password === PANEL_PASSWORD) {

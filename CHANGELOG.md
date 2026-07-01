@@ -4,6 +4,23 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.53
+
+**New endpoint `/api/hass/sensors` for Home Assistant integration.** Returns a flat JSON snapshot of the values HA users typically surface on their dashboards — MS Rewards balance, weekly / monthly / all-time claim counts, pending redeems (Prime + Steam), stale sessions, last-claim, last-run status, captcha-pending, and a per-service breakdown. HA users configure a single stock REST sensor pointing at this URL and derive template sensors for each field. No add-on or custom component needed.
+
+Intentionally unauthenticated (same policy as `/api/health`) so HA's REST integration works out of the box. Data exposed matches what's already visible on the Stats + Sessions tabs — nothing sensitive. Users with publicly-reachable panels who want it locked down anyway can put a reverse proxy with basic auth or an IP allowlist in front.
+
+New [`docs/HOMEASSISTANT.md`](docs/HOMEASSISTANT.md) walks through the setup with copy-paste-ready YAML for:
+
+- The primary REST sensor + `json_attributes` block
+- Template sensors for balance, claim counts, last-claim, pending-redeems, stale-sessions
+- Binary sensors for captcha-pending, last-run-success, and a combined "has alerts" indicator
+- Automations for captcha alerts, session-expiry notifications, and weekly claim summaries
+
+First of three planned integration additions — Alerts tab and notification digest mode are queued next.
+
+---
+
 ## What's new in 2.8.52
 
 **Two fixes reported today, both small.**
