@@ -89,13 +89,58 @@ const notify_games = [];
 const ownedLogged = new Set();
 let user;
 
+// Chromium can tear down the tab or context mid-navigation — either from a
+// container OOM, upstream Epic response that killed the tab, forced
+// sign-out, network transport blip, etc. The exception shape is
+// `page.goto: Target page, context or browser has been closed` (plus a
+// small family of ERR_* transients meaning the same thing: transport went
+// away). Modeled after microsoft.js/isRecoverableMsNavError from #67/#80/
+// #100; surfaced in JLMael's #104 (per-game loop) and fl-99's #105
+// (top-level URL_CLAIM) on the Epic side.
+const isRecoverableEpicNavError = (err) => {
+  const msg = String(err?.message || err);
+  return /Target (page|context|browser) has been closed/i.test(msg)
+      || /interrupted by another navigation/i.test(msg)
+      || /ERR_ADDRESS_UNREACHABLE|ERR_INTERNET_DISCONNECTED|ERR_NAME_NOT_RESOLVED|ERR_NETWORK_CHANGED|ERR_CONNECTION_RESET|ERR_TIMED_OUT/i.test(msg);
+};
+
+// Retry-once wrapper for the critical-path gotos (URL_CLAIM run-start,
+// URL_LOGIN sign-in flow). Recoverable failures — the target-closed
+// family above — trigger a single 30s backoff + retry. If the retry also
+// fails, the error propagates so the outer catch still reports it as an
+// exception; the retry is a cheap chance for a transient to resolve
+// itself, not a way to hide persistent problems. Unrecoverable errors
+// throw immediately (no retry) — an infinite CTA-wait or a real bug
+// shouldn't be masked by a delayed second attempt. Per-game gotos inside
+// the claim loop deliberately don't retry — one bad game shouldn't cost
+// 30s of wall-clock delay against the rest of the batch, and the guard
+// in the loop already breaks cleanly if the whole tab is gone. (fl-99's
+// #105 — same run just after v2.8.57 shipped for #104.)
+const gotoWithNavRetry = async (targetPage, targetUrl, opts, label) => {
+  try {
+    await targetPage.goto(targetUrl, opts);
+  } catch (e) {
+    if (!isRecoverableEpicNavError(e)) throw e;
+    log.warn(`page.goto ${label} (${targetUrl}) — ${String(e.message || e).split('\n')[0]} — retrying in 30s`);
+    await targetPage.waitForTimeout(30000);
+    if (targetPage.isClosed()) {
+      // Whole tab is gone — no point retrying. Rethrow original so the
+      // outer catch surfaces the exception with the original stack.
+      throw e;
+    }
+    await targetPage.goto(targetUrl, opts);
+    log.info(`page.goto ${label} — retry succeeded`);
+  }
+};
+
 try {
   await context.addCookies([
     { name: 'OptanonAlertBoxClosed', value: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(), domain: '.epicgames.com', path: '/' }, // Accept cookies to get rid of banner to save space on screen. Set accept time to 5 days ago.
     { name: 'HasAcceptedAgeGates', value: 'USK:9007199254740991,general:18,EPIC SUGGESTED RATING:18', domain: 'store.epicgames.com', path: '/' }, // gets rid of 'To continue, please provide your date of birth', https://github.com/vogler/free-games-claimer/issues/275, USK number doesn't seem to matter, cookie from 'Fallout 3: Game of the Year Edition'
   ]);
 
-  await page.goto(URL_CLAIM, { waitUntil: 'domcontentloaded' }); // 'domcontentloaded' faster than default 'load' https://playwright.dev/docs/api/class-page#page-goto
+  // 'domcontentloaded' faster than default 'load' https://playwright.dev/docs/api/class-page#page-goto
+  await gotoWithNavRetry(page, URL_CLAIM, { waitUntil: 'domcontentloaded' }, 'URL_CLAIM');
 
   if (cfg.time) console.timeEnd('startup');
   if (cfg.time) console.time('login');
@@ -109,7 +154,7 @@ try {
     if (cfg.novnc_port) log.info(`Open http://localhost:${cfg.novnc_port} to login inside the docker container`);
     if (!cfg.debug) context.setDefaultTimeout(cfg.login_timeout); // give user some extra time to log in
     log.status('Login timeout', `${cfg.login_timeout / 1000}s`);
-    await page.goto(URL_LOGIN, { waitUntil: 'domcontentloaded' });
+    await gotoWithNavRetry(page, URL_LOGIN, { waitUntil: 'domcontentloaded' }, 'URL_LOGIN');
     if (cfg.eg_email && cfg.eg_password) log.info('Using credentials from environment');
     else log.info('Press ESC to login in browser (not possible in headless mode)');
     const notifyBrowserLogin = async () => {
@@ -318,22 +363,6 @@ try {
   // 2026-05-14: 6 URLs in, 5 logged, 1 silently deduped — looked like
   // a missing game).
   let dedupedVariants = 0;
-
-  // Chromium can tear down the tab or context mid-run — either from a
-  // click on the previous game's page triggering a close, container OOM,
-  // network layer disconnection, or a forced sign-out. The exception
-  // shape is `page.goto: Target page, context or browser has been closed`
-  // (plus a small family of ERR_* transients that mean the same thing:
-  // the underlying transport went away between iterations). Modeled after
-  // microsoft.js/isRecoverableMsNavError from #67 / #80 / #100 — same
-  // pattern surfaced in JLMael's #104 on the Epic side, where the whole
-  // claim loop died on one bad goto.
-  const isRecoverableEpicNavError = (err) => {
-    const msg = String(err?.message || err);
-    return /Target (page|context|browser) has been closed/i.test(msg)
-        || /interrupted by another navigation/i.test(msg)
-        || /ERR_ADDRESS_UNREACHABLE|ERR_INTERNET_DISCONNECTED|ERR_NAME_NOT_RESOLVED|ERR_NETWORK_CHANGED|ERR_CONNECTION_RESET|ERR_TIMED_OUT/i.test(msg);
-  };
 
   for (const url of urls) {
     if (cfg.time) console.time('claim game');

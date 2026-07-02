@@ -4,6 +4,20 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.58
+
+**Extend the Epic `Target page closed` guard to the run-start navigations too.** fl-99's [#105](https://github.com/feldorn/free-games-claimer/issues/105) hit the same `page.goto: Target page, context or browser has been closed` error class as #104 — on **v2.8.57 (the fix I just shipped)** — but at a different stack point: the very first `page.goto(URL_CLAIM)` at run start, not the per-game loop I guarded. My earlier reasoning ("URL_CLAIM stays unguarded — 'can't start' is distinct from mid-run tear-down") was wrong; the same transient hits there too.
+
+Changes:
+
+- Hoisted `isRecoverableEpicNavError` from the per-game-loop scope to module scope so all three call sites can use it.
+- Added a `gotoWithNavRetry(page, url, opts, label)` helper — try once, on recoverable-family failure log a warn + wait 30s + retry once. If the retry succeeds, log an info line. If the retry fails, throw so the outer catch surfaces the exception through the normal diagnostic-report path (retry is a chance to ride out a transient, not a way to mask persistent problems).
+- Called at `URL_CLAIM` (L98) and `URL_LOGIN` (L112). Per-game gotos inside the claim loop deliberately still don't retry — one bad game shouldn't cost 30s against the rest of the batch, and the v2.8.57 per-game guard already breaks cleanly if the whole tab is gone.
+
+If the transient resolves in the 30s window (network blip, Chromium settled, etc.), the Epic run continues normally with one warn line instead of a failed run + diagnostic-banner error. If it doesn't resolve, behavior is unchanged from v2.8.57 (diagnostic surfaces, exit 1).
+
+---
+
 ## What's new in 2.8.57
 
 **Defensive guard on the Epic per-game claim loop against Chromium tear-down.** JLMael's [#104](https://github.com/feldorn/free-games-claimer/issues/104) hit the exact `page.goto: Target page, context or browser has been closed` shape that `microsoft.js` got a guard for in v2.8.39 (via #67 / #80 / #100) — but on the Epic side, where a single bad goto took down the whole claim loop instead of degrading to one skipped game.
