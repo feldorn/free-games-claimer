@@ -339,6 +339,11 @@ export const ENV_DISPLAY = [
   { env: 'AE_EMAIL',       category: 'credentials', group: 'AliExpress',       label: 'Email',
     note: 'Only used when AliExpress is enabled. Only needed for automated re-login — you can also log in manually via the Sessions card and cookies persist.' },
   { env: 'AE_PASSWORD',    category: 'credentials', group: 'AliExpress',       label: 'Password' },
+  // locale / timezone (env-only — read at Node process start)
+  { env: 'TZ',            category: 'runtime', label: 'Timezone (IANA)',
+    note: 'When set (e.g. `TZ=Europe/Warsaw`), Node reads it at process start and it drives: log-line timestamps, scheduler input times (`START_TIME` / dailyStartTime / digest hour), the "next run in" wall-time labels. Unset → the container defaults to UTC. Change requires a panel restart. See eapzzz\'s #106.' },
+  { env: 'LANG',          category: 'runtime', label: 'Locale (Chromium)',
+    note: 'When set (e.g. `LANG=de_DE.UTF-8`), Chromium starts with matching `--lang` / `Accept-Language` so third-party storefronts render in your language. Diagnostic error context also records this value. Unset → defaults to en-US.' },
   // runtime/debug flags
   { env: 'DEBUG',         category: 'debug', label: 'DEBUG' },
   { env: 'DEBUG_NETWORK', category: 'debug', label: 'DEBUG_NETWORK' },

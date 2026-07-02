@@ -5811,7 +5811,7 @@ async function loadEnvTable(reveal) {
       if (!byCat[e.category]) { byCat[e.category] = []; catOrder.push(e.category); }
       byCat[e.category].push(e);
     }
-    const catLabel = { panel: 'Panel infrastructure', paths: 'Data paths', credentials: 'Credentials', debug: 'Debug / runtime' };
+    const catLabel = { panel: 'Panel infrastructure', paths: 'Data paths', credentials: 'Credentials', runtime: 'Locale &amp; timezone', debug: 'Debug / runtime' };
     const rows = [];
     for (const cat of catOrder) {
       rows.push('<tr class="cat-row"><td colspan="3">' + escapeHtml(catLabel[cat] || cat) + '</td></tr>');

@@ -4,6 +4,19 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.59
+
+**Environment tab surfaces `TZ` and `LANG` — with a note explaining what each affects.** Per eapzzz's [#106](https://github.com/feldorn/free-games-claimer/issues/106): "the app displays everything in UTC and has no timezone setting." The answer is the container's standard `TZ` env var (Node reads it at process start and it flows into log timestamps, scheduler input times, digest hour, wall-time labels), but that was tribal knowledge — nothing in the panel told users to set it.
+
+Now the Environment tab has a new **Locale & timezone** category with:
+
+- **TZ** — shows the current env value (or `unset`), with an inline note explaining what setting it does and pointing at IANA syntax (`TZ=Europe/Warsaw`). A user hitting the "why is everything in UTC" confusion can see the answer in the panel instead of needing to open an issue.
+- **LANG** — same treatment for the Chromium locale env var (drives `--lang` / `Accept-Language` so storefronts render in the user's language, and is recorded in diagnostic error context).
+
+Both are env-only (Node reads at process start), so the tab just shows their state — changing them requires editing your compose file and restarting the container.
+
+---
+
 ## What's new in 2.8.58
 
 **Extend the Epic `Target page closed` guard to the run-start navigations too.** fl-99's [#105](https://github.com/feldorn/free-games-claimer/issues/105) hit the same `page.goto: Target page, context or browser has been closed` error class as #104 — on **v2.8.57 (the fix I just shipped)** — but at a different stack point: the very first `page.goto(URL_CLAIM)` at run start, not the per-game loop I guarded. My earlier reasoning ("URL_CLAIM stays unguarded — 'can't start' is distinct from mid-run tear-down") was wrong; the same transient hits there too.
