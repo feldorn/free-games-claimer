@@ -89,17 +89,25 @@ const notify_games = [];
 const ownedLogged = new Set();
 let user;
 
-// Chromium can tear down the tab or context mid-navigation — either from a
-// container OOM, upstream Epic response that killed the tab, forced
-// sign-out, network transport blip, etc. The exception shape is
-// `page.goto: Target page, context or browser has been closed` (plus a
-// small family of ERR_* transients meaning the same thing: transport went
-// away). Modeled after microsoft.js/isRecoverableMsNavError from #67/#80/
-// #100; surfaced in JLMael's #104 (per-game loop) and fl-99's #105
-// (top-level URL_CLAIM) on the Epic side.
-const isRecoverableEpicNavError = (err) => {
+// Chromium can tear down the tab, context, or renderer mid-operation —
+// either from a container OOM, upstream Epic response that killed the
+// tab, forced sign-out, network transport blip, renderer segfault, etc.
+// The exception shapes covered here:
+//   - `Target (page|context|browser) has been closed` — tab/context gone
+//     (JLMael's #104, fl-99's #105 during page.goto)
+//   - `Target crashed` — renderer process itself crashed, common on arm64
+//     where Chromium has fewer optimized GPU/canvas paths (marlonqpa's
+//     #107 during page.screenshot after a claim failure)
+//   - `interrupted by another navigation` — competing goto race
+//   - `ERR_*` transport family — network layer went away
+// Modeled after microsoft.js/isRecoverableMsNavError from #67/#80/#100.
+const isRecoverableEpicPageError = (err) => {
   const msg = String(err?.message || err);
-  return /Target (page|context|browser) has been closed/i.test(msg)
+  // The literal string Playwright emits is the comma-list form. The
+  // single-type alternates are defensive future-proofing in case a
+  // Playwright upgrade narrows the message.
+  return /Target (page, context or browser|page|context|browser) has been closed/i.test(msg)
+      || /Target crashed/i.test(msg)
       || /interrupted by another navigation/i.test(msg)
       || /ERR_ADDRESS_UNREACHABLE|ERR_INTERNET_DISCONNECTED|ERR_NAME_NOT_RESOLVED|ERR_NETWORK_CHANGED|ERR_CONNECTION_RESET|ERR_TIMED_OUT/i.test(msg);
 };
@@ -120,7 +128,7 @@ const gotoWithNavRetry = async (targetPage, targetUrl, opts, label) => {
   try {
     await targetPage.goto(targetUrl, opts);
   } catch (e) {
-    if (!isRecoverableEpicNavError(e)) throw e;
+    if (!isRecoverableEpicPageError(e)) throw e;
     log.warn(`page.goto ${label} (${targetUrl}) — ${String(e.message || e).split('\n')[0]} — retrying in 30s`);
     await targetPage.waitForTimeout(30000);
     if (targetPage.isClosed()) {
@@ -405,7 +413,7 @@ try {
       // which game triggered the tear-down) and skip this game. If it's
       // a genuine exception unrelated to browser tear-down, rethrow so
       // the outer error handler still surfaces it as a diagnostic.
-      if (isRecoverableEpicNavError(e)) {
+      if (isRecoverableEpicPageError(e)) {
         log.fail(`page.goto ${url} — ${String(e.message || e).split('\n')[0]} — skipping this game`);
         notify_games.push({ title: skipId, url, status: 'failed: browser closed / network transient during navigation' });
         if (cfg.time) console.timeEnd('claim game');
@@ -662,7 +670,16 @@ try {
         } else {
           log.fail(`${title} — failed to claim`);
           const p = screenshot('failed', `${game_id}_${filenamify(datetime())}.png`);
-          await page.screenshot({ path: p, fullPage: true });
+          // Diagnostic screenshot is best-effort — a crashed renderer
+          // (common on arm64, per marlonqpa's #107) shouldn't cascade a
+          // claim failure into a whole-run failure. Recoverable-family
+          // errors log a warn and move on; other errors still rethrow.
+          try {
+            await page.screenshot({ path: p, fullPage: true });
+          } catch (e) {
+            if (!isRecoverableEpicPageError(e)) throw e;
+            log.warn(`page.screenshot failed for ${title} (${String(e.message || e).split('\n')[0]}) — skipping capture`);
+          }
           db.data[user][game_id].status = 'failed';
           if (iframe && (captchaDetected || await iframe.locator('#h_captcha_challenge_checkout_free_prod iframe').count().catch(() => 0) > 0)) {
             captchaDetected = true;
@@ -680,7 +697,16 @@ try {
       }
 
       const p = screenshot(`${game_id}.png`);
-      if (!existsSync(p)) await page.screenshot({ path: p, fullPage: false }); // fullPage is quite long...
+      if (!existsSync(p)) {
+        // Same defensive shape as the failure-screenshot above — a
+        // recoverable renderer crash here shouldn't fail the run.
+        try {
+          await page.screenshot({ path: p, fullPage: false }); // fullPage is quite long...
+        } catch (e) {
+          if (!isRecoverableEpicPageError(e)) throw e;
+          log.warn(`page.screenshot failed for ${game_id} (${String(e.message || e).split('\n')[0]}) — skipping capture`);
+        }
+      }
     }
     if (cfg.time) console.timeEnd('claim game');
   }

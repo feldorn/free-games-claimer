@@ -4,6 +4,38 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.60
+
+Two customer-driven changes shipped together.
+
+### 1. Extend Epic recoverable-error family to `Target crashed` + guard the diagnostic-screenshot call
+
+Per marlonqpa's [#107](https://github.com/feldorn/free-games-claimer/issues/107): on **arm64** with `TZ=Europe/Warsaw`, a claim of `I Have No Mouth, and I Must Scream` failed, then the diagnostic-screenshot capture crashed the Chromium renderer with `page.screenshot: Target crashed` — a **different error class** than the `Target ... has been closed` family v2.8.57/58 shipped guards for. Renderer-process crashes (SIGSEGV / GPU crash / OOM) are especially common on arm64 where Chromium has fewer optimized paths. My guard didn't match, so a diagnostic-screenshot failure after an already-logged claim failure cascaded into failing the whole Epic run.
+
+Changes to `epic-games.js`:
+
+- Renamed `isRecoverableEpicNavError` → `isRecoverableEpicPageError` (the family covers non-navigation crashes now).
+- **Added `Target crashed` to the recognized recoverable-family regex.**
+- **Also fixed a latent bug in the regex:** the actual Playwright error string is `Target page, context or browser has been closed` (comma list) — my v2.8.57/58 regex `Target (page|context|browser) has been closed` never matched that shape. Guard was shipping non-functional. Regex now includes the comma-list form explicitly plus the single-target variants for future-proofing.
+- Wrapped both `page.screenshot` call sites (the post-failure diagnostic capture at L665 and the per-game capture at L683) in try/catch that recognizes the recoverable-page-error family — a screenshot failure now logs a warn and moves on, never fails the run.
+
+### 2. Day-of-week checkbox mask on the anchored scheduler
+
+Per amphoterism's [#108](https://github.com/feldorn/free-games-claimer/issues/108): schedule by day of the week so a NAS reboot doesn't drift the schedule. Current anchored mode is time-only; adding a mask lets users say "Thursdays at 11:00" without resorting to external cron.
+
+- New schema field `scheduler.dailyStartDays` (array of ints 0-6, `0 = Sunday`, `6 = Saturday`). Default `[0,1,2,3,4,5,6]` = all days = existing behavior.
+- New env var **`START_DAYS`** (comma-separated: `START_DAYS=4` for Thursdays, `START_DAYS=1,3,5` for Mon/Wed/Fri). Surfaced in the Environment tab under a new "Scheduler" category.
+- Validator rejects empty mask ("at least one day required") so a misclick can't silently disable the scheduler; also rejects out-of-range values, duplicates, and non-integers.
+- `computeMainWakeMs()` extended: after computing the anchored candidate wake, if the day-of-week is not in the mask, advance one day at a time until it is. Capped at 7 iterations (a valid mask always contains at least one day). Only applied in anchored mode — interval-from-completion has no wall-clock day-of-week semantics.
+- Settings UI: **7-checkbox row** in Scheduler settings, visible only when Start time is set. Sunday-first ordering matches JS `Date.getDay()`. Inline warning shown when all 7 unchecked; server rejects the save.
+- Schedule tab surfaces the mask when it's not all-days (e.g. "Days · Claimers: Mon, Wed, Fri only") — silent on the default.
+- Missed days do not queue backfill runs — matches the existing "past-target wakes mark as missed" architecture.
+- **Applies to the main claim chain only.** MS Rewards day-of-week mask is deferred to a follow-up.
+
+Docs: [Day-of-week filter](docs/CONFIGURATION.md#day-of-week-filter) section added.
+
+---
+
 ## What's new in 2.8.59
 
 **Environment tab surfaces `TZ` and `LANG` — with a note explaining what each affects.** Per eapzzz's [#106](https://github.com/feldorn/free-games-claimer/issues/106): "the app displays everything in UTC and has no timezone setting." The answer is the container's standard `TZ` env var (Node reads it at process start and it flows into log timestamps, scheduler input times, digest hour, wall-time labels), but that was tribal knowledge — nothing in the panel told users to set it.

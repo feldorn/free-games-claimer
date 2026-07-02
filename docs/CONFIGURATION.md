@@ -36,6 +36,7 @@ example](INSTALL.md#docker-compose) above:
 | `NOTIFY` | | Notification URL(s) for [apprise](https://github.com/caronc/apprise) (Pushover, Telegram, Slack, etc.) — used for claim summaries, login issues, and captcha pause |
 | `LOOP` | | Main-schedule interval in seconds (e.g. `86400` = 24h). Without `START_TIME`, sleeps N seconds after each run completes (drifts by run duration). Drives the non-MS chain only — Microsoft Rewards is on its own schedule. |
 | `START_TIME` | | Wall-clock anchor `HH:MM` (24h) for the main schedule. When set, the non-MS chain wakes at this time each day; with a sub-daily `LOOP` (e.g. `14400` = 4h) the anchor seeds the sequence and runs land at `08:00, 12:00, 16:00, 20:00, 00:00, 04:00`. Microsoft Rewards is independent — see [Microsoft Rewards Options](#microsoft-rewards-options). |
+| `START_DAYS` | `0,1,2,3,4,5,6` | Day-of-week mask on the anchored schedule (comma-separated, `0=Sun … 6=Sat`). Only consulted when `START_TIME` is set. Default = all seven days (backward-compatible). Examples: `START_DAYS=4` (Thursdays only), `START_DAYS=1,3,5` (Mon/Wed/Fri). See [Day-of-week filter](#day-of-week-filter). |
 
 **Behind a reverse proxy?** See [Reverse-Proxy Setup](NETWORKING.md#reverse-proxy-setup)
 for `BASE_PATH`, `PUBLIC_URL`, and `NOVNC_URL`.
@@ -186,6 +187,43 @@ card if needed. Tomorrow's pick is fresh.
 behavior: a single chain anchored 30 minutes before the MS window, with
 `microsoft.js` doing its own internal wait. Set `START_TIME` or `LOOP` to opt
 into the decoupled two-schedule mode.
+
+### Day-of-week filter
+
+The anchored main schedule accepts an optional **day-of-week mask** so you can
+run only on specific days (e.g. weekly Thursdays, or Mon/Wed/Fri) without
+resorting to cron. Only consulted in anchored mode (`START_TIME` set) — pure
+interval-from-completion has no wall-clock day-of-week semantics.
+
+- **Env var**: `START_DAYS` — comma-separated ints where **`0 = Sunday`** …
+  **`6 = Saturday`** (matches JavaScript `Date.getDay()` numbering).
+- **In Settings**: `Scheduler → Run on days` — 7 checkboxes rendered whenever
+  Start time is set. Default: all seven days checked (backward-compatible;
+  existing deploys see no change).
+- **At least one day required.** The Settings validator (and the API's
+  `PUT /api/config` endpoint) reject an empty mask so a misclick can't
+  silently disable the scheduler.
+
+Examples:
+
+- `START_TIME=11:00, START_DAYS=4` — every Thursday at 11:00 local.
+- `START_TIME=07:30, START_DAYS=1,3,5` — Mon/Wed/Fri at 07:30 local.
+- `START_TIME=08:00, START_DAYS=0,6` — weekends only at 08:00 local.
+
+**Missed days do not queue backfill runs.** If the container is off on a
+scheduled Thursday and comes back Friday morning, the next run is *next
+Thursday*, not a delayed run today. This matches the existing "past-target
+wakes mark as missed, don't auto-fire late" policy — the tool is designed
+to run once per scheduled slot, never retroactively.
+
+The Schedule tab surfaces the mask when it isn't all-days (e.g. "Days ·
+Claimers: Mon, Wed, Fri only"), so at a glance you can see which days will
+fire. No line is shown on the default (all-days) mask.
+
+**Applies to the main claim chain only.** Microsoft Rewards has its own
+random-within-window daily schedule (`MS_SCHEDULE_START` / `MS_SCHEDULE_HOURS`);
+extending the days-of-week filter to MS is a separate feature deferred
+to a follow-up.
 
 The control panel process owns the scheduler. No immediate run on container
 boot — the panel stays interactive at startup so you can log in, use

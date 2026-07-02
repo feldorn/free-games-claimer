@@ -92,6 +92,36 @@ export const CONFIG_SCHEMA = [
     validate: v => v === '' || HHMM_RE.test(v) ? null : 'expected HH:MM (24h) or empty' },
   { path: 'scheduler.msScheduleHours', env: 'MS_SCHEDULE_HOURS', type: 'number',  default: 0, coerce: v => Number(v) || 0 },
   { path: 'scheduler.msScheduleStart', env: 'MS_SCHEDULE_START', type: 'number',  default: 8, coerce: v => Number(v) || 0 },
+  // Day-of-week mask on the anchored scheduler (#108). Array of ints in
+  // [0..6] using JavaScript Date.getDay() numbering: 0 = Sunday, 6 = Sat.
+  // Default = all seven days (existing daily behavior; existing deploys
+  // see no change). Only consulted in anchored mode (dailyStartTime set).
+  // Env format: comma-separated (e.g. START_DAYS=1,3,5 for Mon/Wed/Fri);
+  // whitespace tolerated; invalid tokens → default. Validator rejects
+  // empty arrays to prevent accidental scheduler-disable via UI misclick.
+  { path: 'scheduler.dailyStartDays',  env: 'START_DAYS',        type: 'array',
+    default: [0, 1, 2, 3, 4, 5, 6],
+    coerce: v => {
+      if (Array.isArray(v)) {
+        const clean = v.map(x => Number(x)).filter(n => Number.isInteger(n) && n >= 0 && n <= 6);
+        const uniq = [...new Set(clean)].sort((a, b) => a - b);
+        return uniq.length ? uniq : [0, 1, 2, 3, 4, 5, 6];
+      }
+      const parts = String(v || '').split(/[,\s]+/).map(s => s.trim()).filter(Boolean);
+      const nums = parts.map(s => Number(s)).filter(n => Number.isInteger(n) && n >= 0 && n <= 6);
+      const uniq = [...new Set(nums)].sort((a, b) => a - b);
+      return uniq.length ? uniq : [0, 1, 2, 3, 4, 5, 6];
+    },
+    validate: v => {
+      if (!Array.isArray(v)) return 'expected array of integers 0-6';
+      if (v.length === 0) return 'at least one day required (0 = Sunday … 6 = Saturday)';
+      if (v.length > 7) return 'at most 7 days';
+      for (const n of v) {
+        if (!Number.isInteger(n) || n < 0 || n > 6) return 'each day must be an integer 0-6';
+      }
+      if (new Set(v).size !== v.length) return 'duplicate days not allowed';
+      return null;
+    } },
   // 0 = off, 1 = run claim chain after startup auto-check (panel keeps
   // running), 2 = run + exit (one-shot for Sablier / cron / `docker run --rm`).
   { path: 'scheduler.runOnStartup',    env: 'RUN_ON_STARTUP',    type: 'number',  default: 0, coerce: v => {
@@ -344,6 +374,9 @@ export const ENV_DISPLAY = [
     note: 'When set (e.g. `TZ=Europe/Warsaw`), Node reads it at process start and it drives: log-line timestamps, scheduler input times (`START_TIME` / dailyStartTime / digest hour), the "next run in" wall-time labels. Unset → the container defaults to UTC. Change requires a panel restart. See eapzzz\'s #106.' },
   { env: 'LANG',          category: 'runtime', label: 'Locale (Chromium)',
     note: 'When set (e.g. `LANG=de_DE.UTF-8`), Chromium starts with matching `--lang` / `Accept-Language` so third-party storefronts render in your language. Diagnostic error context also records this value. Unset → defaults to en-US.' },
+  // scheduler — anchored-mode extension. Days-of-week mask (#108).
+  { env: 'START_DAYS',    category: 'scheduler', label: 'Anchored-mode days-of-week filter',
+    note: 'Comma-separated list of days on which the anchored scheduler fires: 0 = Sunday … 6 = Saturday. Only consulted when `START_TIME` (or dailyStartTime in Settings) is set. Default = all seven days (backward-compatible). Example: `START_DAYS=4` for weekly Thursdays; `START_DAYS=1,3,5` for Mon/Wed/Fri. Missed days do not queue backfills.' },
   // runtime/debug flags
   { env: 'DEBUG',         category: 'debug', label: 'DEBUG' },
   { env: 'DEBUG_NETWORK', category: 'debug', label: 'DEBUG_NETWORK' },
@@ -367,11 +400,18 @@ function maskLast4(s) {
 // and reschedule without a panel restart.
 export function getSchedulerConfig() {
   const s = describeConfig().effective.scheduler || {};
+  // dailyStartDays: array of ints 0-6 (0 = Sun, 6 = Sat). Defensive
+  // fallback to all-days if the effective value is malformed or missing
+  // — matches the schema default and guards computeMainWakeMs against
+  // an empty mask that somehow slipped past validation.
+  let days = Array.isArray(s.dailyStartDays) ? s.dailyStartDays.filter(n => Number.isInteger(n) && n >= 0 && n <= 6) : null;
+  if (!days || days.length === 0) days = [0, 1, 2, 3, 4, 5, 6];
   return {
-    loop:           s.loopSeconds     ?? 0,
-    dailyStartTime: s.dailyStartTime  ?? '',
-    msHours:        s.msScheduleHours ?? 0,
-    msStart:        s.msScheduleStart ?? 8,
+    loop:            s.loopSeconds     ?? 0,
+    dailyStartTime:  s.dailyStartTime  ?? '',
+    msHours:         s.msScheduleHours ?? 0,
+    msStart:         s.msScheduleStart ?? 8,
+    dailyStartDays:  days,
   };
 }
 
@@ -410,6 +450,9 @@ export function patchConfig(patches) {
     }
     if (field.type === 'string' && typeof value !== 'string') {
       errors.push({ path: p, error: 'expected string, got ' + typeof value }); continue;
+    }
+    if (field.type === 'array' && !Array.isArray(value)) {
+      errors.push({ path: p, error: 'expected array, got ' + typeof value }); continue;
     }
     if (field.validate) {
       const err = field.validate(value);

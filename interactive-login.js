@@ -1963,6 +1963,14 @@ function computeMainWakeMs() {
   // START_TIME anchor + interval (default 24h). Step forward in interval-ms
   // chunks from today's anchor until we land past now. e.g. 08:00 + 4h with
   // restart at 11:00 → wake at 12:00.
+  //
+  // Day-of-week mask (#108): after computing the candidate wake, if the
+  // wake's local day-of-week is not in dailyStartDays, advance one day at
+  // a time until we land on a masked day. Capped at 7 iterations — a
+  // valid mask always contains at least one day, so we'll always find a
+  // match within a week. Only applied in anchored mode (below) — the
+  // interval-only path below has no wall-clock anchor where "day of
+  // week" is meaningful.
   if (c.dailyStartTime) {
     const m = /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(c.dailyStartTime);
     if (m) {
@@ -1972,6 +1980,12 @@ function computeMainWakeMs() {
       const wake = new Date();
       wake.setHours(hh, mm, 0, 0);
       while (wake.getTime() <= Date.now()) wake.setTime(wake.getTime() + intervalMs);
+      const daySet = new Set(c.dailyStartDays);
+      if (daySet.size < 7) {
+        for (let i = 0; i < 7 && !daySet.has(wake.getDay()); i++) {
+          wake.setDate(wake.getDate() + 1);
+        }
+      }
       return Math.max(wake.getTime() - Date.now(), 60 * 1000);
     }
   }
@@ -2738,6 +2752,7 @@ async function getState() {
     loopEnabled: schedEnabled,
     loopSeconds: sched.loop,
     dailyStartTime: sched.dailyStartTime,
+    dailyStartDays: sched.dailyStartDays,
     dailyAnchored,
     msScheduleHours: sched.msHours,
     msScheduleStart: sched.msStart,
@@ -3487,6 +3502,13 @@ const PANEL_HTML = `<!DOCTYPE html>
   .setting-interval-grid input[type="number"] { width: 64px !important; }
   .setting-interval-grid .interval-unit { color: #8aa0c2; font-size: 12px; margin-right: 6px; }
   .setting-interval-grid .interval-summary { color: #8aa0c2; font-size: 12px; font-style: italic; margin-left: 8px; }
+  /* Day-of-week 7-checkbox row on the anchored scheduler (#108). */
+  .days-of-week-row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .dow-checkbox { display: inline-flex; align-items: center; gap: 4px; padding: 4px 8px; background: #0e1726; border: 1px solid #233454; border-radius: 4px; color: #c0c8d8; font-size: 12px; cursor: pointer; user-select: none; }
+  .dow-checkbox:hover { border-color: #4ecca3; }
+  .dow-checkbox input[type="checkbox"] { margin: 0; cursor: pointer; }
+  .dow-checkbox input[type="checkbox"]:checked + span { color: #4ecca3; font-weight: 500; }
+  .settings-error { color: #f0c040; font-size: 12px; line-height: 1.5; }
   .setting-help-inline { color: #8aa0c2; font-size: 12px; line-height: 1.5; max-width: 720px; }
   .setting-input input[type="time"] { width: 110px; padding: 6px 8px; background: #0e1726; border: 1px solid #233454; border-radius: 4px; color: #e0e0e0; font-size: 13px; }
   .setting-input input[type="time"]:focus { outline: none; border-color: #4ecca3; }
@@ -5617,6 +5639,22 @@ function setIntervalPart(part, raw) {
   }
 }
 
+// Toggle a single day (0=Sun … 6=Sat) in the dailyStartDays draft value.
+// Reads current draft (falling back to effective value from the schema
+// default of [0..6]), flips the bit for `day`, and writes back. Called
+// by the 7-checkbox row in the anchored-mode scheduler settings.
+function toggleScheduleDay(day) {
+  const current = draftValue('scheduler.dailyStartDays');
+  const arr = Array.isArray(current) ? current.slice() : [0, 1, 2, 3, 4, 5, 6];
+  const idx = arr.indexOf(day);
+  if (idx >= 0) arr.splice(idx, 1);
+  else { arr.push(day); arr.sort((a, b) => a - b); }
+  setSettingValue('scheduler.dailyStartDays', arr);
+  // Repaint just this row to reflect the new checked state + potential
+  // empty-mask warning without losing focus elsewhere in the form.
+  paintSettings();
+}
+
 function renderSchedulerSection() {
   const startTime = draftValue('scheduler.dailyStartTime') || '';
   const loop = Number(draftValue('scheduler.loopSeconds')) || 0;
@@ -5625,10 +5663,38 @@ function renderSchedulerSection() {
   const pretty = formatIntervalPretty(loop, fromCompletion);
   const startOverridden = isOverriddenInForm('scheduler.dailyStartTime');
   const loopOverridden = isOverriddenInForm('scheduler.loopSeconds');
+  const daysOverridden = isOverriddenInForm('scheduler.dailyStartDays');
   const startDot = startOverridden ? '<span class="setting-dot" title="Overrides environment"></span>' : '';
   const loopDot = loopOverridden ? '<span class="setting-dot" title="Overrides environment"></span>' : '';
+  const daysDot = daysOverridden ? '<span class="setting-dot" title="Overrides environment"></span>' : '';
   const startRevert = startOverridden ? '<button type="button" class="setting-revert" onclick="revertSettingValue(\\'scheduler.dailyStartTime\\')">Revert</button>' : '';
   const loopRevert = loopOverridden ? '<button type="button" class="setting-revert" onclick="revertSettingValue(\\'scheduler.loopSeconds\\')">Revert</button>' : '';
+  const daysRevert = daysOverridden ? '<button type="button" class="setting-revert" onclick="revertSettingValue(\\'scheduler.dailyStartDays\\')">Revert</button>' : '';
+
+  const daysRaw = draftValue('scheduler.dailyStartDays');
+  const daysArr = Array.isArray(daysRaw) ? daysRaw : [0, 1, 2, 3, 4, 5, 6];
+  const daySet = new Set(daysArr);
+  const emptyMask = daysArr.length === 0;
+  const dayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const daysRow = fromCompletion ? '' : (
+    '<div class="setting" data-path="scheduler.dailyStartDays">' +
+      '<div class="setting-label">Run on days' + daysDot + '</div>' +
+      '<div class="setting-input">' +
+        '<div class="days-of-week-row">' +
+          dayLabels.map((name, i) =>
+            '<label class="dow-checkbox">' +
+              '<input type="checkbox" ' + (daySet.has(i) ? 'checked' : '') +
+                ' onchange="toggleScheduleDay(' + i + ')">' +
+              '<span>' + name + '</span>' +
+            '</label>'
+          ).join('') +
+        '</div>' +
+        '<div class="setting-help-inline" style="margin-top:6px">Uncheck days to skip. Default: all days (backward-compatible). At least one day required.</div>' +
+        (emptyMask ? '<div class="settings-error" style="margin-top:6px">At least one day must be selected — the scheduler is disabled with an empty mask.</div>' : '') +
+      '</div>' +
+      daysRevert +
+    '</div>'
+  );
 
   const startTimeRow = fromCompletion ? '' : (
     '<div class="setting" data-path="scheduler.dailyStartTime">' +
@@ -5654,6 +5720,7 @@ function renderSchedulerSection() {
       '</label>' +
     '</div>' +
     startTimeRow +
+    daysRow +
     '<div class="setting" data-path="scheduler.loopSeconds">' +
       '<div class="setting-label">Interval' + loopDot + '</div>' +
       '<div class="setting-input setting-interval-grid">' +
@@ -5811,7 +5878,7 @@ async function loadEnvTable(reveal) {
       if (!byCat[e.category]) { byCat[e.category] = []; catOrder.push(e.category); }
       byCat[e.category].push(e);
     }
-    const catLabel = { panel: 'Panel infrastructure', paths: 'Data paths', credentials: 'Credentials', runtime: 'Locale &amp; timezone', debug: 'Debug / runtime' };
+    const catLabel = { panel: 'Panel infrastructure', paths: 'Data paths', credentials: 'Credentials', runtime: 'Locale &amp; timezone', scheduler: 'Scheduler', debug: 'Debug / runtime' };
     const rows = [];
     for (const cat of catOrder) {
       rows.push('<tr class="cat-row"><td colspan="3">' + escapeHtml(catLabel[cat] || cat) + '</td></tr>');
@@ -6286,6 +6353,15 @@ function renderScheduleTab() {
         mainInterval = '';
       }
       if (mainInterval) parts.push('<div class="sched-row"><div class="sched-label">Interval · Claimers</div><div class="sched-value muted">' + mainInterval + '</div></div>');
+      // Days-of-week readout (#108): only render when the mask is not
+      // all-days (visual noise suppression on the default). Applies to
+      // anchored mode only — interval-from-completion has no wall-clock
+      // day-of-week semantics.
+      if (state.dailyAnchored && Array.isArray(state.dailyStartDays) && state.dailyStartDays.length > 0 && state.dailyStartDays.length < 7) {
+        const dowNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+        const days = state.dailyStartDays.slice().sort((a, b) => a - b).map(i => dowNames[i]).join(', ');
+        parts.push('<div class="sched-row"><div class="sched-label">Days · Claimers</div><div class="sched-value muted">' + days + ' only</div></div>');
+      }
     } else {
       parts.push('<div class="sched-row"><div class="sched-label">Claimers</div><div class="sched-value muted">Not scheduled — set START_TIME or LOOP in Settings → Scheduler.</div></div>');
     }
