@@ -4,6 +4,25 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.62
+
+**Partial fix for the MS Rewards dashboard redesign (Dr4w's [#110](https://github.com/feldorn/free-games-claimer/109)).** Targets **Bug 1 (readPointsBalance)**; Bug 2 (activity-card clicks) and Bug 3 (mobile searches) remain open pending the reporter's DOM dump for the new UI.
+
+Context: MS is gradually rolling out a redesigned Rewards dashboard. My own account is still on the pre-redesign UI (probed 2026-07-03) so I can't reverse-engineer the new selectors locally, but three changes below help users on the new UI **without needing to see their DOM**:
+
+1. **`/about` redirect handler.** When `page.goto(rewards.bing.com)` lands on `/about` (Dr4w's Bug 1 symptom — session appears logged-out to the scraper), the script now logs the redirect + explicitly navigates to `rewards.bing.com/dashboard` and re-waits. Old-UI accounts stay at `/` as before; new-UI accounts get their real dashboard.
+2. **RSC-stream probe now tries both `/` and `/dashboard`.** The React Server Components fetch from kevindevm's #71 (v2.8.40) is data-layer, not DOM — it survives redesigns *if* we hit the right URL. Old UI serves the RSC blob at the root; the redesign moves it to `/dashboard`. Trying both covers both.
+3. **Text-driven "Available points" fallback.** New locate-strategy: find the DOM node whose text is exactly `"Available points"` (the label text Microsoft kept identical between old and new UIs — confirmed via probe of my old-UI account + Dr4w's screenshot of the new UI), then walk up ≤6 ancestors looking for a numeric-only descendant. Portable across UIs, locale-limited to English at this point.
+
+**Still broken on the new UI:**
+
+- Pending-activity-card clicks time out (Bug 2) — needs the new UI's card DOM shape, which I don't have.
+- Mobile search discovery (Bug 3) — needs confirmation whether MS removed it or moved it.
+
+**Workaround if you're on the new UI and want to disable auto-runs entirely:** Settings → Services → Microsoft Rewards → uncheck Active, or `MS_SCHEDULE_HOURS=0` in your compose. The redemption tracker + balance history still work if you manually visit rewards.bing.com through the panel's **Show browser** view.
+
+---
+
 ## What's new in 2.8.61
 
 **Hotfix for v2.8.60.** The `toggleScheduleDay()` helper added in v2.8.60 for the day-of-week checkbox row had backticks around \`day\` in its docstring. That function lives inside the giant `PANEL_HTML` template literal (client-side JS is served as text inside the JS module's outer template string), so the backticks terminated the outer template and the whole `interactive-login.js` module failed to parse at startup. Container went into restart loop for anyone who pulled the v2.8.60 image.

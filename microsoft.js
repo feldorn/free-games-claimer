@@ -603,6 +603,21 @@ async function readPointsBalance(page) {
     try {
       await page.goto(BING_REWARDS_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
       await delay(3000);
+      // Redesigned-dashboard rollout (Dr4w's #110, 2026-07): MS sometimes
+      // lands rewards.bing.com/ on /about (public info page) even when
+      // the session cookie is present, before eventually hydrating the
+      // authenticated dashboard. Force-navigate to /dashboard explicitly
+      // and re-wait if we detect the /about landing. Portable — old UI
+      // stays at rewards.bing.com/, new UI lives at /dashboard.
+      if (/\/about(\/|$|\?)/i.test(page.url())) {
+        log.info('readPointsBalance: landed on /about — navigating to /dashboard explicitly');
+        try {
+          await page.goto(BING_REWARDS_URL + '/dashboard', { waitUntil: 'domcontentloaded', timeout: 60000 });
+          await delay(3000);
+        } catch (e) {
+          log.info(`readPointsBalance: /dashboard navigation ${String(e.message || e).split('\n')[0]}`);
+        }
+      }
       // RSC primary path (v2.8.40, from kevindevm's #71 finding): MS's
       // dashboard is a React Server Components route, and re-fetching
       // the same URL with header `rsc: 1` returns the RSC stream — a
@@ -613,23 +628,66 @@ async function readPointsBalance(page) {
       // costs one extra HTTP request that the browser context's
       // cookies authenticate transparently. DOM selectors stay as a
       // fallback in case MS changes the RSC contract.
-      try {
-        const rscText = await page.evaluate(async (url) => {
-          const r = await fetch(url, { headers: { rsc: '1' }, credentials: 'include' });
-          return await r.text();
-        }, BING_REWARDS_URL);
-        const m = String(rscText || '').match(/"balance"\s*:\s*(\d+)/);
-        if (m) {
-          const n = parseInt(m[1], 10);
-          if (Number.isFinite(n) && n > 0) return n;
-        }
-      } catch { /* fall through to DOM selectors */ }
+      // 2026-07 hardening (#110): try both the legacy root URL and the
+      // new /dashboard route since MS split the redesign across paths.
+      // First hit that yields a balance wins; the old UI has RSC on /,
+      // the redesign moves it to /dashboard.
+      const rscCandidates = [BING_REWARDS_URL, BING_REWARDS_URL + '/dashboard'];
+      for (const rscUrl of rscCandidates) {
+        try {
+          const rscText = await page.evaluate(async (url) => {
+            const r = await fetch(url, { headers: { rsc: '1' }, credentials: 'include' });
+            return await r.text();
+          }, rscUrl);
+          const m = String(rscText || '').match(/"balance"\s*:\s*(\d+)/);
+          if (m) {
+            const n = parseInt(m[1], 10);
+            if (Number.isFinite(n) && n > 0) return n;
+          }
+        } catch { /* try next candidate / fall through to DOM selectors */ }
+      }
       for (const sel of selectors) {
         const loc = page.locator(sel).first();
         if (await loc.count() === 0) continue;
         const text = await loc.innerText({ timeout: 5000 }).catch(() => '');
         const n = parseInt(String(text).replace(/[^\d]/g, ''), 10);
         if (Number.isFinite(n) && n > 0) return n;
+      }
+      // Text-driven fallback (#110): the redesigned dashboard has an
+      // "Available points" label above a number card, same label text as
+      // the legacy UI. Locate the label element and walk up until we find
+      // a container that also holds a number; extract that number. Works
+      // on both old and new UIs because the label text is stable across
+      // the redesign (Dr4w's screenshot confirms the exact "Available
+      // points" wording). Locale-limited to English for now — matching
+      // the existing selectors' locale coverage; localized variants can
+      // be added as needed once we see them in diagnostics.
+      const textDriven = await page.evaluate(() => {
+        const labels = ['Available points', 'Available Points'];
+        for (const label of labels) {
+          const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+          let node;
+          while ((node = walker.nextNode())) {
+            if ((node.textContent || '').trim() !== label) continue;
+            // Walk up ancestors looking for a container that has a
+            // numeric-only text descendant nearby (not counting the
+            // label itself).
+            let el = node.parentElement;
+            for (let depth = 0; depth < 6 && el; depth++, el = el.parentElement) {
+              const numMatches = Array.from(el.querySelectorAll('*'))
+                .map(n => (n.textContent || '').trim())
+                .filter(t => /^\d{1,3}(,\d{3})*$|^\d+$/.test(t))
+                .map(t => parseInt(t.replace(/,/g, ''), 10))
+                .filter(n => Number.isFinite(n) && n > 0);
+              if (numMatches.length) return numMatches[0];
+            }
+          }
+        }
+        return null;
+      }).catch(() => null);
+      if (textDriven && textDriven > 0) {
+        log.info(`readPointsBalance: matched via "Available points" text-driven fallback (${textDriven})`);
+        return textDriven;
       }
       if (attempt === 1) {
         log.info('readPointsBalance: counter not found on first load; retrying after 5s');
