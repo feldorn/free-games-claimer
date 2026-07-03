@@ -4,6 +4,14 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.61
+
+**Hotfix for v2.8.60.** The `toggleScheduleDay()` helper added in v2.8.60 for the day-of-week checkbox row had backticks around \`day\` in its docstring. That function lives inside the giant `PANEL_HTML` template literal (client-side JS is served as text inside the JS module's outer template string), so the backticks terminated the outer template and the whole `interactive-login.js` module failed to parse at startup. Container went into restart loop for anyone who pulled the v2.8.60 image.
+
+Long-standing memory note about `PANEL_HTML` and inline backticks — regression prevention: git-diff-scan v2.8.60→v2.8.61 confirms this was the only backtick introduced in v2.8.60. Anyone who pulled v2.8.60 and got the restart loop should pull `:latest` (v2.8.61) — the panel will come back up on next start with no config changes required.
+
+---
+
 ## What's new in 2.8.60
 
 Two customer-driven changes shipped together.
