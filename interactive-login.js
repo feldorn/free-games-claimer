@@ -5641,8 +5641,10 @@ function setIntervalPart(part, raw) {
 
 // Toggle a single day (0=Sun … 6=Sat) in the dailyStartDays draft value.
 // Reads current draft (falling back to effective value from the schema
-// default of [0..6]), flips the bit for `day`, and writes back. Called
-// by the 7-checkbox row in the anchored-mode scheduler settings.
+// default of [0..6]), flips the bit for the passed day, and writes back.
+// Called by the 7-checkbox row in the anchored-mode scheduler settings.
+// Note: NO backticks in this comment — this function lives inside the
+// PANEL_HTML template literal, so a backtick would terminate the string.
 function toggleScheduleDay(day) {
   const current = draftValue('scheduler.dailyStartDays');
   const arr = Array.isArray(current) ? current.slice() : [0, 1, 2, 3, 4, 5, 6];
