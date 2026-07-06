@@ -865,6 +865,109 @@ async function claimReadyToClaimCard(page) {
   }
 }
 
+// Detect the redesigned MS Rewards dashboard UI (Dr4w's #110). The
+// redesign moves activity cards out of AngularJS `mee-card` elements
+// into two Tailwind-styled containers on separate pages: `#dailyset`
+// on /dashboard and `#exploreonbing` on /earn. Presence of either
+// container ID is a reliable signal that we're on the new UI.
+async function isNewMsUi(page) {
+  try {
+    return (await page.locator('#dailyset, #exploreonbing').count()) > 0;
+  } catch { return false; }
+}
+
+// Attempt to expand a collapsed section on the new UI. Cards inside a
+// closed collapsible are in the DOM but not actionable — Playwright's
+// click waits 15s for visibility+stability then fails, which is
+// exactly Dr4w's Bug 2 timeout signature. Try clicking the section's
+// aria-expanded=false toggle (or the header itself). Best-effort: if
+// the section is already open, or the toggle shape differs from what
+// we expect, just move on. mzernetsch's #110 comment noted both
+// sections default collapsed.
+async function expandNewMsUiSection(page, containerId) {
+  try {
+    // Toggle patterns MS uses on the redesign: a `button[aria-expanded]`
+    // adjacent to or containing the section's header (h2/h3), or on the
+    // container itself. We're generous with what we click as long as
+    // aria-expanded is false — nothing is harmed by clicking an
+    // already-expanded control (its state flips or is idempotent).
+    const candidates = [
+      `#${containerId} button[aria-expanded="false"]`,
+      `button[aria-expanded="false"][aria-controls="${containerId}"]`,
+      `[aria-expanded="false"][aria-controls="${containerId}"]`,
+    ];
+    for (const sel of candidates) {
+      const loc = page.locator(sel).first();
+      if (await loc.count() === 0) continue;
+      await loc.click({ timeout: 3000 });
+      await page.waitForTimeout(600); // let the transition settle
+      return;
+    }
+  } catch { /* section may already be open or use a different toggle shape */ }
+}
+
+// Click every pending activity card on the redesigned MS Rewards UI
+// (Dr4w's #110). Cards live in two containers across two pages:
+// `#dailyset` on /dashboard and `#exploreonbing` on /earn. Each card
+// is an `<a>` element that opens a Bing search in a new tab. Filter:
+// cards whose visible text includes "Completed" are already done —
+// skip. Grayscale-styled cards inside `#exploreonbing` are locked
+// (mzernetsch's observation) — skip them via the :not(:has(.grayscale))
+// selector suffix. The "Keep earning" bonus section that sometimes
+// appears on /earn is caught via the same #exploreonbing container
+// per mzernetsch's follow-up.
+async function clickNewUiActivityCards(page) {
+  const pages = [
+    { url: BING_REWARDS_URL + '/dashboard', containerId: 'dailyset', selector: '#dailyset a:not([href$="/earn"])' },
+    { url: BING_REWARDS_URL + '/earn',      containerId: 'exploreonbing', selector: '#exploreonbing a:not(:has(.grayscale))' },
+  ];
+  let attempted = 0, clicked = 0, skippedCompleted = 0, errors = 0;
+  for (const { url, containerId, selector } of pages) {
+    if (page.isClosed()) break;
+    try {
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    } catch (e) {
+      if (isRecoverableMsNavError(e)) {
+        log.info(`New-UI activity cards: goto ${url} — ${String(e.message || e).split('\n')[0]} — skipping this page`);
+        continue;
+      }
+      throw e;
+    }
+    await delay(2000);
+    await dismissDashboardPopup(page);
+    await expandNewMsUiSection(page, containerId);
+    const cards = await page.locator(selector).elementHandles();
+    log.info(`New-UI activity cards on ${containerId}: ${cards.length} candidate(s)`);
+    for (let i = 0; i < cards.length; i++) {
+      if (page.isClosed()) break;
+      const isCompleted = await cards[i].evaluate(el => /\bCompleted\b/i.test(el.textContent || '')).catch(() => false);
+      if (isCompleted) { skippedCompleted++; continue; }
+      attempted++;
+      try {
+        await cards[i].click({ timeout: 15000 });
+        clicked++;
+        const ms = randomMs(15);
+        log.info(`Card #${i + 1} clicked on ${containerId}. Sleeping ${(ms / 1000).toFixed(1)}s before next.`);
+        await delay(ms);
+      } catch (e) {
+        // Popup interception is the common cause — dismiss and try once more.
+        const dismissed = await dismissDashboardPopup(page);
+        try {
+          await cards[i].click({ timeout: 10000 });
+          clicked++;
+          if (dismissed) log.info(`Card #${i + 1} on ${containerId}: popup dismissed, retry succeeded.`);
+          else log.info(`Card #${i + 1} on ${containerId}: retry succeeded.`);
+          await delay(randomMs(15));
+        } catch (e2) {
+          errors++;
+          log.warn(`Card #${i + 1} on ${containerId} click failed: ${e2.message.split('\n')[0]}`);
+        }
+      }
+    }
+  }
+  log.info(`New-UI activity cards summary: attempted=${attempted} clicked=${clicked} already-completed=${skippedCompleted} errors=${errors}`);
+}
+
 async function clickEveryPendingActivityCard(page) {
   // Same defensive shape as claimPendingBonusPoints — a transient at the
   // initial dashboard goto (chrome-error redirect, DNS blip, browser
@@ -887,6 +990,15 @@ async function clickEveryPendingActivityCard(page) {
     throw e;
   }
   await dismissDashboardPopup(page);
+  // New-UI dispatch (Dr4w's #110): if the redesigned dashboard is
+  // detected, use the redesigned selectors + dual-page walk. Old-UI
+  // flow below stays intact for accounts still on the legacy layout
+  // (my own account, probed 2026-07-03, still on the legacy UI).
+  if (await isNewMsUi(page)) {
+    log.info('clickEveryPendingActivityCard: detected redesigned dashboard UI (#dailyset/#exploreonbing) — using new-UI selectors');
+    await clickNewUiActivityCards(page);
+    return;
+  }
   const cards = await page.locator(BING_REWARDS_ACTIVITY_CARD_SELECTOR).elementHandles();
   log.info(`Clicking pending activity cards (${cards.length} found)`);
   let savedDiag = false;

@@ -4,6 +4,23 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.63
+
+**MS Rewards new-UI activity-card port (Dr4w's [#110](https://github.com/feldorn/free-games-claimer/issues/110) Bug 2).** Second-wave fix for the redesigned Rewards dashboard, using DOM samples from Dr4w + selector suggestions from mzernetsch and kevindevm on the issue thread.
+
+The redesigned dashboard is a Tailwind-CSS rewrite of the old AngularJS shell — none of the `mee-card` / `mee-rewards-daily-set-item-content` selectors match anymore, and the activity cards were split across two pages instead of one. Since my own account is still on the pre-redesign UI (probed 2026-07-03), the port relies on the community-provided DOM samples:
+
+- **New helper `isNewMsUi(page)`** — detects the redesign via presence of `#dailyset` or `#exploreonbing` container IDs.
+- **New helper `expandNewMsUiSection(page, containerId)`** — clicks the collapsible section's `aria-expanded="false"` toggle so cards inside become actionable. Best-effort: no-op if already open or toggle shape differs. Addresses the "cards found but click times out at 15s" signature in Dr4w's diagnostic.
+- **New helper `clickNewUiActivityCards(page)`** — walks both pages: `#dailyset` on `/dashboard` (mzernetsch's `#dailyset a:not([href$="/earn"])` selector, filters out the "See more → /earn" link) and `#exploreonbing` on `/earn` (mzernetsch's `#exploreonbing a:not(:has(.grayscale))` selector, skips locked/grayscale cards; also catches "Keep earning" bonuses per mzernetsch's follow-up). Cards whose visible text includes `"Completed"` are skipped without click attempts. Popup-interception retry follows the same shape as the old-UI path.
+- **Dispatch in `clickEveryPendingActivityCard`** — if `isNewMsUi(page)` returns true, use the new-UI path; otherwise the legacy `mee-card` code stays intact. Both UIs coexist during the rollout.
+
+**Bug 3 (mobile searches):** Dr4w confirmed the mobile-searches activity card is entirely removed from the redesigned dashboard. Not fixable on our side — Microsoft made a product decision. The new-UI dispatch above already handles mobile-view accounts gracefully: if `#dailyset`/`#exploreonbing` aren't present on mobile, the flow falls through to zero-card completion; if they are, it walks them the same way. The base-point Bing search loop itself is unchanged and still fires — whether Microsoft credits those searches is up to them.
+
+**What's still open:** mzernetsch's "Edge Browsing Streak" observation (new activity requiring Edge browser to complete) — I've filed it as a separate track. Making patchright present as Edge is a bigger investigation (user-agent + client hints + fingerprint), not shipping in this release.
+
+---
+
 ## What's new in 2.8.62
 
 **Partial fix for the MS Rewards dashboard redesign (Dr4w's [#110](https://github.com/feldorn/free-games-claimer/109)).** Targets **Bug 1 (readPointsBalance)**; Bug 2 (activity-card clicks) and Bug 3 (mobile searches) remain open pending the reporter's DOM dump for the new UI.
