@@ -4,6 +4,19 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.65
+
+**Locale-portable filters + zero-guard on the MS Rewards new-UI path.** Follow-up to v2.8.63/64 based on @JLMael's post-verification review of [#110](https://github.com/feldorn/free-games-claimer/issues/110) — the core new-UI dispatch works (`attempted=6 clicked=6 errors=0` end-to-end on their account) but two bugs surfaced on French-locale sessions that also affect English:
+
+1. **Completed-card filter was text-based** — `/\bCompleted\b/i` matched EN but missed FR "Terminé", so on FR sessions completed cards got **re-clicked** each run. That's exactly the shape MS's "unusual activity" gate keys off. Switched both `#dailyset` and `#exploreonbing` selectors to a structural check: `:not(:has(.bg-statusSuccessRewardsBg))` — the green success-chip class the redesign applies to completed cards regardless of language.
+2. **`claimReadyToClaimCard` had no zero-guard** — when no points were pending, the SVG+text walk still matched the always-present arrow, clicked into an empty modal, and burned the full 10s `waitForSelector` timeout before failing over. It also silently no-op'd on FR sessions (matched on the literal "Claim" text, which reads "Réclamer" in French). Rewrote to key off `button:has(.bg-statusDangerBg)` — the red status dot appears **only** when there ARE claimable points, works portably across locales, and eliminates the spurious modal open. Modal CTA matcher now covers EN "Claim points" + FR "Réclamer les points" / "Réclamer".
+
+Deferred JLMael's other observations to future releases:
+- `#moreactivities` ("Continue earning") — third card container worth ~69 pts/day on their /earn page. Bigger click volume → plausibly stronger unusual-activity signal, so wants opt-in flag design.
+- RSC-stream JSON `dailySetItems` for locale-proof completion detection — worthwhile architecture change, bigger scope.
+
+---
+
 ## What's new in 2.8.64
 
 **Hotfix for v2.8.63's `expandNewMsUiSection` selector regression.** Caught by @mzernetsch on [#110](https://github.com/feldorn/free-games-claimer/issues/110). Two issues in the previous release:

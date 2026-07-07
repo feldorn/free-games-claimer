@@ -840,26 +840,33 @@ async function claimReadyToClaimCard(page) {
     return;
   }
   try {
-    // Iterate every SVG matching the dashboard's small-arrow class chain
-    // and pick the one whose preceding `<p>` reads "Claim". The class chain
-    // is Tailwind utility classes (`size-3.5 -rotate-90 rtl:rotate-90`) —
-    // they're stable on the redesigned dashboard but bypassed in our locale
-    // flags via --accept-lang=en-US so the "Claim" text matches.
-    const SVG_SELECTOR = 'svg.size-3\\.5.-rotate-90.rtl\\:rotate-90';
-    await page.waitForSelector(SVG_SELECTOR, { timeout: 3000 }).catch(() => {});
-    const svgs = await page.locator(SVG_SELECTOR).all();
-    for (const svg of svgs) {
-      const labelText = await svg.locator('xpath=preceding-sibling::p[1]')
-        .innerText({ timeout: 1500 }).catch(() => '');
-      if (labelText.trim() !== 'Claim') continue;
-      await svg.click({ timeout: 5000 });
-      const claimBtn = page.locator('button:has-text("Claim points")');
-      await claimBtn.waitFor({ state: 'visible', timeout: 10000 });
-      await claimBtn.click({ timeout: 5000 });
-      log.info('Clicked "Ready to claim" card — bonus points credited.');
-      await page.waitForTimeout(2000);
-      return; // one card per run is the realistic shape; bail after success
+    // Structure-based trigger + zero-guard (JLMael's #110 follow-up,
+    // 2026-07-07): the "Ready to claim" CTA carries a `.bg-statusDangerBg`
+    // red status dot ONLY when there are actually claimable points.
+    // Absent → nothing to claim, return cleanly (avoids the previous
+    // 10s spurious-modal-open + waitForSelector timeout on empty-claim
+    // runs). Also locale-portable: the previous SVG+text walk keyed
+    // off the string "Claim" and silently no-op'd on French sessions
+    // where the label reads "Réclamer" — MS renders the dashboard in
+    // EN or FR per session ignoring --accept-lang, so text filters
+    // break on FR accounts even with our locale flags.
+    const claimTrigger = page.locator('button:has(.bg-statusDangerBg)').first();
+    if (await claimTrigger.count() === 0) {
+      return; // nothing pending — no red dot, no CTA
     }
+    await claimTrigger.click({ timeout: 5000 });
+    // Modal CTA — EN + FR variants observed. If MS surfaces additional
+    // locales the reporter didn't see, they'll show up as a "skipping"
+    // log line and we can extend.
+    const claimBtn = page.locator(
+      'button:has-text("Claim points"), ' +
+      'button:has-text("Réclamer les points"), ' +
+      'button:has-text("Réclamer")'
+    ).first();
+    await claimBtn.waitFor({ state: 'visible', timeout: 10000 });
+    await claimBtn.click({ timeout: 5000 });
+    log.info('Clicked "Ready to claim" card — bonus points credited.');
+    await page.waitForTimeout(2000);
   } catch (e) {
     log.info(`claimReadyToClaimCard: ${e.message?.split('\n')[0] || e} — skipping`);
   }
@@ -910,11 +917,19 @@ async function expandNewMsUiSection(page, ariaLabel) {
 // appears on /earn is caught via the same #exploreonbing container
 // per mzernetsch's follow-up.
 async function clickNewUiActivityCards(page) {
+  // Completed-card filter is structural, not text-based: the redesigned
+  // dashboard renders the green "10 points earned" chip on completed
+  // cards via the class `.bg-statusSuccessRewardsBg` regardless of
+  // locale. The previous text filter (`/\bCompleted\b/i`) failed on
+  // French accounts where the badge reads "Terminé" — completed cards
+  // then got re-clicked, which is exactly the kind of behaviour that
+  // trips MS's "unusual activity" gate. Class-based lookup is
+  // locale-portable. (JLMael's #110 follow-up, 2026-07-07.)
   const pages = [
-    { url: BING_REWARDS_URL + '/dashboard', label: 'dailyset',      ariaLabel: 'Daily set',       selector: '#dailyset a:not([href$="/earn"])' },
-    { url: BING_REWARDS_URL + '/earn',      label: 'exploreonbing', ariaLabel: 'Explore on Bing', selector: '#exploreonbing a:not(:has(.grayscale))' },
+    { url: BING_REWARDS_URL + '/dashboard', label: 'dailyset',      ariaLabel: 'Daily set',       selector: '#dailyset a:not([href$="/earn"]):not(:has(.bg-statusSuccessRewardsBg))' },
+    { url: BING_REWARDS_URL + '/earn',      label: 'exploreonbing', ariaLabel: 'Explore on Bing', selector: '#exploreonbing a:not(:has(.grayscale)):not(:has(.bg-statusSuccessRewardsBg))' },
   ];
-  let attempted = 0, clicked = 0, skippedCompleted = 0, errors = 0;
+  let attempted = 0, clicked = 0, errors = 0;
   for (const { url, label, ariaLabel, selector } of pages) {
     if (page.isClosed()) break;
     try {
@@ -930,11 +945,9 @@ async function clickNewUiActivityCards(page) {
     await dismissDashboardPopup(page);
     await expandNewMsUiSection(page, ariaLabel);
     const cards = await page.locator(selector).elementHandles();
-    log.info(`New-UI activity cards on ${label}: ${cards.length} candidate(s)`);
+    log.info(`New-UI activity cards on ${label}: ${cards.length} pending candidate(s)`);
     for (let i = 0; i < cards.length; i++) {
       if (page.isClosed()) break;
-      const isCompleted = await cards[i].evaluate(el => /\bCompleted\b/i.test(el.textContent || '')).catch(() => false);
-      if (isCompleted) { skippedCompleted++; continue; }
       attempted++;
       try {
         await cards[i].click({ timeout: 15000 });
@@ -958,7 +971,7 @@ async function clickNewUiActivityCards(page) {
       }
     }
   }
-  log.info(`New-UI activity cards summary: attempted=${attempted} clicked=${clicked} already-completed=${skippedCompleted} errors=${errors}`);
+  log.info(`New-UI activity cards summary: attempted=${attempted} clicked=${clicked} errors=${errors}`);
 }
 
 async function clickEveryPendingActivityCard(page) {
