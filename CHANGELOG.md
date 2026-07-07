@@ -4,6 +4,22 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.64
+
+**Hotfix for v2.8.63's `expandNewMsUiSection` selector regression.** Caught by @mzernetsch on [#110](https://github.com/feldorn/free-games-claimer/issues/110). Two issues in the previous release:
+
+1. `#${containerId} button[aria-expanded="false"]` matched the section's **info** button (a small "ⓘ" icon that also has `aria-expanded="false"` because it toggles a modal). Clicking the info button opened a modal that then intercepted every subsequent card click — total regression on the new-UI activity-card path.
+2. The section-toggle button's own `aria-expanded` state is buggy on MS's side — always false regardless of open/closed state. So even keying off `aria-expanded` on the correct element wouldn't have worked.
+
+Fix (per @mzernetsch's suggestion): key off the SVG chevron's `.rotate-180` class instead — present when the section is open (chevron up), absent when closed (chevron down). Target the toggle by its section-name aria-label:
+
+- `[aria-label="Daily set"]:not(:has(.rotate-180))` — Daily set toggle when closed
+- `[aria-label="Explore on Bing"]:not(:has(.rotate-180))` — Explore on Bing toggle when closed
+
+Also confirmed by @mzernetsch: card clicks fire through even on collapsed sections (the anchor's `href` navigates regardless of visibility). So the expansion step is now a defensive UX-nicety rather than a functional prerequisite — even if the toggle selector misses, the card clicks still succeed.
+
+---
+
 ## What's new in 2.8.63
 
 **MS Rewards new-UI activity-card port (Dr4w's [#110](https://github.com/feldorn/free-games-claimer/issues/110) Bug 2).** Second-wave fix for the redesigned Rewards dashboard, using DOM samples from Dr4w + selector suggestions from mzernetsch and kevindevm on the issue thread.

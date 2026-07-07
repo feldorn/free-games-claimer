@@ -876,33 +876,26 @@ async function isNewMsUi(page) {
   } catch { return false; }
 }
 
-// Attempt to expand a collapsed section on the new UI. Cards inside a
-// closed collapsible are in the DOM but not actionable — Playwright's
-// click waits 15s for visibility+stability then fails, which is
-// exactly Dr4w's Bug 2 timeout signature. Try clicking the section's
-// aria-expanded=false toggle (or the header itself). Best-effort: if
-// the section is already open, or the toggle shape differs from what
-// we expect, just move on. mzernetsch's #110 comment noted both
-// sections default collapsed.
-async function expandNewMsUiSection(page, containerId) {
+// Attempt to expand a collapsed section on the new UI. Per mzernetsch's
+// #110 follow-up (2026-07-06): (a) the previous `[aria-expanded="false"]`
+// approach picked the section's *info* button instead of the collapse
+// toggle, which opened a modal that then intercepted every subsequent
+// click — total regression. (b) The section toggle's own aria-expanded
+// state is buggy on MS's side (always false), so we can't key off it
+// even on the right element. (c) The correct signal is the SVG chevron
+// class `.rotate-180` — present when the section is open (chevron up),
+// absent when closed (chevron down). Target the toggle by its
+// section-name aria-label and check that its subtree lacks `.rotate-180`.
+// mzernetsch also observed that card clicks fire through to Bing even
+// when the section is collapsed, so this expansion is a best-effort
+// UX-nicety + defensive step, not a functional prerequisite.
+async function expandNewMsUiSection(page, ariaLabel) {
   try {
-    // Toggle patterns MS uses on the redesign: a `button[aria-expanded]`
-    // adjacent to or containing the section's header (h2/h3), or on the
-    // container itself. We're generous with what we click as long as
-    // aria-expanded is false — nothing is harmed by clicking an
-    // already-expanded control (its state flips or is idempotent).
-    const candidates = [
-      `#${containerId} button[aria-expanded="false"]`,
-      `button[aria-expanded="false"][aria-controls="${containerId}"]`,
-      `[aria-expanded="false"][aria-controls="${containerId}"]`,
-    ];
-    for (const sel of candidates) {
-      const loc = page.locator(sel).first();
-      if (await loc.count() === 0) continue;
-      await loc.click({ timeout: 3000 });
-      await page.waitForTimeout(600); // let the transition settle
-      return;
-    }
+    const sel = `[aria-label="${ariaLabel}"]:not(:has(.rotate-180))`;
+    const loc = page.locator(sel).first();
+    if (await loc.count() === 0) return; // already open, or toggle not present
+    await loc.click({ timeout: 3000 });
+    await page.waitForTimeout(600); // let the transition settle
   } catch { /* section may already be open or use a different toggle shape */ }
 }
 
@@ -918,11 +911,11 @@ async function expandNewMsUiSection(page, containerId) {
 // per mzernetsch's follow-up.
 async function clickNewUiActivityCards(page) {
   const pages = [
-    { url: BING_REWARDS_URL + '/dashboard', containerId: 'dailyset', selector: '#dailyset a:not([href$="/earn"])' },
-    { url: BING_REWARDS_URL + '/earn',      containerId: 'exploreonbing', selector: '#exploreonbing a:not(:has(.grayscale))' },
+    { url: BING_REWARDS_URL + '/dashboard', label: 'dailyset',      ariaLabel: 'Daily set',       selector: '#dailyset a:not([href$="/earn"])' },
+    { url: BING_REWARDS_URL + '/earn',      label: 'exploreonbing', ariaLabel: 'Explore on Bing', selector: '#exploreonbing a:not(:has(.grayscale))' },
   ];
   let attempted = 0, clicked = 0, skippedCompleted = 0, errors = 0;
-  for (const { url, containerId, selector } of pages) {
+  for (const { url, label, ariaLabel, selector } of pages) {
     if (page.isClosed()) break;
     try {
       await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
@@ -935,9 +928,9 @@ async function clickNewUiActivityCards(page) {
     }
     await delay(2000);
     await dismissDashboardPopup(page);
-    await expandNewMsUiSection(page, containerId);
+    await expandNewMsUiSection(page, ariaLabel);
     const cards = await page.locator(selector).elementHandles();
-    log.info(`New-UI activity cards on ${containerId}: ${cards.length} candidate(s)`);
+    log.info(`New-UI activity cards on ${label}: ${cards.length} candidate(s)`);
     for (let i = 0; i < cards.length; i++) {
       if (page.isClosed()) break;
       const isCompleted = await cards[i].evaluate(el => /\bCompleted\b/i.test(el.textContent || '')).catch(() => false);
@@ -947,7 +940,7 @@ async function clickNewUiActivityCards(page) {
         await cards[i].click({ timeout: 15000 });
         clicked++;
         const ms = randomMs(15);
-        log.info(`Card #${i + 1} clicked on ${containerId}. Sleeping ${(ms / 1000).toFixed(1)}s before next.`);
+        log.info(`Card #${i + 1} clicked on ${label}. Sleeping ${(ms / 1000).toFixed(1)}s before next.`);
         await delay(ms);
       } catch (e) {
         // Popup interception is the common cause — dismiss and try once more.
@@ -955,12 +948,12 @@ async function clickNewUiActivityCards(page) {
         try {
           await cards[i].click({ timeout: 10000 });
           clicked++;
-          if (dismissed) log.info(`Card #${i + 1} on ${containerId}: popup dismissed, retry succeeded.`);
-          else log.info(`Card #${i + 1} on ${containerId}: retry succeeded.`);
+          if (dismissed) log.info(`Card #${i + 1} on ${label}: popup dismissed, retry succeeded.`);
+          else log.info(`Card #${i + 1} on ${label}: retry succeeded.`);
           await delay(randomMs(15));
         } catch (e2) {
           errors++;
-          log.warn(`Card #${i + 1} on ${containerId} click failed: ${e2.message.split('\n')[0]}`);
+          log.warn(`Card #${i + 1} on ${label} click failed: ${e2.message.split('\n')[0]}`);
         }
       }
     }
