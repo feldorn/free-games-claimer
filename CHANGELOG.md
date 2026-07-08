@@ -4,6 +4,20 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.66
+
+**Auto-skip the MS Rewards mobile earning walk on new UI accounts** — per @Dr4w's [#110](https://github.com/feldorn/free-games-claimer/issues/110) follow-up (2026-07-08): "It runs fine but earns nothing on the new dashboard, so it's just a pointless browser session at this point."
+
+The mobile session was still executing `clickEveryPendingActivityCard` + `claimPendingBonusPoints` + `claimReadyToClaimCard` + a full 25-search Bing loop against a mobile user-agent context, even though Microsoft removed the mobile-searches earning activity from the redesigned dashboard. The walk credited zero points and cost several minutes of wall-clock per run.
+
+Now: after the mobile session's pre-check balance read, `isNewMsUi(page)` is consulted; if the redesigned dashboard is detected, the activity walk + search loop are skipped and the run reports `skipped=1, pointsEarned=0` (with the pre-check balance carried forward as the current-balance snapshot). Old-UI mobile accounts are unaffected — they run the full walk exactly as before.
+
+**If MS reinstates mobile earning:** the detection is the same `#dailyset` / `#exploreonbing` container check the desktop path uses. When those containers disappear (MS rolls back), the skip branch auto-disengages and the walk resumes.
+
+**If you want to disable the mobile session entirely:** uncheck `microsoft-mobile` under Settings → Services. The existing per-service Active toggle is untouched — this release only adds the auto-skip on top of it.
+
+---
+
 ## What's new in 2.8.65
 
 **Locale-portable filters + zero-guard on the MS Rewards new-UI path.** Follow-up to v2.8.63/64 based on @JLMael's post-verification review of [#110](https://github.com/feldorn/free-games-claimer/issues/110) — the core new-UI dispatch works (`attempted=6 clicked=6 errors=0` end-to-end on their account) but two bugs surfaced on French-locale sessions that also affect English:

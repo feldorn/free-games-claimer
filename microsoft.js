@@ -1258,19 +1258,46 @@ log.section('Mobile');
       log.status('Signed in', 'yes');
       before = await readPointsBalance(page);
       if (before != null) log.status('Points before', before);
-      await clickEveryPendingActivityCard(page);
-      await claimPendingBonusPoints(page);
-      await claimReadyToClaimCard(page);
-      await executeBingSearches(page, searchTerms.slice(-mobileSearchCount));
-      after = await readPointsBalance(page);
-      if (after != null) log.status('Points after', after + (before != null ? ` (+${after - before})` : ''));
-      log.summary({
-        siteId: 'microsoft-mobile',
-        claimed: 0,
-        skipped: 0,
-        display: 'pointsEarned',
-        pointsEarned: (before != null && after != null) ? Math.max(0, after - before) : 0,
-      });
+      // Auto-skip mobile earning walk on new UI (Dr4w's #110 follow-up,
+      // 2026-07-08): Microsoft removed the mobile-searches activity
+      // from the redesigned dashboard, so both the activity-card walk
+      // and the Bing search loop credit zero on mobile new-UI accounts.
+      // Running them anyway is a browser session burned for nothing.
+      // Detection uses the same isNewMsUi() helper the desktop path
+      // uses — presence of #dailyset / #exploreonbing containers. If
+      // MS reinstates mobile earning later, this branch will fall
+      // through automatically (containers absent → old-UI path).
+      // Users who want to force the walk anyway can uncheck the
+      // microsoft-mobile service under Settings → Services (existing
+      // per-service Active toggle) — that removes the mobile session
+      // entirely rather than forcing the walk, which is what any user
+      // of a modern MS account should want here.
+      const skipMobileNewUi = await isNewMsUi(page);
+      if (skipMobileNewUi) {
+        log.info('MS Rewards mobile: new dashboard UI detected — skipping activity + search walk (MS removed mobile earning from the redesign). Balance recorded from the pre-check read.');
+        after = before; // pre-check balance is the accurate current balance; no earnings to compare
+        log.summary({
+          siteId: 'microsoft-mobile',
+          claimed: 0,
+          skipped: 1,
+          display: 'pointsEarned',
+          pointsEarned: 0,
+        });
+      } else {
+        await clickEveryPendingActivityCard(page);
+        await claimPendingBonusPoints(page);
+        await claimReadyToClaimCard(page);
+        await executeBingSearches(page, searchTerms.slice(-mobileSearchCount));
+        after = await readPointsBalance(page);
+        if (after != null) log.status('Points after', after + (before != null ? ` (+${after - before})` : ''));
+        log.summary({
+          siteId: 'microsoft-mobile',
+          claimed: 0,
+          skipped: 0,
+          display: 'pointsEarned',
+          pointsEarned: (before != null && after != null) ? Math.max(0, after - before) : 0,
+        });
+      }
     } else {
       log.fail('Login failed or timed out — skipping mobile session');
     }
