@@ -263,9 +263,39 @@ export function markDigestFlushed() {
   }
 }
 
+// Apprise circuit-breaker state (lequan2909's #113, 2026-07-10). During
+// a container-wide DNS/network outage, every per-service failure tries
+// to send its own apprise notification — which itself fails, adding
+// N+1 useless "apprise diag: exit 1" errors to the log for a single
+// outage. Track consecutive network-family failures per process; after
+// two in a row, silence further attempts for the rest of this process
+// lifetime. Any successful send resets the counter (recovery), but
+// once the silence trip has fired we stay silent — next process start
+// gets a fresh attempt. Cross-process state is intentionally not
+// persisted: too much bookkeeping for a rare transient class.
+let _appriseNetFailStreak = 0;
+let _appriseSilencedForRun = false;
+const APPRISE_NET_FAIL_THRESHOLD = 2;
+
+// Match error strings that indicate container-wide network/DNS failure
+// (Chromium goto errors already surface these; apprise wraps glibc
+// getaddrinfo errors through the Python HTTP stack). Deliberately
+// NARROW: we're catching container-can't-reach-internet, not per-
+// target rate limits (429) or credential problems (401) — those
+// should still surface each time so the user notices.
+const isAppriseNetworkTransient = (msg) => {
+  const s = String(msg || '');
+  return /Temporary failure in name resolution|Name or service not known/i.test(s)
+      || /getaddrinfo|ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ECONNRESET|ENETUNREACH/i.test(s);
+};
+
 export const notify = (html, opts = {}) => {
   if (!cfg.notify) {
     if (cfg.debug) console.debug('notify: NOTIFY is not set!');
+    return Promise.resolve();
+  }
+  if (_appriseSilencedForRun) {
+    if (cfg.debug) console.debug('notify: suppressed — apprise circuit-breaker tripped this run');
     return Promise.resolve();
   }
   // Notification verbosity gate (#31). opts.kind tags the call site as
@@ -374,10 +404,24 @@ export const notify = (html, opts = {}) => {
         if (error.message.includes('command not found')) {
           console.info('Run `pip install apprise`. See https://github.com/vogler/free-games-claimer#notifications');
         }
+        // Circuit-breaker: only network-transport failures count toward
+        // the trip. Per-target 401/403/429/etc. do NOT increment — those
+        // are actionable per-run and should keep surfacing normally.
+        if (isAppriseNetworkTransient(combinedDiag) || isAppriseNetworkTransient(error.message)) {
+          _appriseNetFailStreak++;
+          if (_appriseNetFailStreak >= APPRISE_NET_FAIL_THRESHOLD && !_appriseSilencedForRun) {
+            _appriseSilencedForRun = true;
+            console.warn(`apprise: silencing further notifications this run — ${_appriseNetFailStreak} consecutive network-transport failures suggest container-wide outage. Will resume on next process start.`);
+          }
+        }
         return reject(error);
       }
       if (stderr) console.error(`stderr: ${stderr}`);
       if (stdout) console.log(`stdout: ${stdout}`);
+      // Success — reset any pre-threshold streak so an isolated network
+      // failure earlier in the run doesn't accumulate toward the trip
+      // when the network was otherwise fine.
+      _appriseNetFailStreak = 0;
       resolve();
     });
   }));

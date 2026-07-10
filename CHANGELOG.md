@@ -4,6 +4,21 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.67
+
+**Apprise circuit-breaker on container-wide network transients.** Triggered by @lequan2909's [#113](https://github.com/feldorn/free-games-claimer/issues/113): during a DNS/network outage at the container level, every per-service failure tried to send its own apprise notification — which itself failed for the same reason — generating N+1 useless "apprise diag: exit 1" errors in the log for a single outage.
+
+New behavior in `src/util.js`:
+
+- Track a per-process streak of apprise-send failures matching the **network-transport family**: `Temporary failure in name resolution` / `Name or service not known` / `getaddrinfo` / `ENOTFOUND` / `EAI_AGAIN` / `ECONNREFUSED` / `ECONNRESET` / `ENETUNREACH`. Deliberately narrow — per-target rate limits (429), auth failures (401/403), and payload rejections are NOT matched and continue to surface each time as before (those are actionable).
+- After 2 consecutive network-family failures, silence further `notify()` calls for the rest of this process lifetime with a single `apprise: silencing further notifications this run — 2 consecutive network-transport failures suggest container-wide outage. Will resume on next process start.` warning line.
+- Any successful send resets the pre-threshold streak — an isolated network blip earlier in the run doesn't accumulate toward the trip when the network was otherwise fine.
+- Cross-process state is intentionally not persisted — each spawned service subprocess (Epic, GOG, FAB, etc.) starts with a fresh counter. That's a small compromise for a rare transient class; a container-wide outage will still generate ~2 apprise errors per subprocess instead of ~2 per notify call.
+
+No user-visible behavior change on healthy networks — you never hit the threshold, log looks identical.
+
+---
+
 ## What's new in 2.8.66
 
 **Auto-skip the MS Rewards mobile earning walk on new UI accounts** — per @Dr4w's [#110](https://github.com/feldorn/free-games-claimer/issues/110) follow-up (2026-07-08): "It runs fine but earns nothing on the new dashboard, so it's just a pointless browser session at this point."
