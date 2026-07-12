@@ -4,6 +4,25 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.68
+
+**MS Rewards mobile pre-login skip + end-of-run summary isolation on new UI.** Fixes both problems @Dr4w reported in [#114](https://github.com/feldorn/free-games-claimer/issues/114):
+
+**Problem 1 — mobile skip fired too late.** v2.8.66's `isNewMsUi(page)` check on the mobile session was inside `if (loggedIn)`. On new-UI accounts, `login(page)` throws before the check is reached — MS's mobile OAuth flow errors with `unauthorized_client: The client does not exist or is not enabled for consumers.` and the email-input `waitForSelector` inside `login()` times out. The skip never triggered.
+
+**Problem 2 — mobile crash killed the end-of-run summary.** The mobile block had `try/finally` but no `catch`. The `unauthorized_client` throw propagated past the mobile block, past the summary block, and out of the process — so on new-UI accounts, users got NO notification at all: not the desktop successes, not the mobile failure, nothing.
+
+Fixes in `microsoft.js`:
+
+- **Module-level `sessionSawNewUi`** captured during the desktop session (right after `readPointsBalance`, `.catch(() => false)` for safety). Cheap, defaults to old-UI behaviour under any unexpected DOM.
+- **Mobile pre-login skip** consults `sessionSawNewUi` at the very top of the mobile try, before any login attempt. If desktop confirmed new UI, mobile logs a clear "skipping mobile session pre-login" line and moves on — `login()` never runs, `unauthorized_client` never throws.
+- **Belt-and-suspenders post-login mobile check** kept for setups where desktop is disabled (`microsoft` service inactive, `microsoft-mobile` active alone) and `sessionSawNewUi` never got set — if the mobile session manages to reach the dashboard on new UI, we still skip the earning walk.
+- **Catch on both desktop and mobile session `try` blocks** — any exception is logged as `<Session> session failed: <message> — continuing to end-of-run summary` and the run continues. Summary block now fires unconditionally after both sessions, regardless of which one failed.
+
+If MS reinstates mobile earning or fixes the OAuth `unauthorized_client` error, the skip disengages automatically the moment `isNewMsUi()` returns false (containers disappear).
+
+---
+
 ## What's new in 2.8.67
 
 **Apprise circuit-breaker on container-wide network transients.** Triggered by @lequan2909's [#113](https://github.com/feldorn/free-games-claimer/issues/113): during a DNS/network outage at the container level, every per-service failure tried to send its own apprise notification — which itself failed for the same reason — generating N+1 useless "apprise diag: exit 1" errors in the log for a single outage.

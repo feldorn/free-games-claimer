@@ -1193,6 +1193,15 @@ async function recordMsRun(session, startedAt, before, after) {
 // and after as null and gets dropped from the message.
 let desktopBefore = null, desktopAfter = null;
 let mobileBefore = null, mobileAfter = null;
+// Shared new-UI signal captured during the desktop session so the mobile
+// session can skip pre-login (Dr4w's #114): on redesigned-dashboard
+// accounts, the mobile OAuth flow itself errors with `unauthorized_client`,
+// which throws inside `login(page)` before v2.8.66's post-login skip
+// could fire. Desktop runs first + succeeds on the same account, so its
+// UI detection is a reliable pre-signal for mobile. Defaults false so
+// desktop-disabled + mobile-only setups still hit mobile's own belt-and-
+// suspenders check (which also short-circuits if it sees new UI).
+let sessionSawNewUi = false;
 
 // Desktop session
 log.section('Desktop');
@@ -1211,6 +1220,11 @@ log.section('Desktop');
       log.status('Signed in', 'yes');
       before = await readPointsBalance(page);
       if (before != null) log.status('Points before', before);
+      // Capture new-UI state for the mobile session that follows.
+      // Cheap re-check on top of what clickEveryPendingActivityCard
+      // already does internally; failure defaults to old-UI behaviour
+      // for both sessions (safest fallback under unexpected DOM).
+      sessionSawNewUi = await isNewMsUi(page).catch(() => false);
       await clickEveryPendingActivityCard(page);
       await claimPendingBonusPoints(page);
       await claimReadyToClaimCard(page);
@@ -1227,6 +1241,13 @@ log.section('Desktop');
     } else {
       log.fail('Login failed or timed out — skipping desktop session');
     }
+  } catch (e) {
+    // Desktop-session catch — parity with the mobile catch below
+    // (Dr4w's #114 asked "notification sent at end of run regardless
+    // of whether individual steps failed"). Without this, a crash
+    // during desktop propagates past the mobile block AND the
+    // end-of-run summary.
+    log.warn(`Desktop session failed: ${String(e.message || e).split('\n')[0]} — continuing to mobile session + end-of-run summary`);
   } finally {
     await context.close();
     activeContext = null;
@@ -1249,6 +1270,27 @@ log.section('Mobile');
   const startedAt = datetime();
   let before = null, after = null;
   try {
+    // Pre-login skip on new UI (Dr4w's #114). Two things go wrong on
+    // redesigned-dashboard accounts if we attempt the mobile login:
+    // (a) MS removed mobile-earning activities so the walk credits
+    //     zero anyway (v2.8.66),
+    // (b) the mobile OAuth flow itself errors with
+    //     `unauthorized_client` — `login(page)` throws when the email
+    //     input never appears, and without the catch below that
+    //     exception used to kill the end-of-run summary.
+    // Desktop just ran successfully on the same account and set
+    // sessionSawNewUi; short-circuit here so we never enter login().
+    if (sessionSawNewUi) {
+      log.info('MS Rewards mobile: desktop detected new dashboard UI — skipping mobile session pre-login (MS removed mobile earning and mobile OAuth flow errors on redesigned accounts).');
+      log.summary({
+        siteId: 'microsoft-mobile',
+        claimed: 0,
+        skipped: 1,
+        display: 'pointsEarned',
+        pointsEarned: 0,
+      });
+      // fall through to finally — no login attempt, no earning walk
+    } else {
     let loggedIn = await isLoggedIn(page);
     if (!loggedIn) {
       await login(page);
@@ -1258,21 +1300,11 @@ log.section('Mobile');
       log.status('Signed in', 'yes');
       before = await readPointsBalance(page);
       if (before != null) log.status('Points before', before);
-      // Auto-skip mobile earning walk on new UI (Dr4w's #110 follow-up,
-      // 2026-07-08): Microsoft removed the mobile-searches activity
-      // from the redesigned dashboard, so both the activity-card walk
-      // and the Bing search loop credit zero on mobile new-UI accounts.
-      // Running them anyway is a browser session burned for nothing.
-      // Detection uses the same isNewMsUi() helper the desktop path
-      // uses — presence of #dailyset / #exploreonbing containers. If
-      // MS reinstates mobile earning later, this branch will fall
-      // through automatically (containers absent → old-UI path).
-      // Users who want to force the walk anyway can uncheck the
-      // microsoft-mobile service under Settings → Services (existing
-      // per-service Active toggle) — that removes the mobile session
-      // entirely rather than forcing the walk, which is what any user
-      // of a modern MS account should want here.
-      const skipMobileNewUi = await isNewMsUi(page);
+      // Belt-and-suspenders mobile-side check for setups where desktop
+      // didn't run (microsoft-mobile enabled with microsoft disabled)
+      // and sessionSawNewUi never got set. On new UI we still skip the
+      // dead earning walk; on old UI we run it as before.
+      const skipMobileNewUi = await isNewMsUi(page).catch(() => false);
       if (skipMobileNewUi) {
         log.info('MS Rewards mobile: new dashboard UI detected — skipping activity + search walk (MS removed mobile earning from the redesign). Balance recorded from the pre-check read.');
         after = before; // pre-check balance is the accurate current balance; no earnings to compare
@@ -1301,6 +1333,17 @@ log.section('Mobile');
     } else {
       log.fail('Login failed or timed out — skipping mobile session');
     }
+    } // end of `else` (non-new-UI branch)
+  } catch (e) {
+    // Mobile-session catch (Dr4w's #114): the mobile OAuth flow on
+    // new-UI accounts throws `unauthorized_client` inside login()
+    // when the email-input selector times out (MS renders an OAuth
+    // error page instead of the login form). Without this catch that
+    // exception propagates past the try/finally, kills microsoft.js,
+    // and skips the end-of-run notify — so the user gets NO summary
+    // for the whole run, not even the desktop successes. Log the
+    // failure and continue so the summary block fires normally.
+    log.warn(`Mobile session failed: ${String(e.message || e).split('\n')[0]} — continuing to end-of-run summary`);
   } finally {
     await context.close();
     activeContext = null;
