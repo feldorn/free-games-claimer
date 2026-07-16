@@ -4,6 +4,17 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.69
+
+**MS Rewards mobile skip-before-wait + honour the mobile Active toggle.** Two fixes for @xh43k's [#116](https://github.com/feldorn/free-games-claimer/issues/116):
+
+1. **`microsoft-mobile.active` in Settings → Services now actually disables the mobile session.** The toggle existed in the schema but `microsoft.js` didn't consult it — the mobile session ran regardless (only Sessions-tab visibility responded to the flag). Now `microsoft.js` reads `services.microsoft-mobile.active` via `describeConfig()` on startup and short-circuits the mobile session if it's false. Users who want mobile off entirely can uncheck it in Settings → Services → Microsoft Rewards (Mobile).
+2. **Skip-decision moved before the 5–20 minute inter-session wait.** v2.8.68's new-UI skip fired inside the mobile block, which meant new-UI accounts still sat through the delay before doing nothing. Now both the wait AND the mobile session are gated on a single `skipMobileEntirely` check that runs before the delay — new-UI accounts (or accounts with the mobile toggle off) go straight from the desktop session to the end-of-run summary.
+
+`skipMobileEntirely = !mobileActiveInConfig || sessionSawNewUi` — either condition triggers the same code path: log the reason, emit a `skipped=1` mobile summary, no wait, no browser context spawn.
+
+---
+
 ## What's new in 2.8.68
 
 **MS Rewards mobile pre-login skip + end-of-run summary isolation on new UI.** Fixes both problems @Dr4w reported in [#114](https://github.com/feldorn/free-games-claimer/issues/114):

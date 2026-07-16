@@ -3,6 +3,7 @@ import { authenticator } from 'otplib';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { delay, datetime, prompt, notify, log, dataDir, jsonDb, cleanProfileLocks, localeArgs } from './src/util.js';
 import { cfg } from './src/config.js';
+import { describeConfig } from './src/app-config.js';
 import { siteVersion } from './src/sites.js';
 
 const BING_REWARDS_URL = 'https://rewards.bing.com';
@@ -1257,6 +1258,39 @@ log.section('Desktop');
   await recordMsRun('desktop', startedAt, before, after);
 }
 
+// Decide whether the mobile session should run at all, BEFORE we sit
+// through the 5-20 min inter-session delay (#116 xh43k 2026-07-16 —
+// waiting 18 minutes just to hit the pre-login skip on new UI was
+// exactly the "useless time" they flagged). Two independent reasons
+// to skip:
+//   1. User has disabled the microsoft-mobile service in Settings
+//      (services.microsoft-mobile.active = false). The runner keeps
+//      spawning microsoft.js because the parent 'microsoft' service
+//      is still active, so this needs to be honored inside the
+//      script itself.
+//   2. Desktop confirmed the redesigned dashboard UI (Dr4w's #114) —
+//      mobile earning was removed by MS and the OAuth flow itself
+//      errors with `unauthorized_client`. No point running.
+// Both reasons also skip the inter-session wait.
+const mobileServiceEntry = describeConfig().effective.services?.['microsoft-mobile'];
+const mobileActiveInConfig = mobileServiceEntry?.active !== false; // undefined → default true
+const skipMobileEntirely = !mobileActiveInConfig || sessionSawNewUi;
+
+if (skipMobileEntirely) {
+  const reason = !mobileActiveInConfig
+    ? 'Microsoft Rewards (Mobile) is inactive in Settings — skipping mobile session and inter-session wait'
+    : 'desktop detected new dashboard UI — skipping mobile session pre-login (MS removed mobile earning and mobile OAuth flow errors on redesigned accounts); inter-session wait also skipped';
+  log.section('Mobile');
+  log.info(`MS Rewards mobile: ${reason}.`);
+  log.summary({
+    siteId: 'microsoft-mobile',
+    claimed: 0,
+    skipped: 1,
+    display: 'pointsEarned',
+    pointsEarned: 0,
+  });
+} else {
+
 // Random gap between sessions — a human wouldn't switch devices instantly
 const interSessionMinutes = 5 + Math.floor(Math.random() * 16); // 5–20 min
 log.status('Inter-session gap', `${interSessionMinutes}m`);
@@ -1270,27 +1304,6 @@ log.section('Mobile');
   const startedAt = datetime();
   let before = null, after = null;
   try {
-    // Pre-login skip on new UI (Dr4w's #114). Two things go wrong on
-    // redesigned-dashboard accounts if we attempt the mobile login:
-    // (a) MS removed mobile-earning activities so the walk credits
-    //     zero anyway (v2.8.66),
-    // (b) the mobile OAuth flow itself errors with
-    //     `unauthorized_client` — `login(page)` throws when the email
-    //     input never appears, and without the catch below that
-    //     exception used to kill the end-of-run summary.
-    // Desktop just ran successfully on the same account and set
-    // sessionSawNewUi; short-circuit here so we never enter login().
-    if (sessionSawNewUi) {
-      log.info('MS Rewards mobile: desktop detected new dashboard UI — skipping mobile session pre-login (MS removed mobile earning and mobile OAuth flow errors on redesigned accounts).');
-      log.summary({
-        siteId: 'microsoft-mobile',
-        claimed: 0,
-        skipped: 1,
-        display: 'pointsEarned',
-        pointsEarned: 0,
-      });
-      // fall through to finally — no login attempt, no earning walk
-    } else {
     let loggedIn = await isLoggedIn(page);
     if (!loggedIn) {
       await login(page);
@@ -1333,7 +1346,6 @@ log.section('Mobile');
     } else {
       log.fail('Login failed or timed out — skipping mobile session');
     }
-    } // end of `else` (non-new-UI branch)
   } catch (e) {
     // Mobile-session catch (Dr4w's #114): the mobile OAuth flow on
     // new-UI accounts throws `unauthorized_client` inside login()
@@ -1352,6 +1364,7 @@ log.section('Mobile');
   mobileAfter = after;
   await recordMsRun('mobile', startedAt, before, after);
 }
+} // end of `else` — skipMobileEntirely=false branch (mobile actually ran)
 
 // Build a rich end-of-run summary from the captured before/after pairs.
 // Falls back to the legacy generic line when neither session produced
