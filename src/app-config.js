@@ -167,6 +167,16 @@ export const CONFIG_SCHEMA = [
     },
     validate: v => (typeof v === 'number' && v >= 0 && v < 24) ? null : 'expected 0-23' },
   { path: 'panel.publicUrl',                 env: 'PUBLIC_URL',                 type: 'string',  default: '' },
+  // GitHub username for the in-panel reply-alert feature. When set, the
+  // panel polls this user's issues in feldorn/free-games-claimer once a
+  // day (anonymous REST — no token) and surfaces new comment activity
+  // (replies not authored by them, not hidden as spam) as an Alerts-tab
+  // section. Opt-in: users are prompted at first Share-to-GitHub click;
+  // skipping leaves this empty and the feature silently disabled. No
+  // security surface — polling is anonymous against a public repo.
+  { path: 'github.username',                 env: 'GH_USERNAME',                type: 'string',  default: '',
+    validate: v => (typeof v === 'string' && v.length <= 39 && (v === '' || /^[a-z0-9][a-z0-9-]{0,38}$/i.test(v)))
+      ? null : 'must be a valid GitHub username (alphanumeric + hyphens, max 39 chars) or empty to disable' },
   // External-link target mode. Controls how the Discoveries-tab and
   // similar off-site links open. Three values:
   //   'auto' (default)  — iframed → top-nav (break out), top-level → new tab
@@ -377,6 +387,9 @@ export const ENV_DISPLAY = [
   // scheduler — anchored-mode extension. Days-of-week mask (#108).
   { env: 'START_DAYS',    category: 'scheduler', label: 'Anchored-mode days-of-week filter',
     note: 'Comma-separated list of days on which the anchored scheduler fires: 0 = Sunday … 6 = Saturday. Only consulted when `START_TIME` (or dailyStartTime in Settings) is set. Default = all seven days (backward-compatible). Example: `START_DAYS=4` for weekly Thursdays; `START_DAYS=1,3,5` for Mon/Wed/Fri. Missed days do not queue backfills.' },
+  // GitHub integration — reply-alerts for issues you filed via Share-to-GitHub.
+  { env: 'GH_USERNAME',   category: 'github', label: 'GitHub username (reply-alerts)',
+    note: 'When set, the panel polls this user\'s issues in feldorn/free-games-claimer once a day (anonymous REST, no token) and surfaces new comment activity as an Alerts-tab section. Opt-in — you\'re prompted at first Share-to-GitHub click; skip to keep unset and the feature stays silently disabled. Change requires a panel restart. Max 39 chars, GitHub-username characters only.' },
   // runtime/debug flags
   { env: 'DEBUG',         category: 'debug', label: 'DEBUG' },
   { env: 'DEBUG_NETWORK', category: 'debug', label: 'DEBUG_NETWORK' },

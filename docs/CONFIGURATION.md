@@ -37,6 +37,7 @@ example](INSTALL.md#docker-compose) above:
 | `LOOP` | | Main-schedule interval in seconds (e.g. `86400` = 24h). Without `START_TIME`, sleeps N seconds after each run completes (drifts by run duration). Drives the non-MS chain only — Microsoft Rewards is on its own schedule. |
 | `START_TIME` | | Wall-clock anchor `HH:MM` (24h) for the main schedule. When set, the non-MS chain wakes at this time each day; with a sub-daily `LOOP` (e.g. `14400` = 4h) the anchor seeds the sequence and runs land at `08:00, 12:00, 16:00, 20:00, 00:00, 04:00`. Microsoft Rewards is independent — see [Microsoft Rewards Options](#microsoft-rewards-options). |
 | `START_DAYS` | `0,1,2,3,4,5,6` | Day-of-week mask on the anchored schedule (comma-separated, `0=Sun … 6=Sat`). Only consulted when `START_TIME` is set. Default = all seven days (backward-compatible). Examples: `START_DAYS=4` (Thursdays only), `START_DAYS=1,3,5` (Mon/Wed/Fri). See [Day-of-week filter](#day-of-week-filter). |
+| `GH_USERNAME` | | Your GitHub username. When set, the panel polls your issues on `feldorn/free-games-claimer` once a day (anonymous REST, no token) and surfaces new reply activity as an Alerts-tab section. Opt-in via a one-time modal at first Share-to-GitHub click — skipping keeps this empty and the feature silently disabled. Change requires a panel restart. |
 
 **Behind a reverse proxy?** See [Reverse-Proxy Setup](NETWORKING.md#reverse-proxy-setup)
 for `BASE_PATH`, `PUBLIC_URL`, and `NOVNC_URL`.

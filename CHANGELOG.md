@@ -4,6 +4,25 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.70
+
+**In-panel GitHub reply alerts.** Closes the "diagnostic submitted, never heard back" loop. Users who click **Share to GitHub** in the Alerts tab rarely come back to GitHub to check for replies, so clarifying questions I post sit unread and issues stall on my side. Now the panel polls your issues daily and surfaces new reply activity as a dedicated Alerts-tab section — no more losing track.
+
+**How it works (opt-in at first submit):**
+
+1. Click Share to GitHub on any Alerts-tab error. If your `github.username` isn't set yet, a one-time modal appears: *"Enter your GitHub username and this panel will poll your issues once a day and surface new replies in the Alerts tab."* Save & continue → username saved, submit URL opens. Skip → username stays empty, feature stays silently disabled forever (no polling, no privacy footprint), submit URL still opens.
+2. Once set, `src/github-watch.js` runs a lightweight daily loop that hits `search/issues?q=repo:feldorn/free-games-claimer+author:{username}` (anonymous REST — no token, no security surface) plus `issues/{n}/comments?since=` for each returned issue. New comments not authored by you are tallied per-issue and stored in `data/github-watch.json`.
+3. **Alerts tab gets a new "GitHub replies" section.** Each issue with unread comments shows title, `open` / `closed` state badge, reply count, latest commenter, and a 240-char preview of the newest comment. **Mark read** button is local-only (updates the state file, doesn't touch GitHub).
+4. Nothing about the feature engages if `github.username` is empty — no HTTP requests, no state file writes, section stays hidden.
+
+**Anonymous polling caveats:** the GitHub REST anonymous rate limit is 60 requests/hour per IP. Daily cadence + a handful of watched issues per user keeps this comfortably under the limit. Public repos only (that's us).
+
+**Env var + Settings:** `GH_USERNAME` in your compose environment, or Settings → Environment (read-only display; edit via the modal at first Share to lock in the value). Change requires a panel restart (like other env-only values).
+
+**Files:** new `src/github-watch.js` (poll + state file); `src/app-config.js` new `github.username` schema field + `GH_USERNAME` in `ENV_DISPLAY`; `interactive-login.js` scheduler loop + `/api/alerts/summary` extended with `ghReplies` array + `/api/alerts/github-mark-read` endpoint + Alerts-tab render section + modal HTML/CSS + `openShareUrlWithGithubPrompt()` wrapper on both Share-to-GitHub call sites.
+
+---
+
 ## What's new in 2.8.69
 
 **MS Rewards mobile skip-before-wait + honour the mobile Active toggle.** Two fixes for @xh43k's [#116](https://github.com/feldorn/free-games-claimer/issues/116):

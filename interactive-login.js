@@ -11,6 +11,7 @@ import { describeConfig, patchConfig, describeEnv, getSchedulerConfig, CONFIG_FI
 import { SITES as SITE_REGISTRY, getLoginSitesById, getClaimScriptOrder, getLinkedActiveMap, getClaimDbFiles, getServiceRows } from './src/sites.js';
 import { fetchGamerPowerGiveaways, filterFor as filterGpFor, COLLECTOR_PATTERNS as GP_COLLECTOR_PATTERNS, GP_TITLE_HINTS } from './src/gamerpower.js';
 import { fetchFGFPosts, filterFor as filterFgfFor, cleanTitle as fgfCleanTitle, COLLECTOR_TITLE_PATTERNS as FGF_COLLECTOR_PATTERNS } from './src/freegamefindings.js';
+import { pollGithubReplies, getWatchState as getGithubWatchState, markIssueRead as markGithubIssueRead } from './src/github-watch.js';
 
 const PANEL_PORT = Number(process.env.PANEL_PORT) || 7080;
 const NOVNC_PORT = process.env.NOVNC_PORT || 6080;
@@ -2625,6 +2626,38 @@ async function digestSchedulerLoop() {
   }
 }
 
+// GitHub-reply poll loop (feldorn 2026-07-16). Silent when
+// github.username is unset — the poller itself early-returns and this
+// loop just sleeps another day. When set, polls once at startup then
+// every 24h. No config-change wake needed: setting the username the
+// first time takes effect on the next 24h tick, or immediately via
+// the startup poll if the panel restarts (which the compose-restart
+// dance for tag pulls does anyway).
+async function githubWatchLoop() {
+  // Startup fire: users who just enabled the feature see fresh state
+  // in ≤ 30 seconds instead of waiting a day. 30-second delay so we
+  // don't compete with heavier session-check work at boot.
+  await new Promise(resolve => setTimeout(resolve, 30_000));
+  while (true) {
+    try {
+      const result = await pollGithubReplies();
+      if (result === null) {
+        // Feature disabled (username unset). Sleep 24h and re-check.
+      } else if (result && result.pollError) {
+        console.warn(`[${datetime()}] github-watch: ${result.pollError}`);
+      } else if (result && typeof result.itemsScanned === 'number') {
+        console.log(`[${datetime()}] github-watch: polled ${result.itemsScanned} issue(s) for @${result.username}`);
+      }
+    } catch (e) {
+      console.error(`[${datetime()}] github-watch: poll threw`, e);
+    }
+    // Daily cadence — sleepUntilWakeup rather than raw setTimeout so
+    // config-change wakes (someone toggled github.username mid-day)
+    // don't have to wait a full 24h to take effect.
+    await sleepUntilWakeup(24 * 60 * 60 * 1000);
+  }
+}
+
 async function lenovoSchedulerLoop() {
   while (true) {
     const wake = computeNextLenovoWake();
@@ -2754,6 +2787,10 @@ async function getState() {
     dailyStartTime: sched.dailyStartTime,
     dailyStartDays: sched.dailyStartDays,
     dailyAnchored,
+    // Whether the in-panel GitHub reply-alert opt-in has been set — the
+    // Share-to-GitHub button uses this to decide whether to show the
+    // one-time username prompt.
+    githubUsername: (describeConfig().effective.github?.username || ''),
     msScheduleHours: sched.msHours,
     msScheduleStart: sched.msStart,
     msAnchored: legacyMode, // legacy alias — UI now reads legacyCombinedMode/msScheduled
@@ -3824,6 +3861,28 @@ const PANEL_HTML = `<!DOCTYPE html>
   .unsaved-modal-body { font-size: 14px; color: #c0c8d8; line-height: 1.5; margin-bottom: 18px; }
   .unsaved-modal-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
   .unsaved-modal-actions .btn { font-size: 13px; padding: 8px 14px; }
+  /* GitHub username prompt — shown at first Share-to-GitHub click when
+     github.username is not yet set. Save-and-continue records it; Skip
+     leaves it empty (feature stays silently off). */
+  .ghuser-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.65); z-index: 200; display: flex; align-items: center; justify-content: center; }
+  .ghuser-modal-card { background: #16213e; border: 1px solid #2a3a5a; border-radius: 8px; padding: 22px 24px; max-width: 500px; width: 92%; box-shadow: 0 8px 32px rgba(0,0,0,0.5); }
+  .ghuser-modal-title { font-size: 16px; font-weight: 600; color: #ffffff; margin-bottom: 10px; }
+  .ghuser-modal-body { font-size: 13.5px; color: #c0c8d8; line-height: 1.55; margin-bottom: 16px; }
+  .ghuser-modal-body p { margin: 0 0 10px; }
+  .ghuser-modal-body code { background: #0e1b33; padding: 1px 5px; border-radius: 3px; font-size: 12.5px; color: #e0e6f0; }
+  .ghuser-modal-help { color: #8aa0c2; font-size: 12.5px; }
+  .ghuser-modal-body input[type="text"] { width: 100%; padding: 8px 10px; background: #0e1726; border: 1px solid #233454; border-radius: 4px; color: #e0e0e0; font-size: 14px; font-family: inherit; box-sizing: border-box; }
+  .ghuser-modal-body input[type="text"]:focus { outline: none; border-color: #4ecca3; }
+  .ghuser-modal-msg { font-size: 12.5px; color: #f0c040; margin-top: 6px; min-height: 18px; }
+  .ghuser-modal-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+  .ghuser-modal-actions .btn { font-size: 13px; padding: 8px 14px; }
+  /* Alerts-tab preview text for the GitHub-replies row — small dim
+     italics under the meta line. */
+  .alert-row .ar-preview { font-size: 12px; color: #8aa0c2; margin-top: 6px; font-style: italic; line-height: 1.5; }
+  .alert-row .ar-state { display: inline-block; font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; padding: 2px 6px; border-radius: 3px; margin-left: 6px; vertical-align: middle; font-weight: 600; }
+  .alert-row .ar-state-open { background: #1f3a2a; color: #4ecca3; }
+  .alert-row .ar-state-closed { background: #3a1a1e; color: #e94560; }
+  .alert-row .ar-meta-author { color: #8aa0c2; }
   /* Run-Now picker — appears when user clicks Run Now. Lists all active
      services grouped by category with checkbox per service. Defaults
      match CLAIM_CMD_MANUAL (everything checked except microsoft +
@@ -4048,6 +4107,7 @@ const PANEL_HTML = `<!DOCTYPE html>
     <div id="alertsRedeems"></div>
     <div id="alertsSessions"></div>
     <div id="alertsDiscoveries"></div>
+    <div id="alertsGithub"></div>
     <div class="diag-head">
       <div>
         <h3 style="margin-top:24px">Errors</h3>
@@ -4115,6 +4175,21 @@ const PANEL_HTML = `<!DOCTYPE html>
     <div class="relogin-modal-actions">
       <button class="btn btn-cancel relogin-cancel">No</button>
       <button class="btn btn-run relogin-confirm">Yes, log in</button>
+    </div>
+  </div>
+</div>
+<div class="ghuser-modal" id="ghUserModal" role="dialog" aria-modal="true" aria-labelledby="ghUserModalTitle" style="display:none">
+  <div class="ghuser-modal-card">
+    <div class="ghuser-modal-title" id="ghUserModalTitle">Get replies in-app? (one-time setup)</div>
+    <div class="ghuser-modal-body">
+      <p>Enter your GitHub username and this panel will poll your issues in <code>feldorn/free-games-claimer</code> once a day and surface new reply activity in the Alerts tab. No token required — polling is anonymous against a public repo.</p>
+      <p class="ghuser-modal-help">Skip to submit anonymously. You can enable this later under Settings → Environment → <code>GH_USERNAME</code>.</p>
+      <input type="text" id="ghUserInput" placeholder="your-github-username" maxlength="39" autocomplete="off" spellcheck="false" />
+      <div class="ghuser-modal-msg" id="ghUserModalMsg"></div>
+    </div>
+    <div class="ghuser-modal-actions">
+      <button class="btn btn-cancel" onclick="ghUserModalSkip()">Skip and submit</button>
+      <button class="btn btn-run" onclick="ghUserModalSaveAndContinue()">Save and continue</button>
     </div>
   </div>
 </div>
@@ -4747,6 +4822,76 @@ function renderDiagnosticContext(ctx) {
   return lines.join('\\n');
 }
 
+// Share-to-GitHub wrapper: intercepts the window.open of the pre-filled
+// issue URL to prompt for a GitHub username the first time. Once the
+// username is saved, subsequent shares open the URL directly. Skipping
+// leaves github.username empty and the in-panel reply-alert feature
+// stays silently disabled — no polling, no Alerts-tab section.
+// (feldorn 2026-07-16: opt-in at first submit, not upfront.)
+let _pendingShareUrl = null;
+function openShareUrlWithGithubPrompt(url) {
+  const configuredUsername = String(
+    (state && state.githubUsername) ||
+    (settingsData && settingsData.effective && settingsData.effective.github && settingsData.effective.github.username) ||
+    ''
+  ).trim();
+  if (configuredUsername) {
+    window.open(url, '_blank', 'noopener');
+    return;
+  }
+  _pendingShareUrl = url;
+  const modal = document.getElementById('ghUserModal');
+  const input = document.getElementById('ghUserInput');
+  const msg = document.getElementById('ghUserModalMsg');
+  if (msg) msg.textContent = '';
+  if (input) { input.value = ''; setTimeout(() => input.focus(), 50); }
+  if (modal) modal.style.display = 'flex';
+}
+async function ghUserModalSaveAndContinue() {
+  const input = document.getElementById('ghUserInput');
+  const msg = document.getElementById('ghUserModalMsg');
+  const value = String(input && input.value || '').trim();
+  if (!value) {
+    if (msg) msg.textContent = 'Enter a username, or click Skip to submit without in-app alerts.';
+    return;
+  }
+  // Client-side format validation — matches the server-side schema
+  // validator: alphanumeric + hyphens, max 39 chars, must start with
+  // alphanumeric.
+  if (!/^[a-z0-9][a-z0-9-]{0,38}$/i.test(value)) {
+    if (msg) msg.textContent = 'Not a valid GitHub username (a–z, 0–9, hyphens; max 39; must start alphanumeric).';
+    return;
+  }
+  try {
+    const r = await fetch(BASE_PATH + '/api/config', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 'github.username': value }),
+    });
+    if (!r.ok) {
+      const j = await r.json().catch(() => ({}));
+      const err = (j.errors && j.errors[0] && j.errors[0].error) || j.error || ('HTTP ' + r.status);
+      if (msg) msg.textContent = 'Save failed: ' + err;
+      return;
+    }
+  } catch (e) {
+    if (msg) msg.textContent = 'Save failed: ' + e.message;
+    return;
+  }
+  const modal = document.getElementById('ghUserModal');
+  if (modal) modal.style.display = 'none';
+  if (_pendingShareUrl) window.open(_pendingShareUrl, '_blank', 'noopener');
+  _pendingShareUrl = null;
+  // Refresh state so subsequent shares skip the prompt without a reload.
+  refreshState();
+}
+function ghUserModalSkip() {
+  const modal = document.getElementById('ghUserModal');
+  if (modal) modal.style.display = 'none';
+  if (_pendingShareUrl) window.open(_pendingShareUrl, '_blank', 'noopener');
+  _pendingShareUrl = null;
+}
+
 async function diagBannerShare(fingerprint) {
   if (!state || !state.diagnostics || !state.diagnostics.pending) return;
   const p = state.diagnostics.pending;
@@ -4786,7 +4931,7 @@ async function diagBannerShare(fingerprint) {
   const body = bodyLines.join('\\n');
   const url = 'https://github.com/feldorn/free-games-claimer/issues/new?title=' +
     encodeURIComponent(title) + '&body=' + encodeURIComponent(body);
-  window.open(url, '_blank', 'noopener');
+  openShareUrlWithGithubPrompt(url);
   // Mark as shared regardless of whether the user actually submits on
   // GitHub — the per-fingerprint decision means we trust them not to
   // be re-nagged. They can re-share from the Diagnostics tab if they
@@ -4820,6 +4965,7 @@ async function renderAlertsSections() {
   const redeemsEl = document.getElementById('alertsRedeems');
   const sessionsEl = document.getElementById('alertsSessions');
   const discEl = document.getElementById('alertsDiscoveries');
+  const ghEl = document.getElementById('alertsGithub');
   if (!redeemsEl || !sessionsEl || !discEl) return;
   try {
     const r = await fetch(BASE_PATH + '/api/alerts/summary');
@@ -4912,6 +5058,54 @@ async function renderAlertsSections() {
           '</div>' +
         '</div>';
     }
+    // GitHub reply-alerts (feldorn 2026-07-16). Opt-in section — only
+    // populated when github.username is set + at least one watched
+    // issue has unreadCount > 0. Empty state hides itself, matching
+    // the other sections above.
+    if (ghEl) {
+      const ghReplies = Array.isArray(j.ghReplies) ? j.ghReplies : [];
+      if (ghReplies.length === 0) {
+        ghEl.innerHTML = '';
+      } else {
+        const totalUnread = ghReplies.reduce((s, r) => s + (r.unreadCount || 0), 0);
+        const rows = ghReplies.map(r => {
+          const stateBadge = r.state === 'closed' ? '<span class="ar-state ar-state-closed">closed</span>' : '<span class="ar-state ar-state-open">open</span>';
+          const authorLine = r.lastCommentAuthor
+            ? '<span class="ar-meta-author">@' + escapeHtml(r.lastCommentAuthor) + '</span>'
+            : '';
+          const preview = r.lastCommentPreview
+            ? '<div class="ar-preview">' + escapeHtml(r.lastCommentPreview) + (r.lastCommentPreview.length >= 240 ? '…' : '') + '</div>'
+            : '';
+          return '<div class="alert-row" data-gh-number="' + r.number + '">' +
+            '<div class="ar-main">' +
+              '<div class="ar-title">' +
+                '<a href="' + encodeURI(r.url) + '" onclick="return openSiteUrl(this)" target="_blank" rel="noopener">' +
+                  '#' + r.number + ' — ' + escapeHtml(r.title) +
+                '</a> ' +
+                stateBadge +
+              '</div>' +
+              '<div class="ar-meta">' +
+                r.unreadCount + ' new repl' + (r.unreadCount === 1 ? 'y' : 'ies') + ' ' + authorLine +
+              '</div>' +
+              preview +
+            '</div>' +
+            '<div class="ar-actions">' +
+              '<button class="ar-btn-mark" data-gh-mark="' + r.number + '" title="Mark this issue\\'s replies as read locally. Doesn\\'t touch GitHub.">Mark read</button>' +
+            '</div>' +
+          '</div>';
+        }).join('');
+        ghEl.innerHTML =
+          '<div class="alerts-section">' +
+            '<div class="alerts-section-head">' +
+              '<h4>GitHub replies</h4>' +
+              '<span class="as-count">' + totalUnread + '</span>' +
+              '<span class="as-hint">' + ghReplies.length + ' issue' + (ghReplies.length === 1 ? '' : 's') + ' with new replies</span>' +
+            '</div>' +
+            '<div class="alerts-section-body">' + rows + '</div>' +
+          '</div>';
+        ghEl.onclick = handleGithubMarkReadClick;
+      }
+    }
     // Wire up the redeem-action click handlers via delegation on the
     // whole redeems element — avoids adding N inline listeners.
     if (allPending.length) {
@@ -4922,7 +5116,36 @@ async function renderAlertsSections() {
     // renders below, so silence the failure rather than blocking the
     // whole tab. Refresh will retry.
     redeemsEl.innerHTML = ''; sessionsEl.innerHTML = ''; discEl.innerHTML = '';
+    if (ghEl) ghEl.innerHTML = '';
     console.warn('renderAlertsSections failed:', e);
+  }
+}
+
+// Mark a watched GitHub issue's replies as read locally. Doesn't touch
+// GitHub — just updates the panel's on-disk state so future polls don't
+// re-surface the same comments. Optimistic UI removal to keep the tab
+// snappy; the next state fetch confirms the change.
+async function handleGithubMarkReadClick(ev) {
+  const btn = ev.target.closest('button[data-gh-mark]');
+  if (!btn) return;
+  const number = parseInt(btn.dataset.ghMark, 10);
+  if (!Number.isInteger(number)) return;
+  const row = btn.closest('.alert-row');
+  btn.disabled = true;
+  try {
+    const r = await api('POST', '/alerts/github-mark-read', { number });
+    if (r && r.success === false) {
+      showToast('Failed to mark read: ' + (r.error || 'unknown'), 'error');
+      btn.disabled = false;
+      return;
+    }
+    if (row) {
+      row.style.opacity = '0.4';
+      setTimeout(() => renderAlertsSections(), 500);
+    }
+  } catch (e) {
+    showToast('Failed to mark read: ' + e.message, 'error');
+    btn.disabled = false;
   }
 }
 
@@ -5137,7 +5360,7 @@ async function shareDiagnosticsEntry(fingerprint) {
   const body = bodyLines.join('\\n');
   const url = 'https://github.com/feldorn/free-games-claimer/issues/new?title=' +
     encodeURIComponent(title) + '&body=' + encodeURIComponent(body);
-  window.open(url, '_blank', 'noopener');
+  openShareUrlWithGithubPrompt(url);
   await fetch(BASE_PATH + '/api/diagnostics/decide', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -5880,7 +6103,7 @@ async function loadEnvTable(reveal) {
       if (!byCat[e.category]) { byCat[e.category] = []; catOrder.push(e.category); }
       byCat[e.category].push(e);
     }
-    const catLabel = { panel: 'Panel infrastructure', paths: 'Data paths', credentials: 'Credentials', runtime: 'Locale &amp; timezone', scheduler: 'Scheduler', debug: 'Debug / runtime' };
+    const catLabel = { panel: 'Panel infrastructure', paths: 'Data paths', credentials: 'Credentials', runtime: 'Locale &amp; timezone', scheduler: 'Scheduler', github: 'GitHub integration', debug: 'Debug / runtime' };
     const rows = [];
     for (const cat of catOrder) {
       rows.push('<tr class="cat-row"><td colspan="3">' + escapeHtml(catLabel[cat] || cat) + '</td></tr>');
@@ -8992,14 +9215,57 @@ const server = http.createServer(async (req, res) => {
             }).length;
           }
         } catch {}
+        // GitHub reply-alerts (feldorn 2026-07-16): opt-in feature keyed
+        // on `github.username`. Watched-issue state is populated by
+        // `pollGithubReplies()` on the daily scheduler wake; here we
+        // just shape it for the client.
+        let ghReplies = [];
+        try {
+          const gh = getGithubWatchState();
+          ghReplies = Object.values(gh.watchedIssues || {})
+            .filter(i => (i.unreadCount || 0) > 0)
+            .sort((a, b) => (b.lastCommentAt || '').localeCompare(a.lastCommentAt || ''))
+            .map(i => ({
+              number: i.number,
+              title: i.title || `Issue #${i.number}`,
+              url: i.url,
+              state: i.state,
+              unreadCount: i.unreadCount,
+              lastCommentAuthor: i.lastCommentAuthor,
+              lastCommentPreview: i.lastCommentPreview,
+              lastCommentAt: i.lastCommentAt,
+            }));
+        } catch {}
         sendJson(res, {
           pendingPrime,
           pendingSteam,
           staleSessions,
           discoveriesCount,
+          ghReplies,
         });
       } catch (e) {
         sendJson(res, { error: e.message }, 500);
+      }
+      return;
+    }
+
+    // POST /api/alerts/github-mark-read — { number }
+    // Marks all replies on the given watched-issue as read; the section
+    // disappears from the Alerts tab once every watched issue has
+    // unreadCount === 0. Structural fix vs. gating on visits to GitHub
+    // itself (which we can't observe).
+    if (req.method === 'POST' && req.url === '/api/alerts/github-mark-read') {
+      try {
+        const body = await parseBody(req);
+        const num = Number(body && body.number);
+        if (!Number.isInteger(num) || num <= 0) {
+          sendJson(res, { error: 'number (positive integer) required' }, 400);
+          return;
+        }
+        const ok = markGithubIssueRead(num);
+        sendJson(res, { success: ok });
+      } catch (e) {
+        sendJson(res, { error: e.message }, 400);
       }
       return;
     }
@@ -9447,6 +9713,13 @@ server.listen(PANEL_PORT, async () => {
   });
   digestSchedulerLoop().catch(err => {
     console.error(`[${datetime()}] Scheduler (digest) crashed:`, err);
+  });
+  // GitHub reply-alert poller — daily cadence, silent no-op when
+  // `github.username` unset (opt-in via the Share-to-GitHub modal).
+  // Fire once at startup so users who just set their username see
+  // fresh state without waiting up to 24h.
+  githubWatchLoop().catch(err => {
+    console.error(`[${datetime()}] Scheduler (github-watch) crashed:`, err);
   });
   watchConfigForScheduler();
   watchLenovoStateForScheduler();
