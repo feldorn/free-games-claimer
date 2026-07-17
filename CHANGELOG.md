@@ -4,6 +4,16 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.71
+
+**Settings-tab checkbox for the MS Rewards mobile session.** Follow-up to @xh43k's [#116](https://github.com/feldorn/free-games-claimer/issues/116): v2.8.69 wired the runtime to honour `services.microsoft-mobile.active` but there was no UI toggle to reach that config value — the microsoft-mobile service is rolled into the parent Microsoft Rewards row via `linkedWith`, so it wasn't rendered independently.
+
+Fix: `getServiceRows()` now injects a synthetic **"Run mobile session"** checkbox at the top of the Microsoft Rewards row's fields, pointing at `services.microsoft-mobile.active`. Unchecking it skips the mobile session (including the 5–20 min inter-session wait, the mobile-UA browser context spawn, and the search loop) — same behaviour as `MS_MOBILE_ACTIVE=false` in env. Unchecking the parent Microsoft Rewards toggle above still disables both desktop + mobile via the existing linked-active cascade.
+
+No runtime code change beyond the row synthesis — this is a UI-only fix on top of v2.8.69's runtime honour.
+
+---
+
 ## What's new in 2.8.70
 
 **In-panel GitHub reply alerts.** Closes the "diagnostic submitted, never heard back" loop. Users who click **Share to GitHub** in the Alerts tab rarely come back to GitHub to check for replies, so clarifying questions I post sit unread and issues stall on my side. Now the panel polls your issues daily and surfaces new reply activity as a dedicated Alerts-tab section — no more losing track.

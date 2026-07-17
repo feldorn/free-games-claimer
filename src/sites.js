@@ -839,6 +839,22 @@ export function getServiceRows() {
         if (f.options && !extra.options) extra.options = f.options;
         return Object.keys(extra).length ? [path, f.label, extra] : [path, f.label];
       });
+      // Synthetic sub-service toggle for microsoft (#116 xh43k, 2026-07-17):
+      // the microsoft row rolls up microsoft-mobile via linkedWith, so
+      // the Settings UI has no way to disable JUST the mobile session
+      // without also disabling desktop. Expose `services.microsoft-mobile
+      // .active` inline as a boolean checkbox at the top of the microsoft
+      // row so users can skip the mobile pass explicitly (useful on
+      // new-UI accounts where MS removed mobile earning). microsoft.js
+      // v2.8.69+ already reads this flag and short-circuits the mobile
+      // session; this change is UI-only.
+      if (s.id === 'microsoft') {
+        row.fields.unshift([
+          'services.microsoft-mobile.active',
+          'Run mobile session',
+          { hint: 'Uncheck to skip the mobile MS Rewards session entirely — its inter-session wait, mobile-UA browser context, and search loop are all skipped. Default: on. On new-UI accounts the mobile session is already auto-skipped at runtime (MS removed mobile earning from the redesign), so toggling this off just makes the skip explicit in your config for old-UI accounts too. Unchecking the parent Microsoft Rewards toggle above disables both desktop and mobile together.' }
+        ]);
+      }
       return row;
     });
 }
