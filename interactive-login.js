@@ -8805,6 +8805,27 @@ const server = http.createServer(async (req, res) => {
         };
       };
 
+      // Forecast MANUAL for GamerPower "Key Giveaway" titles (Steam
+      // only). These are third-party key-distribution promos
+      // (Alienware Arena, IndieGala, dev landing pages, etc.) — their
+      // GamerPower `open_giveaway_url` never resolves to a Steam store
+      // /app/<id>/, so `steam.js` gives up at claim time and emits a
+      // manual-action notify. Without this forecast, the Discoveries
+      // tab badges the entry AUTO and users are confused when the
+      // Steam collector doesn't actually claim it. The runtime check
+      // in steam.js runs after URL resolution (an HTTP round trip);
+      // here we forecast off the title alone, which GamerPower is
+      // consistent about ("… Key Giveaway" == third-party). Report
+      // 2026-07-19: Dwarven Realms badged AUTO, actually manual.
+      const forecastManualKeyGiveaway = (coverage, collectorKey, title) => {
+        if (coverage.state !== 'auto' || collectorKey !== 'steam') return coverage;
+        if (!/\bKey Giveaway\b/i.test(String(title || ''))) return coverage;
+        return {
+          state: 'manual',
+          label: 'Steam key giveaway — the Steam collector can’t redeem third-party keys. Open the GamerPower link to claim manually.',
+        };
+      };
+
       // For GamerPower titles like "Devil's Island (Epic Games) Giveaway",
       // strip the trailing platform tag + "Giveaway" so title-match against
       // store DBs works. FGF cleaned titles already drop the bracket prefix.
@@ -8870,6 +8891,7 @@ const server = http.createServer(async (req, res) => {
         let coverage = coverageFor(collectorKey);
         coverage = promoteIfOwned(coverage, collectorKey, p.url, title);
         coverage = forecastSkip(coverage, collectorKey, worth);
+        coverage = forecastManualKeyGiveaway(coverage, collectorKey, p.title);
         // "ReadComments" flair class = key is randomly distributed in the
         // Reddit comments thread, not on the external page. The post.url
         // points at the redeem endpoint (e.g. nvidia.com/redeem) which is
@@ -8933,6 +8955,7 @@ const server = http.createServer(async (req, res) => {
         let coverage = coverageFor(collectorKey);
         coverage = promoteIfOwned(coverage, collectorKey, e.open_giveaway_url || '', titleForMatch);
         coverage = forecastSkip(coverage, collectorKey, e.worth);
+        coverage = forecastManualKeyGiveaway(coverage, collectorKey, e.title);
         const dedupKey = buildKey(collectorKey, titleForMatch);
         const promoted = promoteUserState(coverage, dedupKey);
         return {

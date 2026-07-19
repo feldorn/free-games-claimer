@@ -4,6 +4,16 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.74
+
+**Two Steam-log clarity fixes.**
+
+**1. Silence the "already in queue" dedupe log lines.** In the Steam run block, when GamerPower or FGF discovery found a game Steam's own `/search` endpoint had already picked up, we logged a per-item `✓ GamerPower → <title>: appId <id> already in queue` line. That's dev-facing plumbing — the user doesn't care that two discovery sources found the same game. Worse: when the dedupe line for one game interleaved with unrelated per-item lines from other GamerPower entries (e.g. a "manual action" line for a different item, or the recurring FGF 403 skip), users read them as related and thought the deduped game was failing / manual / erroring. Both the GamerPower and FGF dedupe lines are now `console.debug`-gated (visible only with `DEBUG=1`). The authoritative claim-time line (`• Sir Brante — already owned`) remains as the sole user-facing message for these games.
+
+**2. Discoveries: forecast MANUAL for GamerPower "Key Giveaway" titles (Steam).** These are third-party key-distribution promos (Alienware Arena, IndieGala, dev landing pages, etc.) — their GamerPower `open_giveaway_url` never resolves to a Steam store `/app/<id>/`, so `steam.js` gives up at runtime and emits a manual-action notify. But the Discoveries tab was badging these as **AUTO** because its forecast only checked ownership + price. New `forecastManualKeyGiveaway()` heuristic downgrades AUTO → MANUAL when the title matches `/\bKey Giveaway\b/i`, with a clear label ("Steam key giveaway — the Steam collector can't redeem third-party keys. Open the GamerPower link to claim manually."). Reported 2026-07-19 via Dwarven Realms showing AUTO in Discoveries while the actual Steam run couldn't touch it. The runtime already handles this correctly — the fix is UI-only, aligning the tab with actual behaviour.
+
+---
+
 ## What's new in 2.8.73
 
 **Discoveries-tab price forecast now reads live `steam.minPrice`.** Related to v2.8.72: after a user dropped their Steam `min_price` from `10` → `8.99` in Settings to catch a $9.99 GamerPower giveaway, the Discoveries tab kept badging the entry SKIP against the OLD threshold — because the endpoint read `cfg.steam_min_price`, which is a **module-load-time snapshot** and doesn't refresh on Settings-UI edits without a panel restart. Same stale-cfg class of bug as the digest scheduler fix in v2.8.56.

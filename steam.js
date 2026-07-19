@@ -374,7 +374,15 @@ try {
         if (appMatch) {
           const appId = appMatch[1];
           if (knownIds.has(appId)) {
-            log.info(`GamerPower → ${entry.title}: appId ${appId} already in queue`);
+            // Silent dedupe — Steam's own /search endpoint already added
+            // this appId. The old log.info line surfaced dev-facing dedup
+            // plumbing to users and, when interleaved with unrelated
+            // per-game lines (Dwarven "manual action", FGF 403, etc.),
+            // made it look like the deduped game had issues too. The
+            // authoritative "already owned" / "claimed" line at claim-
+            // time is the sole user-facing message for these games.
+            // Report 2026-07-19.
+            if (cfg.debug) console.debug(`GamerPower → ${entry.title}: appId ${appId} already in queue (deduped)`);
             continue;
           }
           knownIds.add(appId);
@@ -436,7 +444,9 @@ try {
         }
         const appId = appMatch[1];
         if (knownIds.has(appId)) {
-          log.info(`FGF → ${cleanedTitle}: appId ${appId} already in queue`);
+          // Silent dedupe — same rationale as the GamerPower path above
+          // (see comment there). Keep dev-visible via DEBUG=1 only.
+          if (cfg.debug) console.debug(`FGF → ${cleanedTitle}: appId ${appId} already in queue (deduped)`);
           continue;
         }
         knownIds.add(appId);
