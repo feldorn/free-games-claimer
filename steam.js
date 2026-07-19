@@ -381,6 +381,24 @@ try {
           log.info(`GamerPower → ${entry.title}: appId ${appId}`);
           freeGames.push({ appId, name: entry.title, url: `https://store.steampowered.com/app/${appId}/`, endDate: entry.end_date || null });
         } else {
+          // Price gate — match the Discoveries-tab forecast (interactive-
+          // login.js forecastSkip). If GamerPower's advertised `worth`
+          // parses to a value below cfg.steam_min_price, the Discoveries
+          // tab already badges the entry SKIP with the same "under your
+          // min-price" reasoning. Surfacing a "manual action needed"
+          // notify for the same item is a self-contradiction — the user
+          // gets a push telling them to act on something the UI tells
+          // them to skip. Silently drop the manual-action notify in that
+          // case; the log.info line below stays for run-log traceability.
+          // Non-parseable worth (missing / "N/A") falls through to the
+          // action path — user should still evaluate. Found 2026-07-19
+          // via Dwarven Realms ($9.99) contradicting a $10 min-price
+          // config.
+          const worthVal = parsePrice(entry.worth);
+          if (worthVal !== null && worthVal < cfg.steam_min_price) {
+            log.info(`GamerPower → ${entry.title}: worth $${worthVal.toFixed(2)} < min $${cfg.steam_min_price} — skipping manual-action notify (Discoveries tab shows it with SKIP badge)`);
+            continue;
+          }
           log.warn(`GamerPower → ${entry.title}: not a /app/ URL — listing as manual action (${resolved || entry.open_giveaway_url})`);
           notify_games.push({ title: `${entry.title} (via GamerPower)`, url: resolved || entry.open_giveaway_url, status: 'action', details: `<a href="${resolved || entry.open_giveaway_url}">Claim manually</a>` });
         }

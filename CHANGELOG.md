@@ -4,6 +4,16 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.72
+
+**Steam-side GamerPower fallback now honours `steam_min_price` before firing a manual-action notify.** Fixes a self-contradictory signal: for a Steam-key giveaway on GamerPower whose URL doesn't resolve to `/app/<id>/` (so `steam.js` can't auto-claim) AND whose advertised `worth` is below your `steam_min_price` threshold, the Discoveries tab correctly badges the entry SKIP (won't fire on next run) but the Steam-run notify still emitted a "manual action needed" line for the same item. Users got a push saying "act on this" while the UI told them to skip.
+
+Fix in `steam.js`: the same `parsePrice(entry.worth)` check the Discoveries tab uses is now applied inline. If the worth parses to a value below `cfg.steam_min_price`, the manual-action notify is silently dropped and a run-log `log.info` line records the skip for traceability. Non-parseable worth ("N/A", missing field) falls through to the existing action path — user should still evaluate manually.
+
+Discovered via a Dwarven Realms ($9.99) run notify contradicting the Discoveries tab's SKIP badge on a `min_price=10` config.
+
+---
+
 ## What's new in 2.8.71
 
 **Settings-tab checkbox for the MS Rewards mobile session.** Follow-up to @xh43k's [#116](https://github.com/feldorn/free-games-claimer/issues/116): v2.8.69 wired the runtime to honour `services.microsoft-mobile.active` but there was no UI toggle to reach that config value — the microsoft-mobile service is rolled into the parent Microsoft Rewards row via `linkedWith`, so it wasn't rendered independently.
