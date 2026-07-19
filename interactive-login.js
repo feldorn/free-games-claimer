@@ -8778,7 +8778,13 @@ const server = http.createServer(async (req, res) => {
       // can't forecast the rating skip without scraping the Steam page,
       // so leave rating-based skips invisible — they'll show as AUTO
       // and then skip at runtime.
-      const steamMinPrice = Number(cfg.steam_min_price) || 0;
+      // Live-read: cfg.steam_min_price is a module-load-time snapshot and
+      // does NOT reflect Settings-UI edits without a panel restart —
+      // Discoveries would keep badging entries SKIP against a stale
+      // threshold. describeConfig() reflects the freshly-saved value.
+      // (Reported 2026-07-19: user dropped min_price 10 → 8.99 to catch
+      // a $9.99 GamerPower giveaway; Discoveries kept showing SKIP.)
+      const steamMinPrice = Number(describeConfig().effective.services?.steam?.minPrice) || 0;
       const parseWorth = w => {
         const m = /\$?\s*(\d+(?:\.\d+)?)/.exec(String(w || ''));
         return m ? parseFloat(m[1]) : NaN;

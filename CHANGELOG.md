@@ -4,6 +4,18 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.73
+
+**Discoveries-tab price forecast now reads live `steam.minPrice`.** Related to v2.8.72: after a user dropped their Steam `min_price` from `10` → `8.99` in Settings to catch a $9.99 GamerPower giveaway, the Discoveries tab kept badging the entry SKIP against the OLD threshold — because the endpoint read `cfg.steam_min_price`, which is a **module-load-time snapshot** and doesn't refresh on Settings-UI edits without a panel restart. Same stale-cfg class of bug as the digest scheduler fix in v2.8.56.
+
+Fix in `interactive-login.js`: the Discoveries `forecastSkip()` price threshold now sources from `describeConfig().effective.services.steam.minPrice`, which reflects Settings-UI edits immediately. Change threshold → next Discoveries fetch reflects it, no restart required.
+
+The subprocess-side Steam collector (`steam.js`) is unaffected — each scheduled run spawns a fresh subprocess with a fresh `cfg` snapshot, so the actual claim path always reads the current value. Only the long-running panel process was holding stale cfg.
+
+Diagnostic-body snapshots at `_captureErrorContext()` (interactive-login.js:658-660) still read `cfg.steam_*` — informational-only, not actionable; a separate polish item.
+
+---
+
 ## What's new in 2.8.72
 
 **Steam-side GamerPower fallback now honours `steam_min_price` before firing a manual-action notify.** Fixes a self-contradictory signal: for a Steam-key giveaway on GamerPower whose URL doesn't resolve to `/app/<id>/` (so `steam.js` can't auto-claim) AND whose advertised `worth` is below your `steam_min_price` threshold, the Discoveries tab correctly badges the entry SKIP (won't fire on next run) but the Steam-run notify still emitted a "manual action needed" line for the same item. Users got a push saying "act on this" while the UI told them to skip.
