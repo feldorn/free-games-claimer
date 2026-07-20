@@ -267,7 +267,8 @@ try {
     const gpAll = await fetchGamerPowerGiveaways();
     const gpEpic = filterGpFor(gpAll, 'epic-games');
     if (gpEpic.length) {
-      log.status('GamerPower (Epic)', `${gpEpic.length} entry/entries`);
+      // Infra breadcrumb — silenced from normal log, DEBUG=1 restores.
+      if (cfg.debug) console.debug(`GamerPower (Epic): ${gpEpic.length} entry/entries`);
       for (const entry of gpEpic) {
         const resolved = await resolveGamerPowerHref(context, entry.open_giveaway_url, 'epic-games');
         if (resolved) {
@@ -347,7 +348,8 @@ try {
       log.info(`FreeGameFindings — platform tags without a collector/watcher: ${lines}`);
     }
   } catch (e) {
-    log.warn(`FreeGameFindings discovery skipped — ${e.message.split('\n')[0]}`);
+    // Reddit blocks datacenter IPs — silenced from normal log, DEBUG=1 restores.
+    if (cfg.debug) console.debug(`FreeGameFindings discovery skipped — ${e.message.split('\n')[0]}`);
   }
 
   const titleCounts = {};

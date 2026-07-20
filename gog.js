@@ -488,7 +488,8 @@ try {
     const gpAll = await fetchGamerPowerGiveaways();
     const gpGog = filterGpFor(gpAll, 'gog');
     if (gpGog.length) {
-      log.status('GamerPower (GOG)', `${gpGog.length} entry/entries`);
+      // Infra breadcrumb — silenced from normal log, DEBUG=1 restores.
+      if (cfg.debug) console.debug(`GamerPower (GOG): ${gpGog.length} entry/entries`);
       const userMarked = getDiscoveryUserMarkedKeys();
       // GamerPower/FGF are supplementary discovery — they suggest games
       // to claim manually. If the GOG library scan above already surfaced
@@ -550,7 +551,8 @@ try {
       }
     }
   } catch (e) {
-    log.warn(`FreeGameFindings discovery skipped — ${e.message.split('\n')[0]}`);
+    // Reddit blocks datacenter IPs — silenced from normal log, DEBUG=1 restores.
+    if (cfg.debug) console.debug(`FreeGameFindings discovery skipped — ${e.message.split('\n')[0]}`);
   }
 
   // Reconcile Prime Gaming's pending GOG codes against the authenticated user's library.

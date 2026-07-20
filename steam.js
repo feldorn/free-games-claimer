@@ -360,7 +360,10 @@ try {
     const gpAll = await fetchGamerPowerGiveaways();
     const gpSteam = filterGpFor(gpAll, 'steam');
     if (gpSteam.length) {
-      log.status('GamerPower (Steam)', `${gpSteam.length} entry/entries`);
+      // Infra breadcrumb only — user isn't going to act on "GamerPower
+      // returned N entries", the actionable signal is what happens with
+      // each entry. Silenced from the normal log; DEBUG=1 restores.
+      if (cfg.debug) console.debug(`GamerPower (Steam): ${gpSteam.length} entry/entries`);
       const knownIds = new Set(freeGames.map(g => g.appId));
       // Pre-resolve title index (2026-07-19): the resolveGamerPowerHref
       // call below hits GamerPower's /open/ page + follows a redirect to
@@ -428,7 +431,13 @@ try {
             log.info(`GamerPower → ${entry.title}: worth $${worthVal.toFixed(2)} < min $${cfg.steam_min_price} — skipping manual-action notify (Discoveries tab shows it with SKIP badge)`);
             continue;
           }
-          log.warn(`GamerPower → ${entry.title}: not a /app/ URL — listing as manual action (${resolved || entry.open_giveaway_url})`);
+          // Discoveries tab already surfaces "Key Giveaway" entries with
+          // a MANUAL coverage badge + label (per v2.8.74's forecast). The
+          // per-item Pushover notify still fires via notify_games below
+          // when worth ≥ min_price. Log line is redundant and repeats
+          // every run for the same items — silenced from the normal log.
+          // DEBUG=1 restores per-item visibility.
+          if (cfg.debug) console.debug(`GamerPower → ${entry.title}: not a /app/ URL — listing as manual action (${resolved || entry.open_giveaway_url})`);
           notify_games.push({ title: `${entry.title} (via GamerPower)`, url: resolved || entry.open_giveaway_url, status: 'action', details: `<a href="${resolved || entry.open_giveaway_url}">Claim manually</a>` });
         }
       }
@@ -459,7 +468,10 @@ try {
         }
         const appMatch = /store\.steampowered\.com\/app\/(\d+)/.exec(post.url);
         if (!appMatch) {
-          log.warn(`FGF → ${cleanedTitle}: not a /app/ URL — listing as manual action (${post.url})`);
+          // Same rationale as the GamerPower non-/app/ path above —
+          // Discoveries + notify_games are the actionable surfaces;
+          // silenced from the normal log, DEBUG=1 restores.
+          if (cfg.debug) console.debug(`FGF → ${cleanedTitle}: not a /app/ URL — listing as manual action (${post.url})`);
           notify_games.push({ title: `${cleanedTitle} (via FGF)`, url: post.url, status: 'action', details: `<a href="${post.url}">Claim manually</a>` });
           continue;
         }
@@ -476,7 +488,11 @@ try {
       }
     }
   } catch (e) {
-    log.warn(`FreeGameFindings discovery skipped — ${e.message.split('\n')[0]}`);
+    // Reddit's public JSON endpoint hard-blocks datacenter/container IPs;
+    // nothing the user can act on. Silenced from the normal log — DEBUG=1
+    // restores. GamerPower coverage still applies for FGF-equivalent
+    // discoveries.
+    if (cfg.debug) console.debug(`FreeGameFindings discovery skipped — ${e.message.split('\n')[0]}`);
   }
 
   log.status('Promotions found', freeGames.length);

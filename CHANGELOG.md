@@ -4,6 +4,20 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.76
+
+**Silence three repeat-every-run discovery log lines.** User report 2026-07-20: even after prior cleanups, these three lines still fired every run for the same reasons and cluttered the log without being actionable:
+
+- `GamerPower (Steam): N entry/entries` — infra breadcrumb; user isn't going to act on "N entries returned"
+- `! GamerPower → <title>: not a /app/ URL — listing as manual action (…)` — Discoveries tab already surfaces these with a MANUAL badge (v2.8.74's forecast); the per-item Pushover notify via `notify_games` still fires when worth ≥ min_price. Log line was redundant with those two authoritative surfaces.
+- `! FreeGameFindings discovery skipped — Reddit API returned 403 ...` — datacenter/container IPs are hard-blocked by Reddit; nothing the user can act on. Multi-line boilerplate that fired every run.
+
+All three now `console.debug`-gated — visible only with `DEBUG=1`. Applied consistently across `steam.js`, `epic-games.js`, and `gog.js` (same three-line pattern lives in each). Also dropped the equivalent `! FGF → <title>: not a /app/ URL` line in `steam.js`'s FGF path for the same reason.
+
+Verified end-to-end via a Steam run — the block now flows tightly: `Steam header → Min rating/price → User → Promotions found → (aggregate + skip) → Summary`. No behavioral change to claiming, notifications, or Discoveries tab.
+
+---
+
 ## What's new in 2.8.75
 
 **Two Steam-run efficiency improvements** — user report 2026-07-19:
