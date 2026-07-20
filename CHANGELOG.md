@@ -4,6 +4,18 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.75
+
+**Two Steam-run efficiency improvements** — user report 2026-07-19:
+
+**1. Aggregate the "already owned — DB fastpath" log lines.** Previously the DB-fastpath emitted one `• <title> — already owned` log line per known-claimed game. On a mature library that surfaces every day, this added up to 5-10 identical-shape lines per run — pure noise once the fastpath is doing its job. Refactored to a pre-pass: partition `freeGames` into `ownedFromDb` (skip-and-count) and `gamesToProcess` (real work), then emit ONE aggregated line — `• N games already owned — skipped via claim DB (set DEBUG=1 to list)`. `DEBUG=1` still writes per-title `console.debug` entries for anyone who wants the detail.
+
+**2. Skip GamerPower URL-resolve for games already in the queue.** The GamerPower discovery loop was calling `resolveGamerPowerHref()` (1-2s HTTP round-trip per entry) for every GP entry — including entries whose titles already matched a Steam-search-discovered game in `freeGames`. Now: pre-compute a `titleToAppId` index from `freeGames` before the loop; if the GP entry's title matches, skip the resolve entirely (silent — `DEBUG=1` logs the skip). Saves ~2-5 sec per Steam run on typical 2-3-entry GP/Steam-search overlaps.
+
+Both changes are purely observational — no behavior change to claiming or the notification body. Just less log noise and less redundant network I/O.
+
+---
+
 ## What's new in 2.8.74
 
 **Two Steam-log clarity fixes.**

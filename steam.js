@@ -362,11 +362,32 @@ try {
     if (gpSteam.length) {
       log.status('GamerPower (Steam)', `${gpSteam.length} entry/entries`);
       const knownIds = new Set(freeGames.map(g => g.appId));
+      // Pre-resolve title index (2026-07-19): the resolveGamerPowerHref
+      // call below hits GamerPower's /open/ page + follows a redirect to
+      // Steam — ~1-2s HTTP round trip per entry. If the entry's title
+      // already matches a Steam-search-discovered game in freeGames, we
+      // KNOW the appId is in knownIds; the resolve just confirms what we
+      // already know. Skip it. Only saves ~5s per run in practice
+      // (overlap is usually 2-3 games) but eliminates a class of wasted
+      // work.
+      const titleToAppId = new Map();
+      for (const g of freeGames) {
+        const k = matchKey(g.name || '');
+        if (k) titleToAppId.set(k, g.appId);
+      }
       const userMarked = getDiscoveryUserMarkedKeys();
       for (const entry of gpSteam) {
-        const dedupKey = `steam::${matchKey(stripGpTail(entry.title))}`;
+        const stripped = stripGpTail(entry.title);
+        const titleKey = matchKey(stripped);
+        const dedupKey = `steam::${titleKey}`;
         if (userMarked.has(dedupKey)) {
           log.info(`GamerPower → ${entry.title}: already triaged via Discoveries tab, skipping`);
+          continue;
+        }
+        if (titleKey && titleToAppId.has(titleKey)) {
+          // Title matches a Steam-search entry already in the queue —
+          // no need to resolve the URL just to dedupe. Silent skip.
+          if (cfg.debug) console.debug(`GamerPower → ${entry.title}: title matches queued Steam-search entry, skipping resolve`);
           continue;
         }
         const resolved = await resolveGamerPowerHref(context, entry.open_giveaway_url, 'steam');
@@ -460,19 +481,39 @@ try {
 
   log.status('Promotions found', freeGames.length);
 
-  let claimed = 0;
-  let skipped = 0;
-  let existed = 0;
-
+  // Pre-pass DB-fastpath: split freeGames into already-claimed (skip
+  // silently, count them) and to-be-processed. Aggregated single-line
+  // count replaces N per-game "already owned" lines that added up on
+  // libraries with many previously-claimed games — pure noise once the
+  // fastpath is doing its job. DEBUG=1 restores per-title visibility.
+  // (Reported 2026-07-19: log verbosity ask on a mature library.)
+  const ownedFromDb = [];
+  const gamesToProcess = [];
   for (const game of freeGames) {
     const appId = game.appId;
-
-    if (db.data[user][appId]?.status === 'claimed' || db.data[user][appId]?.status === 'existed') {
+    const st = db.data[user][appId]?.status;
+    if (st === 'claimed' || st === 'existed') {
       const knownTitle = db.data[user][appId]?.title || game.name;
-      log.owned(knownTitle);
-      existed++;
-      continue;
+      if (cfg.debug) console.debug(`  • ${knownTitle} — already owned (from DB)`);
+      ownedFromDb.push(knownTitle);
+    } else {
+      gamesToProcess.push(game);
     }
+  }
+  if (ownedFromDb.length) {
+    // Direct console.log matches the shape of per-game log.owned lines
+    // ("    • Game X — already owned") rather than adding a redundant
+    // log.info ✓ prefix. Keeps the aggregate line visually aligned with
+    // the individual lines it replaces.
+    console.log(`    • ${ownedFromDb.length} game${ownedFromDb.length === 1 ? '' : 's'} already owned — skipped via claim DB (set DEBUG=1 to list)`);
+  }
+
+  let claimed = 0;
+  let skipped = 0;
+  let existed = ownedFromDb.length; // seed with DB-fastpath count for the summary
+
+  for (const game of gamesToProcess) {
+    const appId = game.appId;
 
     const details = await getGameDetails(page, game.url);
     const title = details.title || game.name;
