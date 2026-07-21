@@ -4,6 +4,22 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.77
+
+**Steam: detect DLC-without-base-game and skip persistently.** Per @xh43k's [#119](https://github.com/feldorn/free-games-claimer/issues/119) — daily Pushover spam for a DLC (The Mound: Omen of Cthulhu — Lost Explorers' Swords Pack, appId 4630450) that Steam refuses to claim because the base game isn't in the user's library.
+
+Root cause: `steam.js` treated the failed-claim as a generic `failed` DB status, and the DB fastpath only skipped `claimed`/`existed` — so every next run retried the same doomed claim + generated another `failed` notification.
+
+Fix:
+- **`getGameDetails`** now inspects `.game_area_dlc_bubble` on the store page and extracts the base-game `appId` from the linked href — populates `details.isDlc` and `details.baseAppId`.
+- **Claim loop** — when `isDlc && baseAppId` and the base game's status isn't `claimed` or `existed` in the local Steam DB, skip the claim attempt entirely and mark `status: 'skipped:requires-base-game'` on the DB row. One log line: `✗ <DLC title> — DLC — base game <N> not in your library, Steam refuses claim (persistent skip; if you later acquire the base game, clear its steam.json entry to re-eval)`.
+- **DB fastpath** extended to treat `skipped:requires-base-game` as terminal — subsequent runs short-circuit via a new aggregate line: `• N DLC skipped — base game not in library (set DEBUG=1 to list)`. Zero HTTP roundtrip, zero notification push.
+- **Recovery path**: if the user later acquires the base game (via Steam directly or via us), they can clear the DLC row from `data/steam.json` and the next run will re-evaluate the DLC normally.
+
+Applies to all Steam DLC picked up by `/search?specials=1&maxprice=free` — historically these have been rare (Steam usually doesn't discount DLC to zero without the base game being free too), but when they do surface, they used to spam.
+
+---
+
 ## What's new in 2.8.76
 
 **Silence three repeat-every-run discovery log lines.** User report 2026-07-20: even after prior cleanups, these three lines still fired every run for the same reasons and cluttered the log without being actionable:

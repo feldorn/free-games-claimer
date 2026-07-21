@@ -119,7 +119,7 @@ async function getGameDetails(p, url) {
 
   await dismissAgeGate(p);
 
-  const details = { url, title: null, rating: null, ratingText: null, originalPrice: null, isFree: false, alreadyOwned: false, canClaim: false };
+  const details = { url, title: null, rating: null, ratingText: null, originalPrice: null, isFree: false, alreadyOwned: false, canClaim: false, isDlc: false, baseAppId: null };
 
   try {
     details.title = await p.locator('#appHubAppName, .apphub_AppName').first().innerText();
@@ -162,6 +162,25 @@ async function getGameDetails(p, url) {
   if (await p.locator('.game_area_already_owned').count() > 0) {
     details.alreadyOwned = true;
   }
+
+  // DLC detection (xh43k's #119, 2026-07-21): Steam DLC pages carry a
+  // `.game_area_dlc_bubble` marker linking to the base game. If the user
+  // doesn't own the base game, Steam will refuse the "Add to Account"
+  // click — which we currently mark as generic `failed` and retry every
+  // run, spamming per-item notifications. Detect it upfront so the
+  // claim loop can skip persistently.
+  try {
+    const dlcBubble = p.locator('.game_area_dlc_bubble').first();
+    if (await dlcBubble.count() > 0) {
+      details.isDlc = true;
+      const baseLink = dlcBubble.locator('a[href*="/app/"]').first();
+      if (await baseLink.count() > 0) {
+        const href = await baseLink.getAttribute('href');
+        const m = /\/app\/(\d+)/.exec(href || '');
+        details.baseAppId = m ? m[1] : null;
+      }
+    }
+  } catch {}
 
   if (!details.alreadyOwned && details.isFree) {
     const addToAccount = p.locator('a.btn_green_steamui:has-text("Add to Account"), .game_purchase_action .btn_addtocart a:has-text("Add to Account")');
@@ -504,6 +523,7 @@ try {
   // fastpath is doing its job. DEBUG=1 restores per-title visibility.
   // (Reported 2026-07-19: log verbosity ask on a mature library.)
   const ownedFromDb = [];
+  const dlcSkippedFromDb = [];
   const gamesToProcess = [];
   for (const game of freeGames) {
     const appId = game.appId;
@@ -512,6 +532,12 @@ try {
       const knownTitle = db.data[user][appId]?.title || game.name;
       if (cfg.debug) console.debug(`  • ${knownTitle} — already owned (from DB)`);
       ownedFromDb.push(knownTitle);
+    } else if (st === 'skipped:requires-base-game') {
+      // Terminal skip — DLC whose base game we've previously detected
+      // as not-owned. Steam would refuse the claim anyway. Never retry.
+      const knownTitle = db.data[user][appId]?.title || game.name;
+      if (cfg.debug) console.debug(`  • ${knownTitle} — DLC skipped (base game not owned)`);
+      dlcSkippedFromDb.push(knownTitle);
     } else {
       gamesToProcess.push(game);
     }
@@ -523,10 +549,13 @@ try {
     // the individual lines it replaces.
     console.log(`    • ${ownedFromDb.length} game${ownedFromDb.length === 1 ? '' : 's'} already owned — skipped via claim DB (set DEBUG=1 to list)`);
   }
+  if (dlcSkippedFromDb.length) {
+    console.log(`    • ${dlcSkippedFromDb.length} DLC${dlcSkippedFromDb.length === 1 ? '' : 's'} skipped — base game not in library (set DEBUG=1 to list)`);
+  }
 
   let claimed = 0;
-  let skipped = 0;
-  let existed = ownedFromDb.length; // seed with DB-fastpath count for the summary
+  let skipped = dlcSkippedFromDb.length; // seed with DLC-DB-fastpath skips
+  let existed = ownedFromDb.length;      // seed with owned-DB-fastpath count
 
   for (const game of gamesToProcess) {
     const appId = game.appId;
@@ -548,6 +577,29 @@ try {
         notify_games.push({ title, url: game.url, status: 'existed' });
       }
       continue;
+    }
+
+    // DLC-without-base-game guard (xh43k's #119, 2026-07-21). Steam DLC
+    // whose base game isn't in the user's library will get an "Add to
+    // Account" refusal — historically we logged 'failed' and retried
+    // every run, spamming per-item notifications. Mark terminal on
+    // first detection: the DB fastpath above (`skipped:requires-base-
+    // game`) then short-circuits subsequent runs. If baseAppId isn't
+    // resolvable (rare — Steam's DLC-bubble markup change), fall
+    // through to the normal claim path so we don't silently drop
+    // items on false-positive detections. Ownership check honours the
+    // same `claimed | existed` semantic the fastpath uses; anything
+    // else (including no DB row) treats as not-owned.
+    if (details.isDlc && details.baseAppId) {
+      const baseStatus = db.data[user][details.baseAppId]?.status;
+      const baseOwned = baseStatus === 'claimed' || baseStatus === 'existed';
+      if (!baseOwned) {
+        log.skip(title, `DLC — base game ${details.baseAppId} not in your library, Steam refuses claim (persistent skip; if you later acquire the base game, clear its steam.json entry to re-eval)`);
+        db.data[user][appId].status = 'skipped:requires-base-game';
+        db.data[user][appId].baseAppId = details.baseAppId;
+        skipped++;
+        continue;
+      }
     }
 
     // The five skip paths below previously left the DB row's `status`
