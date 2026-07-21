@@ -4,6 +4,26 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.78
+
+**Suppress the diagnostic banner for likely-transient errors; auto-dismiss on next successful run.** Reduces the "please don't file this" ceremony where users share Count:1 errors that had adjacent successful runs (e.g. rex099's [#120](https://github.com/feldorn/free-games-claimer/issues/120), a one-off Epic `egs-navigation` timeout on v2.8.76).
+
+**Heuristic** (applied at record-time): a fresh fingerprint (`count === 1`) on a service that has ANY prior successful run in `data/last-runs.json` is auto-tagged `transientLikely: true`. Two things happen:
+
+- **Banner suppressed.** The diagnostic banner state builder in `getState()` now skips `transientLikely` entries when picking "latest pending." User isn't nagged.
+- **Errors tab still shows the entry** — with a "watching" pill styled quietly — so users retain full visibility. Fingerprint is logged, context captured, everything's there for triage if they want to look.
+
+**Two ways an entry leaves the transient tier:**
+
+- **Recurrence** — a second occurrence increments `count`, `_recordDiagnosticError` clears `transientLikely`, and the banner surfaces on next `getState()`.
+- **Auto-dismiss on success** — `recordLastRunSuccess()` sweeps all `transientLikely=true` entries whose `script` matches the succeeded service (skipping ones the user has already decided). Logs `Diagnostics: auto-dismissed N transient-likely error(s) after <service> success.`.
+
+Genuine bugs still hit the banner immediately on their second occurrence; genuine transients silently disappear on next success. Full round-trip verified end-to-end via test-injected diagnostic entries: `/api/state` banner-pending correctly excluded the transient, `/api/diagnostics/list` exposed the flag, a real Epic panel-run triggered the auto-sweep + log line.
+
+**Existing entries** (pre-upgrade): don't have the `transientLikely` field, so they render/behave as before — no migration needed. The heuristic only kicks in on new fingerprints.
+
+---
+
 ## What's new in 2.8.77
 
 **Steam: detect DLC-without-base-game and skip persistently.** Per @xh43k's [#119](https://github.com/feldorn/free-games-claimer/issues/119) — daily Pushover spam for a DLC (The Mound: Omen of Cthulhu — Lost Explorers' Swords Pack, appId 4630450) that Steam refuses to claim because the base game isn't in the user's library.

@@ -701,6 +701,16 @@ function _recordDiagnosticError(script, errorClass, message, stackLines) {
   _recentFingerprintHits.set(fp, now);
   const nowIso = new Date(now).toISOString();
   const errors = diagnosticsDb.data.errors;
+  // Transient-likely heuristic (Tier 2, 2026-07-21): fresh fingerprints
+  // (count=1) where the SAME service has ANY prior successful run in
+  // last-runs.json are auto-tagged as "watching, don't nag yet." The
+  // banner state builder skips these; the Diagnostics/Alerts tab still
+  // lists them tagged with a "watching" pill so users retain visibility.
+  // Two ways an entry loses the tag: (a) it recurs (count >= 2) — see
+  // else branch below, which promotes it to a real error; (b) the same
+  // service runs successfully again — swept in recordLastRunSuccess.
+  const siteKey = (script || '').toLowerCase();
+  const priorSuccess = siteKey && lastRunSuccess && lastRunSuccess[siteKey];
   if (!errors[fp]) {
     errors[fp] = {
       script: script || 'unknown',
@@ -712,6 +722,7 @@ function _recordDiagnosticError(script, errorClass, message, stackLines) {
       lastSeen: nowIso,
       count: 1,
       decided: null,
+      transientLikely: !!priorSuccess,
     };
   } else {
     errors[fp].lastSeen = nowIso;
@@ -723,6 +734,9 @@ function _recordDiagnosticError(script, errorClass, message, stackLines) {
     // first-seen and last-seen, and the reporter cares about the state
     // at the point they shared the banner (now), not the original.
     errors[fp].context = _captureErrorContext();
+    // Recurrence promotes it out of transient-likely — this fingerprint
+    // has now been seen more than once, so treat as a real actionable error.
+    if (errors[fp].transientLikely) errors[fp].transientLikely = false;
   }
   // Best-effort persist; failures here don't block the run.
   diagnosticsDb.write().catch(e => console.warn(`[${datetime()}] diagnostics-state write failed: ${e.message}`));
@@ -1924,6 +1938,31 @@ function recordLastRunSuccess(siteId, ts = datetime()) {
   // "…09:13:43.137" — the user-visible value is to-the-second precision.
   lastRunSuccess[siteId] = String(ts).slice(0, 19);
   saveLastRuns();
+  // Transient-diagnostic auto-dismiss (Tier 2, 2026-07-21): a successful
+  // run of this service after a transient-likely fingerprint means the
+  // error self-healed. Silently delete any transientLikely=true entries
+  // whose `script` matches — cleans up the Diagnostics/Alerts errors
+  // list without user intervention. Skips entries that have been
+  // decided (shared/dismissed/etc.) — user acted on them, respect that.
+  _sweepTransientDiagnostics(siteId);
+}
+function _sweepTransientDiagnostics(siteId) {
+  if (!diagnosticsDb || !diagnosticsDb.data || !diagnosticsDb.data.errors) return;
+  const target = String(siteId || '').toLowerCase();
+  const errs = diagnosticsDb.data.errors;
+  let removed = 0;
+  for (const fp of Object.keys(errs)) {
+    const e = errs[fp];
+    if (!e || !e.transientLikely) continue;
+    if (e.decided) continue; // user acted — leave it
+    if (String(e.script || '').toLowerCase() !== target) continue;
+    delete errs[fp];
+    removed++;
+  }
+  if (removed) {
+    diagnosticsDb.write().catch(err => console.warn(`[${datetime()}] diagnostics-state sweep write failed: ${err.message}`));
+    console.log(`[${datetime()}] Diagnostics: auto-dismissed ${removed} transient-likely error${removed === 1 ? '' : 's'} after ${siteId} success.`);
+  }
 }
 loadLastRuns();
 
@@ -2834,10 +2873,17 @@ async function getState() {
       const enabled = diagnosticsDb.data.enabled !== false;
       if (!enabled) return { enabled: false, pending: null };
       const errs = diagnosticsDb.data.errors || {};
-      // Find the most recently seen undecided fingerprint.
+      // Find the most recently seen undecided fingerprint. Skip
+      // transient-likely entries (Tier 2 diagnostic filtering, 2026-07-21):
+      // count=1 errors on services with prior successful runs are
+      // "watching, don't nag" — the banner stays silent until the
+      // fingerprint either recurs (`_recordDiagnosticError` clears the
+      // flag on count >= 2) or the next successful run auto-dismisses
+      // them (`_sweepTransientDiagnostics`).
       let latest = null;
       for (const [fp, e] of Object.entries(errs)) {
         if (e.decided) continue;
+        if (e.transientLikely) continue;
         if (!latest || (e.lastSeen || '') > (latest.lastSeen || '')) {
           latest = { fingerprint: fp, ...e };
         }
@@ -3290,6 +3336,9 @@ const PANEL_HTML = `<!DOCTYPE html>
   .diag-table td { padding: 10px; border-bottom: 1px solid #1c2c4a; vertical-align: top; color: #c8d4eb; }
   .diag-table tr:hover td { background: #161f33; }
   .diag-table .col-script { font-family: 'Menlo', 'Consolas', monospace; font-size: 12px; color: #a0d4eb; white-space: nowrap; }
+  /* "Watching" pill for transient-likely diagnostic entries — banner
+     is suppressed for these, they're auto-dismissed on next success. */
+  .diag-transient-pill { display: inline-block; font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; padding: 2px 6px; border-radius: 3px; margin-left: 6px; vertical-align: middle; background: #1f3050; color: #8aa0c2; font-weight: 600; font-family: inherit; }
   .diag-table .col-class  { font-family: 'Menlo', 'Consolas', monospace; font-size: 12px; color: #eba0a0; white-space: nowrap; }
   .diag-table .col-msg    { font-family: 'Menlo', 'Consolas', monospace; font-size: 12px; max-width: 480px; word-break: break-word; }
   .diag-table .col-count  { text-align: center; color: #ddd; }
@@ -5237,9 +5286,17 @@ async function renderDiagnosticsTab() {
       }
       const delBtn = '<button class="dt-del" data-diag-row-act="delete" data-diag-fp="' + fp + '" title="Permanently remove this error">Delete</button>';
       const hasStack = e.stack && e.stack.length > 0;
+      // Transient-likely tag (Tier 2, 2026-07-21): entries auto-tagged
+      // when fresh (count=1) AND the same service has prior successful
+      // runs. Banner suppressed; entry stays visible here with a
+      // "watching" pill so users retain visibility. Auto-dismissed when
+      // the next successful run of the same service completes.
+      const transientPill = e.transientLikely
+        ? ' <span class="diag-transient-pill" title="First-time error on a service with prior successful runs — banner suppressed. Will auto-dismiss on next successful run, or promote to real error if it recurs.">watching</span>'
+        : '';
       html += '<tr>' +
         '<td class="col-when">' + escapeHtml(_diagFormatWhen(e.lastSeen)) + '<br><span style="opacity:0.6">first ' + escapeHtml(_diagFormatWhen(e.firstSeen)) + '</span></td>' +
-        '<td class="col-script">' + escapeHtml(e.script) + '</td>' +
+        '<td class="col-script">' + escapeHtml(e.script) + transientPill + '</td>' +
         '<td class="col-class">' + escapeHtml(e.errorClass) + '</td>' +
         '<td class="col-msg">' + escapeHtml(e.message) +
           (hasStack ? '<br><button class="toggle-stack" data-diag-row-act="stack" data-diag-fp="' + escapeHtml(e.fingerprint) + '">show stack</button><pre class="diag-stack" id="diagStack_' + escapeHtml(e.fingerprint) + '">' + escapeHtml(e.stack) + '</pre>' : '') +
@@ -9360,6 +9417,7 @@ const server = http.createServer(async (req, res) => {
           lastSeen: e.lastSeen || '',
           decided: e.decided || null,
           decidedAt: e.decidedAt || null,
+          transientLikely: !!e.transientLikely,
         })).sort((a, b) => String(b.lastSeen).localeCompare(String(a.lastSeen)));
         sendJson(res, {
           enabled: diagnosticsDb.data.enabled !== false,
