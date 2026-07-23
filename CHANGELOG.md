@@ -4,6 +4,24 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.80
+
+**Run Prime Gaming before GOG so cross-store keys redeem same-day.** Per @amphoterism's [#121](https://github.com/feldorn/free-games-claimer/issues/121): the pre-existing claim-order put GOG first (`claimOrder: 1`), Prime Gaming second. Prime routinely produces free-game keys that need to be redeemed on GOG's site (`redeem.gog.com`) — but since GOG's script had already finished for the day, Prime→GOG codes got queued for the NEXT scheduled GOG run. On weekly schedules this could stall a claim by up to 7 days.
+
+**Fix:** in `src/sites.js`, changed GOG's `claimOrder` from `1` to `2.5` (between Prime Gaming's `2` and Epic Games' `3`). GOG now runs after Prime, so Prime→GOG key redemptions land on the same run. Cross-checked no other Prime-produced storefront is stalled by the change:
+
+- Prime→Epic keys — Epic still runs after Prime (order 3 vs 2). Unchanged.
+- Prime→Legacy Games — separate site, no dedicated script, unaffected.
+- Prime→Microsoft Store / Xbox / Origin — no auto-redemption automation exists; these already surface as "pending manual redeem" in the Alerts tab.
+
+**New order** (script-having services only): `prime-gaming(2) → gog(2.5) → epic-games(3) → fab(3.5) → steam(4) → ubisoft(6) → humble-bundle(7) → fanatical(8) → microsoft(9) → lenovo-gaming(10)`.
+
+Rationale updated in the `getClaimScriptOrder()` header comment. No configurable-order option added yet — the hardcoded swap covers the reported case. If users hit a scenario the swap doesn't handle, a config knob is a follow-up.
+
+Verified live via `/api/run-all` with a Prime+GOG+Epic+Steam site list: sections appeared in the expected order (Prime Gaming → GOG → Epic Games → Steam).
+
+---
+
 ## What's new in 2.8.79
 
 **Steam: suppress GamerPower Key-Giveaway notifications for games you already own.** Per @xh43k's [#119](https://github.com/feldorn/free-games-claimer/issues/119) follow-up: they were still getting daily Pushover pings for Dwarven Realms (a third-party Alienware Arena Steam-key giveaway routed through GamerPower) despite owning the game already.

@@ -278,7 +278,14 @@ export const SITES = [
     version: '2.2',
     subtitle: null,
     script: 'gog.js',
-    claimOrder: 1,
+    // Runs AFTER Prime Gaming (claimOrder 2) so Prime→GOG cross-store
+    // keys discovered on a given run can be redeemed same-day rather
+    // than waiting for the next scheduled gog.js. Before v2.8.80 GOG
+    // ran first (claimOrder 1) which stalled Prime→GOG redemptions by
+    // up to a full LOOP interval — nasty on weekly schedules where a
+    // Prime run right after Monday's GOG walk had to wait until next
+    // Monday's GOG walk to process the code. Report: amphoterism #121.
+    claimOrder: 2.5,
     loginUrl: 'https://www.gog.com/en',
     get browserDir() { return cfg.dir.browser; },
     contextOptions: null,
@@ -752,11 +759,13 @@ export function getLoginSitesById() {
 
 // Run-order list consumed by buildClaimCommand. Sorted by claimOrder so the
 // registry's display ordering (used by the Sessions tab) stays decoupled from
-// the script execution sequence — gog runs first because it's the fastest
-// and most stable, microsoft runs last because microsoft.js has an internal
-// wait-until-window that blocks the process. linkedWith is preserved verbatim
-// so a single 'microsoft' entry covers both microsoft + microsoft-mobile via
-// the same microsoft.js invocation.
+// the script execution sequence — prime-gaming runs first among the
+// storefront claimers so its cross-store keys (Prime→GOG, Prime→Epic,
+// Prime→Legacy Games) can be redeemed same-day by the downstream
+// scripts; microsoft runs last because microsoft.js has an internal
+// wait-until-window that blocks the process. linkedWith is preserved
+// verbatim so a single 'microsoft' entry covers both microsoft +
+// microsoft-mobile via the same microsoft.js invocation.
 export function getClaimScriptOrder() {
   return SITES
     .filter(s => s.script && Number.isFinite(s.claimOrder))
