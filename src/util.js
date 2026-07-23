@@ -543,7 +543,16 @@ export const matchKey = s => stripEditionSuffix(normalizeTitle(s || ''));
 // Strip GamerPower's "(Storefront) Giveaway" tail so a title like
 // "Tower of Time (Steam) Key Giveaway" keys against "tower of time" —
 // same shape the per-store DBs see and that the panel uses for dedup.
-export const stripGpTail = t => String(t || '').replace(/\s*\([^)]+\)\s*Giveaway\b.*$/i, '').trim();
+// Strip the "(Storefront) Giveaway" tail from a GamerPower listing title
+// so downstream title-index / search lookups get the bare game name.
+// The optional inner group `(?:\w+\s+)*` handles the multi-word tail
+// variants GamerPower uses: "(Steam) Giveaway", "(Steam) Key Giveaway",
+// "(Steam) Free Key Giveaway", "(Epic Games) Beta Giveaway", plus the
+// pluralized "Giveaways" form. Regression 2026-07-23: xh43k's #119
+// follow-up broke Tier-B ownership lookup because "(Steam) Key
+// Giveaway" wasn't stripped — Steam search returned nothing for the
+// full unstripped title.
+export const stripGpTail = t => String(t || '').replace(/\s*\([^)]+\)\s*(?:\w+\s+)*Giveaways?\b.*$/i, '').trim();
 
 // Load discoveries-state.json once per process and return a Set of dedup
 // keys (`${collectorKey}::${matchKey(cleanTitle)}`) for items the user has

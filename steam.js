@@ -96,6 +96,35 @@ await page.setViewportSize({ width: cfg.width, height: cfg.height });
 const notify_games = [];
 let user;
 
+// Steam's public storesearch JSON API — anonymous, returns matches for
+// a query string with appId + type + name. Used by the GamerPower "Key
+// Giveaway" ownership-check path (xh43k's #119 follow-up, 2026-07-22):
+// GamerPower URLs for third-party key promos don't resolve to a Steam
+// /app/<id>/ so we can't check ownership without first locating the
+// game's Steam appId. matchKey normalization avoids false negatives on
+// punctuation/case differences between GamerPower and Steam titles.
+// Returns the matched appId as a string, or null if no exact match /
+// search failed. Best-effort — network transients degrade to null.
+async function steamSearchByTitle(title) {
+  try {
+    const url = 'https://store.steampowered.com/api/storesearch/?term=' +
+      encodeURIComponent(String(title || '').trim()) +
+      '&l=en&cc=US';
+    const r = await fetch(url, { headers: { 'User-Agent': 'free-games-claimer' } });
+    if (!r.ok) return null;
+    const j = await r.json();
+    const items = Array.isArray(j.items) ? j.items : [];
+    if (!items.length) return null;
+    const needle = matchKey(title);
+    for (const it of items) {
+      if (it.type === 'app' && matchKey(it.name || '') === needle) {
+        return String(it.id);
+      }
+    }
+    return null;
+  } catch { return null; }
+}
+
 async function dismissAgeGate(p) {
   try {
     const ageGate = p.locator('#agegate_box, .agegate_text_container, .age_gate');
@@ -450,6 +479,55 @@ try {
             log.info(`GamerPower → ${entry.title}: worth $${worthVal.toFixed(2)} < min $${cfg.steam_min_price} — skipping manual-action notify (Discoveries tab shows it with SKIP badge)`);
             continue;
           }
+
+          // Tier A ownership gate (xh43k's #119 follow-up, 2026-07-22):
+          // title-match against the Steam claim DB. If ANY row in this
+          // user's Steam DB has status claimed/existed AND a matching
+          // normalized title, we already own the game — suppress the
+          // manual-action notify. Covers games claimed via us plus any
+          // Tier B lookups from prior runs (which persist matched
+          // appIds as `status: 'existed'`).
+          const strippedTitle = stripGpTail(entry.title);
+          const titleKey = matchKey(strippedTitle);
+          const ownedByTitle = titleKey && Object.values(db.data[user] || {}).some(row =>
+            row && (row.status === 'claimed' || row.status === 'existed')
+              && matchKey(row.title || '') === titleKey);
+          if (ownedByTitle) {
+            log.info(`GamerPower → ${entry.title}: already claimed per Steam DB (title match) — skipping manual-action notify`);
+            continue;
+          }
+
+          // Tier B ownership check (Steam-search-by-title): for
+          // "Key Giveaway" titles the GamerPower URL doesn't resolve
+          // to a Steam store /app/<id>/, so we can't check ownership
+          // without first locating the appId. Query Steam's public
+          // storesearch API by title; if exact match, visit the store
+          // page and read `.game_area_already_owned`. Owned → persist
+          // as `status: 'existed'` (Tier A will now catch on subsequent
+          // runs, no repeated search) + suppress notify.
+          //
+          // Best-effort: search/goto failures fall through to the
+          // existing notify path so we never silently drop items on
+          // Steam-search hiccups. ~1-2 HTTP roundtrips per Key
+          // Giveaway per run; rare enough not to bother batching.
+          if (/\bKey Giveaway\b/i.test(entry.title)) {
+            try {
+              const matchedAppId = await steamSearchByTitle(strippedTitle);
+              if (matchedAppId) {
+                const storeUrl = `https://store.steampowered.com/app/${matchedAppId}/`;
+                const details = await getGameDetails(page, storeUrl);
+                if (details.alreadyOwned) {
+                  db.data[user][matchedAppId] ||= { title: details.title || strippedTitle, time: datetime(), url: storeUrl };
+                  db.data[user][matchedAppId].status = 'existed';
+                  log.info(`GamerPower → ${entry.title}: appId ${matchedAppId} already in your Steam library (via title search) — skipping manual-action notify`);
+                  continue;
+                }
+              }
+            } catch (e) {
+              if (cfg.debug) console.debug(`GamerPower → ${entry.title}: Tier-B ownership check failed (${String(e.message || e).split('\n')[0]}) — falling through to manual-action notify`);
+            }
+          }
+
           // Discoveries tab already surfaces "Key Giveaway" entries with
           // a MANUAL coverage badge + label (per v2.8.74's forecast). The
           // per-item Pushover notify still fires via notify_games below

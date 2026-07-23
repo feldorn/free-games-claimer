@@ -4,6 +4,23 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.8.79
+
+**Steam: suppress GamerPower Key-Giveaway notifications for games you already own.** Per @xh43k's [#119](https://github.com/feldorn/free-games-claimer/issues/119) follow-up: they were still getting daily Pushover pings for Dwarven Realms (a third-party Alienware Arena Steam-key giveaway routed through GamerPower) despite owning the game already.
+
+**Root cause:** GamerPower `Key Giveaway` URLs don't resolve to a Steam `/app/<id>/` (they redirect to Alienware Arena or similar third-party pages), so `steam.js` had no appId to check ownership against — it fell through to a `notify_games` action push every run.
+
+**Fix — two-tier ownership check in the GamerPower non-`/app/` branch:**
+
+1. **Tier A (title-match against Steam claim DB).** Before firing the notify, walks `db.data[user]` looking for any row with status `claimed`/`existed` whose normalized title matches the GamerPower entry's stripped title. If found → suppress + log `already claimed per Steam DB (title match)`. Handles games we've claimed through the tool previously.
+2. **Tier B (Steam-search + store-page ownership check).** For titles matching `/Key Giveaway/i`, calls Steam's public `storesearch` JSON API by title, finds the exact-match appId, visits the store page, checks `.game_area_already_owned`. Owned → persist `db.data[user][appId] = { status: 'existed', ... }` (Tier A will now catch on subsequent runs — no repeated search) + suppress notify with log `already in your Steam library (via title search)`. **Handles games owned via ANY source** — direct Steam purchase, Alienware Arena redemption, humble bundle, etc.
+
+Cost: 1 `storesearch` HTTP + 1 store-page HTTP per Key-Giveaway per run, ONLY on the first-ever encounter of that title (subsequent runs hit the Tier A DB fastpath silently). Search + ownership check are wrapped in try/catch — any failure falls through to the existing notify path, so no items get silently dropped on network transients.
+
+**Also fixes a stripGpTail regex bug** in `src/util.js`: `stripGpTail` only handled `"(Storefront) Giveaway"` shape, not the multi-word variants GamerPower uses (`"(Steam) Key Giveaway"`, `"(Epic Games) Beta Giveaway"`, plural `"Giveaways"`). Regex updated to accept an optional `\w+\s+` prefix on `Giveaway` — smoke-tested against all 6 known variants. This regex is shared with the Discoveries-tab title index, so its correctness improves title-based deduplication across the whole tool.
+
+---
+
 ## What's new in 2.8.78
 
 **Suppress the diagnostic banner for likely-transient errors; auto-dismiss on next successful run.** Reduces the "please don't file this" ceremony where users share Count:1 errors that had adjacent successful runs (e.g. rex099's [#120](https://github.com/feldorn/free-games-claimer/issues/120), a one-off Epic `egs-navigation` timeout on v2.8.76).
