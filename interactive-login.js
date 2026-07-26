@@ -7666,6 +7666,7 @@ function showVnc() {
   if (!container.querySelector('iframe')) {
     const iframe = document.createElement('iframe');
     iframe.src = buildNovncUrl();
+    iframe.allow = 'fullscreen';
     container.appendChild(iframe);
   }
 }
