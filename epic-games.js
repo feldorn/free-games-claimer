@@ -2,7 +2,7 @@ import { chromium } from 'patchright';
 import { authenticator } from 'otplib';
 import path from 'path';
 import { existsSync, writeFileSync } from 'fs';
-import { resolve, jsonDb, datetime, filenamify, prompt, confirm, notify, html_game_list, handleSIGINT, closeContextSafely, log, cleanProfileLocks, localeArgs } from './src/util.js';
+import { resolve, jsonDb, datetime, filenamify, prompt, confirm, notify, html_game_list, handleSIGINT, closeContextSafely, log, cleanProfileLocks, localeArgs, siteLocale } from './src/util.js';
 import { cfg } from './src/config.js';
 import { siteVersion } from './src/sites.js';
 import { getMobileGames } from './src/epic-games-mobile.js';
@@ -11,7 +11,7 @@ import { fetchFGFPosts, filterFor as filterFgfFor, unhandledPlatforms as fgfUnha
 
 const screenshot = (...a) => resolve(cfg.dir.screenshots, 'epic-games', ...a);
 
-const URL_CLAIM = 'https://store.epicgames.com/en-US/free-games';
+const URL_CLAIM = cfg.eg_page_url || 'https://store.epicgames.com/en-US/free-games'; // EG_PAGE_URL override
 const URL_LOGIN = 'https://www.epicgames.com/id/login?lang=en-US&noHostRedirect=true&redirectUrl=' + URL_CLAIM;
 const URL_PROMOTIONS = 'https://store-site-backend-static-ipv4.ak.epicgames.com/freeGamesPromotions?locale=en-US';
 
@@ -46,7 +46,8 @@ const context = await chromium.launchPersistentContext(cfg.dir.browser, {
   // channel: 'chrome', // recommended, but `npx patchright install chrome` clashes with system Chrome - https://github.com/Kaliiiiiiiiii-Vinyzu/patchright-nodejs#best-practice----use-chrome-without-fingerprint-injection
   headless: false, // don't use cfg.headless headless here since SHOW=0 will lead to captcha
   viewport: { width: cfg.width, height: cfg.height },
-  locale: 'en-US', // ignore OS locale to be sure to have english text for locators
+  locale: siteLocale('epic-games'), // see siteLocale() for the per-site locale policy
+  timezoneId: cfg.timezone_id,
   recordVideo: cfg.record ? { dir: 'data/record/', size: { width: cfg.width, height: cfg.height } } : undefined, // will record a .webm video for each page navigated; without size, video would be scaled down to fit 800x800
   recordHar: cfg.record ? { path: `data/record/eg-${filenamify(datetime())}.har` } : undefined, // will record a HAR file with network requests and responses; can be imported in Chrome devtools
   handleSIGINT: false, // have to handle ourselves and call context.close(), otherwise recordings from above won't be saved
@@ -55,7 +56,7 @@ const context = await chromium.launchPersistentContext(cfg.dir.browser, {
     '--hide-crash-restore-bubble',
     '--ignore-gpu-blocklist', // required for OpenGL: Disabled -> Enabled & WebGL: Software only -> Hardware accelerated
     '--enable-unsafe-webgpu', // required for WebGPU: Disabled -> Hardware accelerated
-    ...localeArgs(),
+    ...localeArgs(siteLocale('epic-games')),
   ],
   // The following makes the browser crash in docker with 'Chromium sandboxing failed!':
   // chromiumSandbox: true, // https://github.com/Kaliiiiiiiiii-Vinyzu/patchright/issues/52

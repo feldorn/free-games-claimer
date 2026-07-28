@@ -22,6 +22,14 @@ const ae    = svc['aliexpress']   || {};
 const ms    = svc['microsoft']    || {};
 const lenovo = svc['lenovo-gaming'] || {};
 
+// LANG is POSIX (e.g. de_DE.UTF-8); Playwright wants a BCP-47 tag (de-DE).
+// Strip the encoding, swap _ → -. C / POSIX / unparsable → '' (caller falls
+// back to en-US).
+const localeFromLang = lang => {
+  const tag = (lang || '').split('.')[0].split('@')[0].replace('_', '-').trim();
+  return /^[a-z]{2,3}(-[A-Za-z0-9]+)?$/i.test(tag) ? tag : '';
+};
+
 // Options - also see table in README.md
 export const cfg = {
   debug: process.env.DEBUG == '1' || process.env.PWDEBUG == '1', // runs non-headless and opens https://playwright.dev/docs/inspector
@@ -37,6 +45,22 @@ export const cfg = {
   },
   width: adv.width || 1920, // width of the opened browser
   height: adv.height || 1080, // height of the opened browser
+  // Fingerprint coherence so a non-US IP doesn't look like a US proxy: LANG
+  // sets the context locale (navigator.language / Accept-Language) and TZ its
+  // timezoneId. Unset = legacy en-US, no timezoneId. See siteLocale.
+  browser_locale: localeFromLang(process.env.LANG) || 'en-US',
+  timezone_id: process.env.TZ || undefined,
+  // Per-service base-URL overrides (<SVC>_PAGE_URL): escape hatch for
+  // locale/regional redirects. Unset = each service's built-in default.
+  eg_page_url: (process.env.EG_PAGE_URL || '').replace(/\/+$/, '') || undefined,
+  gog_page_url: (process.env.GOG_PAGE_URL || '').replace(/\/+$/, '') || undefined,
+  steam_page_url: (process.env.STEAM_PAGE_URL || '').replace(/\/+$/, '') || undefined,
+  fab_page_url: (process.env.FAB_PAGE_URL || '').replace(/\/+$/, '') || undefined,
+  humble_page_url: (process.env.HUMBLE_PAGE_URL || '').replace(/\/+$/, '') || undefined,
+  fanatical_page_url: (process.env.FANATICAL_PAGE_URL || '').replace(/\/+$/, '') || undefined,
+  lenovo_page_url: (process.env.LENOVO_PAGE_URL || '').replace(/\/+$/, '') || undefined,
+  ubisoft_page_url: (process.env.UBISOFT_PAGE_URL || '').replace(/\/+$/, '') || undefined,
+  ae_page_url: (process.env.AE_PAGE_URL || '').replace(/\/+$/, '') || undefined,
   run_history_max: adv.runHistoryMax || 200, // cap on data/runs.json entries (Logs tab Past-runs)
   timeout: (adv.timeoutSec || 60) * 1000, // default timeout for playwright is 30s
   login_timeout: (adv.loginTimeoutSec || 180) * 1000, // higher timeout for login, will wait twice: prompt + wait for manual login

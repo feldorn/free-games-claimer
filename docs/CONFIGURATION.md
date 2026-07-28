@@ -56,6 +56,9 @@ for `BASE_PATH`, `PUBLIC_URL`, and `NOVNC_URL`.
 | `HEIGHT` | `1080` | Browser/screen height |
 | `VNC_PASSWORD` | | VNC password. No password by default. |
 | `BROWSER_DIR` | `data/browser` | Browser profile directory |
+| `LANG` | `en-US` | Browser locale from POSIX `LANG` (e.g. `de_DE.UTF-8` → `de-DE`), so the fingerprint matches your IP |
+| `TZ` | | Container timezone (e.g. `America/Sao_Paulo`); also sets the browser `timezoneId` |
+| `<SVC>_PAGE_URL` | (per-service default) | Override a service's base URL (`EG_`, `GOG_`, `STEAM_`, `FAB_`, `HUMBLE_`, `FANATICAL_`, `LENOVO_`, `UBISOFT_`, `AE_PAGE_URL`; Prime uses `PG_BASE_URL`) |
 | `TIMEOUT` | `60` | Timeout in seconds for page actions |
 | `LOGIN_TIMEOUT` | `180` | Timeout in seconds for login |
 | `DEBUG` | `0` | Set to `1` for verbose debug output |

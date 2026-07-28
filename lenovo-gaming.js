@@ -25,7 +25,7 @@
 
 import { chromium } from 'patchright';
 import { writeFileSync, readFileSync, existsSync } from 'node:fs';
-import { datetime, notify, log, dataDir, handleSIGINT, cleanProfileLocks, localeArgs } from './src/util.js';
+import { datetime, notify, log, dataDir, handleSIGINT, cleanProfileLocks, localeArgs, siteLocale } from './src/util.js';
 import { cfg } from './src/config.js';
 import { siteVersion } from './src/sites.js';
 
@@ -37,7 +37,7 @@ process.on('exit', code => {
   if (!code) log.summary(_summaryStats);
 });
 
-const URL_LISTING = 'https://gaming.lenovo.com/game-key-drops';
+const URL_LISTING = cfg.lenovo_page_url || 'https://gaming.lenovo.com/game-key-drops'; // LENOVO_PAGE_URL override
 const STATE_FILE = dataDir('lenovo-gaming-watch.json');
 
 function loadState() {
@@ -96,8 +96,9 @@ try {
   context = await chromium.launchPersistentContext(cfg.dir.browser + '-lenovo', {
     headless: false,
     viewport: { width: cfg.width, height: cfg.height },
-    locale: 'en-US',
-    args: ['--hide-crash-restore-bubble', '--no-sandbox', '--disable-gpu', ...localeArgs()],
+    locale: siteLocale('lenovo-gaming'), // see siteLocale() for the per-site locale policy
+    timezoneId: cfg.timezone_id,
+    args: ['--hide-crash-restore-bubble', '--no-sandbox', '--disable-gpu', ...localeArgs(siteLocale('lenovo-gaming'))],
   });
   page = context.pages()[0] || await context.newPage();
   context.setDefaultTimeout(cfg.debug ? 0 : cfg.timeout);
