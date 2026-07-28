@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 const __panelDirname = path.dirname(fileURLToPath(import.meta.url));
 import { chromium } from 'patchright';
-import { datetime, notify, jsonDb, normalizeTitle, cleanProfileLocks, localeArgs, readDigestBuffer, markDigestFlushed } from './src/util.js';
+import { datetime, notify, jsonDb, normalizeTitle, cleanProfileLocks, localeArgs, siteLocale, readDigestBuffer, markDigestFlushed } from './src/util.js';
 import { cfg } from './src/config.js';
 import { describeConfig, patchConfig, describeEnv, getSchedulerConfig, CONFIG_FILE_PATH } from './src/app-config.js';
 import { SITES as SITE_REGISTRY, getLoginSitesById, getClaimScriptOrder, getLinkedActiveMap, getClaimDbFiles, getServiceRows } from './src/sites.js';
@@ -126,9 +126,10 @@ async function launchSite(siteId) {
   const context = await chromium.launchPersistentContext(site.browserDir, {
     headless: false,
     viewport: { width: cfg.width, height: cfg.height },
-    locale: 'en-US',
+    locale: siteLocale(siteId), // see siteLocale() for the per-site locale policy
+    timezoneId: cfg.timezone_id,
     handleSIGINT: false,
-    args: ['--hide-crash-restore-bubble', ...localeArgs()],
+    args: ['--hide-crash-restore-bubble', ...localeArgs(siteLocale(siteId))],
     ...(site.contextOptions || {}),
   });
 
@@ -211,9 +212,10 @@ async function checkSiteStatus(siteId) {
     context = await chromium.launchPersistentContext(site.browserDir, {
       headless: false,
       viewport: { width: cfg.width, height: cfg.height },
-      locale: 'en-US',
+      locale: siteLocale(siteId), // see siteLocale() for the per-site locale policy
+      timezoneId: cfg.timezone_id,
       handleSIGINT: false,
-      args: ['--hide-crash-restore-bubble', '--no-sandbox', '--disable-gpu', ...localeArgs()],
+      args: ['--hide-crash-restore-bubble', '--no-sandbox', '--disable-gpu', ...localeArgs(siteLocale(siteId))],
       ...(site.contextOptions || {}),
     });
 
@@ -320,9 +322,10 @@ async function importSiteCookies(siteId, rawCookies) {
     context = await chromium.launchPersistentContext(site.browserDir, {
       headless: false,
       viewport: { width: cfg.width, height: cfg.height },
-      locale: 'en-US',
+      locale: siteLocale(siteId), // see siteLocale() for the per-site locale policy
+      timezoneId: cfg.timezone_id,
       handleSIGINT: false,
-      args: ['--hide-crash-restore-bubble', ...localeArgs()],
+      args: ['--hide-crash-restore-bubble', ...localeArgs(siteLocale(siteId))],
       ...(site.contextOptions || {}),
     });
     await context.addCookies(normalized);
@@ -986,7 +989,8 @@ async function countPendingGogCodes() {
 }
 
 async function processOneRedeemCode(page, code) {
-  await page.goto(`https://www.gog.com/redeem/${encodeURIComponent(code)}`, { waitUntil: 'domcontentloaded', timeout: 30000 });
+  // /en keeps the success heading English regardless of context locale
+  await page.goto(`https://www.gog.com/en/redeem/${encodeURIComponent(code)}`, { waitUntil: 'domcontentloaded', timeout: 30000 });
   await page.waitForTimeout(2000);
   // URL-based pre-fill usually works; fall back to filling #codeInput explicitly.
   try { await page.fill('#codeInput', code); } catch {}
@@ -1152,9 +1156,10 @@ async function startBatchRedeem() {
   const context = await chromium.launchPersistentContext(cfg.dir.browser, {
     headless: false,
     viewport: { width: cfg.width, height: cfg.height },
-    locale: 'en-US',
+    locale: siteLocale('gog'), // see siteLocale() for the per-site locale policy
+    timezoneId: cfg.timezone_id,
     handleSIGINT: false,
-    args: ['--hide-crash-restore-bubble', ...localeArgs()],
+    args: ['--hide-crash-restore-bubble', ...localeArgs(siteLocale('gog'))],
   });
   const page = context.pages()[0] || await context.newPage();
   try { await page.setViewportSize({ width: cfg.width, height: cfg.height }); } catch {}
@@ -1212,7 +1217,8 @@ function clearFinishedBatchRedeem() {
 // batch so we don't burn through more keys than necessary.
 let steamRedeem = null;
 
-const STEAM_REDEEM_URL = 'https://store.steampowered.com/account/registerkey';
+// ?l=english keeps the page English regardless of context locale (as steam.js does)
+const STEAM_REDEEM_URL = 'https://store.steampowered.com/account/registerkey?l=english';
 const STEAM_AJAX_URL = 'https://store.steampowered.com/account/ajaxregisterkey/';
 
 function collectPendingSteamCodes(dbs) {
@@ -1474,9 +1480,10 @@ async function startSteamRedeem() {
   const context = await chromium.launchPersistentContext(cfg.dir.browser, {
     headless: false,
     viewport: { width: cfg.width, height: cfg.height },
-    locale: 'en-US',
+    locale: siteLocale('steam'), // see siteLocale() for the per-site locale policy
+    timezoneId: cfg.timezone_id,
     handleSIGINT: false,
-    args: ['--hide-crash-restore-bubble', ...localeArgs()],
+    args: ['--hide-crash-restore-bubble', ...localeArgs(siteLocale('steam'))],
   });
   const page = context.pages()[0] || await context.newPage();
   try { await page.setViewportSize({ width: cfg.width, height: cfg.height }); } catch {}
