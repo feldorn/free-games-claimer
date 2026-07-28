@@ -1,5 +1,6 @@
 import { writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { datetime, notify, log, dataDir, handleSIGINT } from './src/util.js';
+import { cfg } from './src/config.js';
 import { siteVersion } from './src/sites.js';
 
 // Watch-only Ubisoft Connect free-games tracker. No login, no claim — just
@@ -21,7 +22,7 @@ process.on('exit', code => {
   if (!code) log.summary(_summaryStats);
 });
 
-const URL_FREE = 'https://store.ubisoft.com/us/free-games';
+const URL_FREE = cfg.ubisoft_page_url || 'https://store.ubisoft.com/us/free-games'; // UBISOFT_PAGE_URL override
 const STATE_FILE = dataDir('ubisoft-watch.json');
 
 function loadState() {

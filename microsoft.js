@@ -1,7 +1,7 @@
 import { chromium, devices } from 'patchright';
 import { authenticator } from 'otplib';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
-import { delay, datetime, prompt, notify, log, dataDir, jsonDb, cleanProfileLocks, localeArgs } from './src/util.js';
+import { delay, datetime, prompt, notify, log, dataDir, jsonDb, cleanProfileLocks, localeArgs, siteLocale } from './src/util.js';
 import { cfg } from './src/config.js';
 import { describeConfig } from './src/app-config.js';
 import { siteVersion } from './src/sites.js';
@@ -294,7 +294,8 @@ async function createContext(isMobile) {
   const context = await chromium.launchPersistentContext(browserDir, {
     headless: false,
     viewport,
-    locale: 'en-US',
+    locale: siteLocale('microsoft'), // see siteLocale() for the per-site locale policy
+    timezoneId: cfg.timezone_id,
     handleSIGINT: false,
     args: [
       '--hide-crash-restore-bubble',
@@ -311,7 +312,7 @@ async function createContext(isMobile) {
       '--enable-webgl',
       '--ignore-gpu-blocklist',
       '--enable-unsafe-webgpu',
-      ...localeArgs(),
+      ...localeArgs(siteLocale('microsoft')),
     ],
     ...deviceSettings, // for mobile: overrides viewport, sets userAgent/isMobile/hasTouch
   });

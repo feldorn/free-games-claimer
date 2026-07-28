@@ -1,6 +1,6 @@
 import { chromium } from 'patchright';
 import { writeFileSync } from 'node:fs';
-import { resolve, jsonDb, datetime, filenamify, prompt, notify, html_game_list, handleSIGINT, log, dataDir, cleanProfileLocks, matchKey, stripGpTail, getDiscoveryUserMarkedKeys, localeArgs } from './src/util.js';
+import { resolve, jsonDb, datetime, filenamify, prompt, notify, html_game_list, handleSIGINT, log, dataDir, cleanProfileLocks, matchKey, stripGpTail, getDiscoveryUserMarkedKeys, localeArgs, siteLocale } from './src/util.js';
 import { cfg } from './src/config.js';
 import { siteVersion } from './src/sites.js';
 import { fetchGamerPowerGiveaways, filterFor as filterGpFor, resolveGamerPowerHref } from './src/gamerpower.js';
@@ -8,7 +8,7 @@ import { fetchFGFPosts, filterFor as filterFgfFor, cleanTitle as fgfClean } from
 
 const screenshot = (...a) => resolve(cfg.dir.screenshots, 'steam', ...a);
 
-const URL_STORE = 'https://store.steampowered.com';
+const URL_STORE = cfg.steam_page_url || 'https://store.steampowered.com'; // STEAM_PAGE_URL override
 const URL_LOGIN = `${URL_STORE}/login/`;
 
 // All our store-page selectors and success indicators key off English text
@@ -76,13 +76,14 @@ cleanProfileLocks(cfg.dir.browser);
 const context = await chromium.launchPersistentContext(cfg.dir.browser, {
   headless: cfg.headless,
   viewport: { width: cfg.width, height: cfg.height },
-  locale: 'en-US',
+  locale: siteLocale('steam'), // see siteLocale() for the per-site locale policy
+  timezoneId: cfg.timezone_id,
   recordVideo: cfg.record ? { dir: 'data/record/', size: { width: cfg.width, height: cfg.height } } : undefined,
   recordHar: cfg.record ? { path: `data/record/steam-${filenamify(datetime())}.har` } : undefined,
   handleSIGINT: false,
   args: [
     '--hide-crash-restore-bubble',
-    ...localeArgs(),
+    ...localeArgs(siteLocale('steam')),
   ],
 });
 
@@ -329,7 +330,7 @@ try {
     { name: 'Steam_Language', value: 'english', domain: 'store.steampowered.com', path: '/' },
   ]);
 
-  await page.goto(URL_STORE, { waitUntil: 'domcontentloaded' });
+  await page.goto(withEnglish(URL_STORE), { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(3000);
 
   const isLoggedIn = async () => {
@@ -340,7 +341,7 @@ try {
   while (!await isLoggedIn()) {
     log.warn('Not signed in to Steam');
     if (cfg.nowait) process.exit(1);
-    await page.goto(URL_LOGIN, { waitUntil: 'domcontentloaded' });
+    await page.goto(withEnglish(URL_LOGIN), { waitUntil: 'domcontentloaded' });
     if (!cfg.debug) context.setDefaultTimeout(cfg.login_timeout);
     log.status('Login timeout', `${cfg.login_timeout / 1000}s`);
     if (cfg.steam_email && cfg.steam_password) log.info('Using credentials from environment');
@@ -372,7 +373,7 @@ try {
       try {
         await page.waitForURL('https://store.steampowered.com/', { timeout: cfg.login_timeout });
       } catch {
-        await page.goto(URL_STORE, { waitUntil: 'domcontentloaded' });
+        await page.goto(withEnglish(URL_STORE), { waitUntil: 'domcontentloaded' });
         await page.waitForTimeout(3000);
       }
     } else {
@@ -386,7 +387,7 @@ try {
       await page.waitForSelector('#account_pulldown', { timeout: cfg.login_timeout });
     }
     if (!cfg.debug) context.setDefaultTimeout(cfg.timeout);
-    await page.goto(URL_STORE, { waitUntil: 'domcontentloaded' });
+    await page.goto(withEnglish(URL_STORE), { waitUntil: 'domcontentloaded' });
     await page.waitForTimeout(2000);
   }
 

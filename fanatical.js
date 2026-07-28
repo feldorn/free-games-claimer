@@ -1,6 +1,6 @@
 import { writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { chromium } from 'patchright';
-import { datetime, notify, log, dataDir, handleSIGINT, cleanProfileLocks, localeArgs } from './src/util.js';
+import { datetime, notify, log, dataDir, handleSIGINT, cleanProfileLocks, localeArgs, siteLocale } from './src/util.js';
 import { cfg } from './src/config.js';
 import { siteVersion } from './src/sites.js';
 
@@ -35,7 +35,7 @@ process.on('exit', code => {
   if (!code) log.summary(_summaryStats);
 });
 
-const URL_PAGE = 'https://www.fanatical.com/en/free-games-keys';
+const URL_PAGE = cfg.fanatical_page_url || 'https://www.fanatical.com/en/free-games-keys'; // FANATICAL_PAGE_URL override
 const STATE_FILE = dataDir('fanatical-watch.json');
 
 function loadState() {
@@ -70,9 +70,10 @@ try {
     // been captured.
     headless: false,
     viewport: { width: cfg.width, height: cfg.height },
-    locale: 'en-US',
+    locale: siteLocale('fanatical'), // see siteLocale() for the per-site locale policy
+    timezoneId: cfg.timezone_id,
     handleSIGINT: false,
-    args: ['--hide-crash-restore-bubble', ...localeArgs()],
+    args: ['--hide-crash-restore-bubble', ...localeArgs(siteLocale('fanatical'))],
   });
   page = context.pages()[0] || await context.newPage();
   context.setDefaultTimeout(30000);

@@ -1,7 +1,7 @@
 import { chromium } from 'patchright';
 import { authenticator } from 'otplib';
 import { existsSync } from 'fs';
-import { resolve, jsonDb, datetime, filenamify, prompt, confirm, notify, html_game_list, handleSIGINT, closeContextSafely, log, cleanProfileLocks, localeArgs } from './src/util.js';
+import { resolve, jsonDb, datetime, filenamify, prompt, confirm, notify, html_game_list, handleSIGINT, closeContextSafely, log, cleanProfileLocks, localeArgs, siteLocale } from './src/util.js';
 import { cfg } from './src/config.js';
 import { siteVersion } from './src/sites.js';
 
@@ -21,7 +21,7 @@ import { siteVersion } from './src/sites.js';
 const screenshot = (...a) => resolve(cfg.dir.screenshots, 'fab', ...a);
 
 const URL_HOME = 'https://www.fab.com/';
-const URL_FREE = 'https://www.fab.com/limited-time-free';
+const URL_FREE = cfg.fab_page_url || 'https://www.fab.com/limited-time-free'; // FAB_PAGE_URL override
 const URL_ME = 'https://www.fab.com/i/users/me';
 
 log.section(`FAB (v${siteVersion('fab')})`);
@@ -34,7 +34,8 @@ cleanProfileLocks(cfg.dir.browser);
 const context = await chromium.launchPersistentContext(cfg.dir.browser, {
   headless: false, // don't use cfg.headless — like Epic, headless triggers captcha on the shared Epic login
   viewport: { width: cfg.width, height: cfg.height },
-  locale: 'en-US', // ignore OS locale so our English text locators match
+  locale: siteLocale('fab'), // see siteLocale() for the per-site locale policy
+  timezoneId: cfg.timezone_id,
   recordVideo: cfg.record ? { dir: 'data/record/', size: { width: cfg.width, height: cfg.height } } : undefined,
   recordHar: cfg.record ? { path: `data/record/fab-${filenamify(datetime())}.har` } : undefined,
   handleSIGINT: false,
@@ -42,7 +43,7 @@ const context = await chromium.launchPersistentContext(cfg.dir.browser, {
     '--hide-crash-restore-bubble',
     '--ignore-gpu-blocklist',
     '--enable-unsafe-webgpu',
-    ...localeArgs(),
+    ...localeArgs(siteLocale('fab')),
   ],
 });
 

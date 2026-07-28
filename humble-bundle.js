@@ -1,6 +1,6 @@
 import { writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { chromium } from 'patchright';
-import { datetime, notify, log, dataDir, handleSIGINT, cleanProfileLocks, localeArgs } from './src/util.js';
+import { datetime, notify, log, dataDir, handleSIGINT, cleanProfileLocks, localeArgs, siteLocale } from './src/util.js';
 import { cfg } from './src/config.js';
 import { siteVersion } from './src/sites.js';
 
@@ -41,7 +41,7 @@ process.on('exit', code => {
 // search response. Iterating to a curated promo URL (e.g.
 // /store/promo/<slug>) once one is identified would make this
 // runner sharper.
-const URL_PAGE = 'https://www.humblebundle.com/store/search?sort=newest';
+const URL_PAGE = cfg.humble_page_url || 'https://www.humblebundle.com/store/search?sort=newest'; // HUMBLE_PAGE_URL override
 const STATE_FILE = dataDir('humble-bundle-watch.json');
 
 function loadState() {
@@ -66,9 +66,10 @@ try {
     // close the context once the API response has been captured.
     headless: false,
     viewport: { width: cfg.width, height: cfg.height },
-    locale: 'en-US',
+    locale: siteLocale('humble-bundle'), // see siteLocale() for the per-site locale policy
+    timezoneId: cfg.timezone_id,
     handleSIGINT: false,
-    args: ['--hide-crash-restore-bubble', ...localeArgs()],
+    args: ['--hide-crash-restore-bubble', ...localeArgs(siteLocale('humble-bundle'))],
   });
   page = context.pages()[0] || await context.newPage();
   context.setDefaultTimeout(30000);
