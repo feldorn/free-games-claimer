@@ -58,21 +58,31 @@ export const datetimeUTC = (d = new Date()) => d.toISOString().replace('T', ' ')
 export const datetime = (d = new Date()) => datetimeUTC(new Date(d.getTime() - d.getTimezoneOffset() * 60000));
 export const filenamify = s => s.replaceAll(':', '.').replace(/[^a-z0-9 _\-.]/gi, '_'); // alternative: https://www.npmjs.com/package/filenamify - On Unix-like systems, / is reserved. On Windows, <>:"/\|?* along with trailing periods are reserved.
 
-// Common Chromium launch flags every claim script should include. Force
-// English at the browser-process level (--lang + --accept-lang) and disable
-// Chrome's auto-translate so the DOM text our locators key off stays in
-// English regardless of the user's locale. Belt-and-suspenders with any
-// per-site URL-param locale forcing (e.g. Steam's ?l=english). Reported
-// originally as #68 (German Steam locale broke the "Add to Account"
-// locator) and #72 (Polish AliExpress broke the login-state detector) —
-// flag-level forcing fixes both in one place and covers every storefront
-// without per-site changes.
-export const localeArgs = () => [
-  '--lang=en-US',
-  '--accept-lang=en-US,en;q=0.9',
-  '--disable-translate',
-  '--disable-features=Translate,TranslateUI',
-];
+// Per-site context locale. Claim locators need English DOM text (#68 German
+// Steam, #72 Polish AliExpress), but a blanket en-US fingerprint on a non-US
+// IP is a proxy/bot signal. So: sites that force English via URL (Steam
+// ?l=english, GOG /en, Epic /en-US, Fanatical /en) or scrape locale-blind
+// (Humble/Lenovo) follow the LANG locale; the rest pin en-US to keep locators.
+const EN_PINNED_SITES = new Set(['prime-gaming', 'microsoft', 'microsoft-mobile', 'fab', 'aliexpress']);
+export const siteLocale = siteId => EN_PINNED_SITES.has(siteId) ? 'en-US' : cfg.browser_locale || 'en-US';
+
+// Chromium launch flags matching the context `locale` (pass siteLocale(id)):
+// set --lang/--accept-lang and disable auto-translate so DOM text stays in the
+// served language. The accept-lang chain keeps an English fallback (en;q=0.8).
+// Default en-US reproduces the exact legacy flags.
+export const localeArgs = (locale = cfg.browser_locale) => {
+  const loc = locale || 'en-US';
+  const base = loc.split('-')[0];
+  const accept = [loc];
+  if (base !== loc) accept.push(`${base};q=0.9`);
+  if (base !== 'en') accept.push('en;q=0.8');
+  return [
+    `--lang=${loc}`,
+    `--accept-lang=${accept.join(',')}`,
+    '--disable-translate',
+    '--disable-features=Translate,TranslateUI',
+  ];
+};
 
 // Load a previously-saved fingerprint from <profileDir>/.fgc-fingerprint.json
 // or call the supplied generator function once and persist its output.
