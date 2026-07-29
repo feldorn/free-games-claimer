@@ -2,7 +2,8 @@ import { chromium } from 'patchright';
 import { authenticator } from 'otplib';
 import path from 'path';
 import { existsSync, writeFileSync } from 'fs';
-import { resolve, jsonDb, datetime, filenamify, prompt, confirm, notify, html_game_list, handleSIGINT, closeContextSafely, log, cleanProfileLocks, localeArgs, siteLocale } from './src/util.js';
+import { resolve, jsonDb, datetime, filenamify, prompt, confirm, notify, html_game_list, closeContextSafely, log } from './src/util.js';
+import { launchContext } from './src/browser.js';
 import { cfg } from './src/config.js';
 import { siteVersion } from './src/sites.js';
 import { getMobileGames } from './src/epic-games-mobile.js';
@@ -41,35 +42,19 @@ const db = await jsonDb('epic-games.json', {});
 if (cfg.time) console.time('startup');
 
 // https://playwright.dev/docs/auth#multi-factor-authentication
-cleanProfileLocks(cfg.dir.browser);
-const context = await chromium.launchPersistentContext(cfg.dir.browser, {
-  // channel: 'chrome', // recommended, but `npx patchright install chrome` clashes with system Chrome - https://github.com/Kaliiiiiiiiii-Vinyzu/patchright-nodejs#best-practice----use-chrome-without-fingerprint-injection
-  headless: false, // don't use cfg.headless headless here since SHOW=0 will lead to captcha
-  viewport: { width: cfg.width, height: cfg.height },
-  locale: siteLocale('epic-games'), // see siteLocale() for the per-site locale policy
-  timezoneId: cfg.timezone_id,
-  recordVideo: cfg.record ? { dir: 'data/record/', size: { width: cfg.width, height: cfg.height } } : undefined, // will record a .webm video for each page navigated; without size, video would be scaled down to fit 800x800
-  recordHar: cfg.record ? { path: `data/record/eg-${filenamify(datetime())}.har` } : undefined, // will record a HAR file with network requests and responses; can be imported in Chrome devtools
-  handleSIGINT: false, // have to handle ourselves and call context.close(), otherwise recordings from above won't be saved
-  // https://peter.sh/experiments/chromium-command-line-switches/
-  args: [
-    '--hide-crash-restore-bubble',
-    '--ignore-gpu-blocklist', // required for OpenGL: Disabled -> Enabled & WebGL: Software only -> Hardware accelerated
-    '--enable-unsafe-webgpu', // required for WebGPU: Disabled -> Hardware accelerated
-    ...localeArgs(siteLocale('epic-games')),
-  ],
-  // The following makes the browser crash in docker with 'Chromium sandboxing failed!':
-  // chromiumSandbox: true, // https://github.com/Kaliiiiiiiiii-Vinyzu/patchright/issues/52
+const { context, page } = await launchContext('epic-games', {
+  recordPrefix: 'eg',
+  // headless:false — SHOW=0 (headless) leads to captcha on the Epic login.
+  contextOptions: { headless: false },
+  // --ignore-gpu-blocklist: OpenGL/WebGL software-only -> hardware accelerated.
+  // --enable-unsafe-webgpu: WebGPU disabled -> hardware accelerated.
+  extraArgs: ['--ignore-gpu-blocklist', '--enable-unsafe-webgpu'],
 });
 
 // console.log(context.browser().browserType()); // browser is null...
 if (cfg.debug) console.log(chromium.executablePath());
 
-handleSIGINT(context);
-
 if (!cfg.debug) context.setDefaultTimeout(cfg.timeout);
-
-const page = context.pages().length ? context.pages()[0] : await context.newPage(); // should always exist
 // await page.setViewportSize({ width: cfg.width, height: cfg.height }); // TODO workaround for https://github.com/vogler/free-games-claimer/issues/277 until Playwright fixes it
 
 // some debug info about the page (screen dimensions, user agent, platform)

@@ -1,7 +1,7 @@
-import { chromium } from 'patchright';
+import { launchContext } from './src/browser.js';
 import { existsSync, readFileSync, appendFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
-import { resolve, jsonDb, datetime, filenamify, prompt, confirm, notify, html_game_list, handleSIGINT, log, normalizeTitle, awaitUserCaptchaSolve, cleanProfileLocks, matchKey, stripGpTail, getDiscoveryUserMarkedKeys, delay, localeArgs, siteLocale, dataDir } from './src/util.js';
+import { resolve, jsonDb, datetime, filenamify, prompt, confirm, notify, html_game_list, log, normalizeTitle, awaitUserCaptchaSolve, matchKey, stripGpTail, getDiscoveryUserMarkedKeys, delay, dataDir } from './src/util.js';
 import { cfg } from './src/config.js';
 import { siteVersion } from './src/sites.js';
 import { fetchGamerPowerGiveaways, filterFor as filterGpFor, resolveGamerPowerHref } from './src/gamerpower.js';
@@ -53,27 +53,10 @@ if (cfg.width < 1280) { // otherwise 'Sign in' and #menuUsername are hidden (but
 }
 
 // https://playwright.dev/docs/auth#multi-factor-authentication
-cleanProfileLocks(cfg.dir.browser);
-const context = await chromium.launchPersistentContext(cfg.dir.browser, {
-  headless: cfg.headless,
-  viewport: { width: cfg.width, height: cfg.height },
-  locale: siteLocale('gog'), // see siteLocale() for the per-site locale policy
-  timezoneId: cfg.timezone_id,
-  recordVideo: cfg.record ? { dir: 'data/record/', size: { width: cfg.width, height: cfg.height } } : undefined, // will record a .webm video for each page navigated; without size, video would be scaled down to fit 800x800
-  recordHar: cfg.record ? { path: `data/record/gog-${filenamify(datetime())}.har` } : undefined, // will record a HAR file with network requests and responses; can be imported in Chrome devtools
-  handleSIGINT: false, // have to handle ourselves and call context.close(), otherwise recordings from above won't be saved
-  // https://peter.sh/experiments/chromium-command-line-switches/
-  args: [
-    '--hide-crash-restore-bubble',
-    ...localeArgs(siteLocale('gog')),
-  ],
-});
-
-handleSIGINT(context);
+const { context, page } = await launchContext('gog');
 
 if (!cfg.debug) context.setDefaultTimeout(cfg.timeout);
 
-const page = context.pages().length ? context.pages()[0] : await context.newPage(); // should always exist
 await page.setViewportSize({ width: cfg.width, height: cfg.height }); // TODO workaround for https://github.com/vogler/free-games-claimer/issues/277 until Playwright fixes it
 // console.debug('userAgent:', await page.evaluate(() => navigator.userAgent));
 

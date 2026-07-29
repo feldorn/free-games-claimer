@@ -1,6 +1,6 @@
-import { chromium } from 'patchright';
+import { launchContext } from './src/browser.js';
 import { authenticator } from 'otplib';
-import { resolve, jsonDb, datetime, filenamify, prompt, confirm, notify, html_game_list, handleSIGINT, log, cleanProfileLocks, localeArgs, siteLocale } from './src/util.js';
+import { resolve, jsonDb, datetime, filenamify, prompt, confirm, notify, html_game_list, log } from './src/util.js';
 import { cfg } from './src/config.js';
 import { siteVersion } from './src/sites.js';
 
@@ -37,26 +37,10 @@ for (const userRecords of Object.values(db.data || {})) {
 }
 
 // https://playwright.dev/docs/auth#multi-factor-authentication
-cleanProfileLocks(cfg.dir.browser);
-const context = await chromium.launchPersistentContext(cfg.dir.browser, {
-  headless: cfg.headless,
-  viewport: { width: cfg.width, height: cfg.height },
-  locale: siteLocale('prime-gaming'), // see siteLocale() for the per-site locale policy
-  timezoneId: cfg.timezone_id,
-  recordVideo: cfg.record ? { dir: 'data/record/', size: { width: cfg.width, height: cfg.height } } : undefined, // will record a .webm video for each page navigated; without size, video would be scaled down to fit 800x800
-  recordHar: cfg.record ? { path: `data/record/pg-${filenamify(datetime())}.har` } : undefined, // will record a HAR file with network requests and responses; can be imported in Chrome devtools
-  handleSIGINT: false, // have to handle ourselves and call context.close(), otherwise recordings from above won't be saved
-  args: [
-    '--hide-crash-restore-bubble',
-    ...localeArgs(siteLocale('prime-gaming')),
-  ],
-});
-
-handleSIGINT(context);
+const { context, page } = await launchContext('prime-gaming', { recordPrefix: 'pg' });
 
 if (!cfg.debug) context.setDefaultTimeout(cfg.timeout);
 
-const page = context.pages().length ? context.pages()[0] : await context.newPage(); // should always exist
 await page.setViewportSize({ width: cfg.width, height: cfg.height }); // TODO workaround for https://github.com/vogler/free-games-claimer/issues/277 until Playwright fixes it
 // console.debug('userAgent:', await page.evaluate(() => navigator.userAgent));
 

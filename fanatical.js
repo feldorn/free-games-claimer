@@ -1,6 +1,6 @@
 import { writeFileSync, readFileSync, existsSync } from 'node:fs';
-import { chromium } from 'patchright';
-import { datetime, notify, log, dataDir, handleSIGINT, cleanProfileLocks, localeArgs, siteLocale } from './src/util.js';
+import { datetime, notify, log, dataDir, handleSIGINT } from './src/util.js';
+import { launchContext } from './src/browser.js';
 import { cfg } from './src/config.js';
 import { siteVersion } from './src/sites.js';
 
@@ -62,20 +62,14 @@ let apiResponses = 0;        // /api/all-promotions/* responses seen
 let freeProductsSeen = 0;    // total entries in freeProducts arrays
 let noSpendPromos = 0;       // entries with min_spend.USD == 0
 try {
-  cleanProfileLocks(cfg.dir.browser);
-  context = await chromium.launchPersistentContext(cfg.dir.browser, {
-    // Headed chromium — the container only ships full chrome, not the
-    // separate chrome-headless-shell. Page renders into the unused VNC
-    // surface; we close the context as soon as the API response has
-    // been captured.
-    headless: false,
-    viewport: { width: cfg.width, height: cfg.height },
-    locale: siteLocale('fanatical'), // see siteLocale() for the per-site locale policy
-    timezoneId: cfg.timezone_id,
-    handleSIGINT: false,
-    args: ['--hide-crash-restore-bubble', ...localeArgs(siteLocale('fanatical'))],
-  });
-  page = context.pages()[0] || await context.newPage();
+  // headless:false — the container only ships full chrome, not the separate
+  // chrome-headless-shell. Page renders into the unused VNC surface; we close
+  // the context as soon as the API response has been captured.
+  ({ context, page } = await launchContext('fanatical', {
+    record: false,
+    sigint: false, // handleSIGINT() already registered above
+    contextOptions: { headless: false },
+  }));
   context.setDefaultTimeout(30000);
 
   // Intercept any /api/ JSON response. Fanatical's exact freebie

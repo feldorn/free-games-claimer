@@ -1,7 +1,8 @@
 import { chromium } from 'patchright';
 import { authenticator } from 'otplib';
 import { existsSync } from 'fs';
-import { resolve, jsonDb, datetime, filenamify, prompt, confirm, notify, html_game_list, handleSIGINT, closeContextSafely, log, cleanProfileLocks, localeArgs, siteLocale } from './src/util.js';
+import { resolve, jsonDb, datetime, filenamify, prompt, confirm, notify, html_game_list, closeContextSafely, log } from './src/util.js';
+import { launchContext } from './src/browser.js';
 import { cfg } from './src/config.js';
 import { siteVersion } from './src/sites.js';
 
@@ -30,30 +31,15 @@ const db = await jsonDb('fab.json', {});
 
 if (cfg.time) console.time('startup');
 
-cleanProfileLocks(cfg.dir.browser);
-const context = await chromium.launchPersistentContext(cfg.dir.browser, {
-  headless: false, // don't use cfg.headless — like Epic, headless triggers captcha on the shared Epic login
-  viewport: { width: cfg.width, height: cfg.height },
-  locale: siteLocale('fab'), // see siteLocale() for the per-site locale policy
-  timezoneId: cfg.timezone_id,
-  recordVideo: cfg.record ? { dir: 'data/record/', size: { width: cfg.width, height: cfg.height } } : undefined,
-  recordHar: cfg.record ? { path: `data/record/fab-${filenamify(datetime())}.har` } : undefined,
-  handleSIGINT: false,
-  args: [
-    '--hide-crash-restore-bubble',
-    '--ignore-gpu-blocklist',
-    '--enable-unsafe-webgpu',
-    ...localeArgs(siteLocale('fab')),
-  ],
+const { context, page } = await launchContext('fab', {
+  // headless:false — like Epic, headless triggers captcha on the shared Epic login
+  contextOptions: { headless: false },
+  extraArgs: ['--ignore-gpu-blocklist', '--enable-unsafe-webgpu'],
 });
 
 if (cfg.debug) console.log(chromium.executablePath());
 
-handleSIGINT(context);
-
 if (!cfg.debug) context.setDefaultTimeout(cfg.timeout);
-
-const page = context.pages().length ? context.pages()[0] : await context.newPage();
 
 const notify_assets = [];
 let user;

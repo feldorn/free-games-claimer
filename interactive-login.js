@@ -4,8 +4,8 @@ import { watch, readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 const __panelDirname = path.dirname(fileURLToPath(import.meta.url));
-import { chromium } from 'patchright';
-import { datetime, notify, jsonDb, normalizeTitle, cleanProfileLocks, localeArgs, siteLocale, readDigestBuffer, markDigestFlushed } from './src/util.js';
+import { datetime, notify, jsonDb, normalizeTitle, cleanProfileLocks, readDigestBuffer, markDigestFlushed } from './src/util.js';
+import { launchContext } from './src/browser.js';
 import { cfg } from './src/config.js';
 import { describeConfig, patchConfig, describeEnv, getSchedulerConfig, CONFIG_FILE_PATH } from './src/app-config.js';
 import { SITES as SITE_REGISTRY, getLoginSitesById, getClaimScriptOrder, getLinkedActiveMap, getClaimDbFiles, getServiceRows } from './src/sites.js';
@@ -122,20 +122,15 @@ async function launchSite(siteId) {
 
   console.log(`[${datetime()}] Launching browser for ${site.name}...`);
 
-  cleanProfileLocks(site.browserDir);
-  const context = await chromium.launchPersistentContext(site.browserDir, {
-    headless: false,
-    viewport: { width: cfg.width, height: cfg.height },
-    locale: siteLocale(siteId), // see siteLocale() for the per-site locale policy
-    timezoneId: cfg.timezone_id,
-    handleSIGINT: false,
-    args: ['--hide-crash-restore-bubble', ...localeArgs(siteLocale(siteId))],
-    ...(site.contextOptions || {}),
+  const { context, page } = await launchContext(siteId, {
+    profileDir: site.browserDir,
+    record: false,
+    sigint: false, // panel owns the browser lifecycle (activeBrowser / closeBrowser)
+    contextOptions: { headless: false, ...(site.contextOptions || {}) },
   });
 
   context.setDefaultTimeout(0);
 
-  const page = context.pages().length ? context.pages()[0] : await context.newPage();
   if (!site.contextOptions?.viewport) await page.setViewportSize({ width: cfg.width, height: cfg.height });
   await page.goto(site.loginUrl, { waitUntil: 'domcontentloaded' });
 
@@ -208,18 +203,14 @@ async function checkSiteStatus(siteId) {
 
   let context;
   try {
-    cleanProfileLocks(site.browserDir);
-    context = await chromium.launchPersistentContext(site.browserDir, {
-      headless: false,
-      viewport: { width: cfg.width, height: cfg.height },
-      locale: siteLocale(siteId), // see siteLocale() for the per-site locale policy
-      timezoneId: cfg.timezone_id,
-      handleSIGINT: false,
-      args: ['--hide-crash-restore-bubble', '--no-sandbox', '--disable-gpu', ...localeArgs(siteLocale(siteId))],
-      ...(site.contextOptions || {}),
-    });
-
-    const page = context.pages()[0] || await context.newPage();
+    let page;
+    ({ context, page } = await launchContext(siteId, {
+      profileDir: site.browserDir,
+      record: false,
+      sigint: false,
+      contextOptions: { headless: false, ...(site.contextOptions || {}) },
+      extraArgs: ['--no-sandbox', '--disable-gpu'],
+    }));
     const result = await site.checkLogin(page);
     siteStatus[siteId] = {
       status: result.loggedIn ? 'logged_in' : 'not_logged_in',
@@ -318,16 +309,12 @@ async function importSiteCookies(siteId, rawCookies) {
   console.log(`[${datetime()}] Importing ${normalized.length} cookie(s) into ${site.name} profile (${matches.length} match host ${targetHost})`);
   let context;
   try {
-    cleanProfileLocks(site.browserDir);
-    context = await chromium.launchPersistentContext(site.browserDir, {
-      headless: false,
-      viewport: { width: cfg.width, height: cfg.height },
-      locale: siteLocale(siteId), // see siteLocale() for the per-site locale policy
-      timezoneId: cfg.timezone_id,
-      handleSIGINT: false,
-      args: ['--hide-crash-restore-bubble', ...localeArgs(siteLocale(siteId))],
-      ...(site.contextOptions || {}),
-    });
+    ({ context } = await launchContext(siteId, {
+      profileDir: site.browserDir,
+      record: false,
+      sigint: false,
+      contextOptions: { headless: false, ...(site.contextOptions || {}) },
+    }));
     await context.addCookies(normalized);
   } finally {
     if (context) { try { await context.close(); } catch {} }
@@ -1152,16 +1139,11 @@ async function startBatchRedeem() {
   if (!pending.length) throw new Error('No pending GOG codes to redeem.');
 
   console.log(`[${datetime()}] Starting batch redeem for ${pending.length} GOG code(s)...`);
-  cleanProfileLocks(cfg.dir.browser);
-  const context = await chromium.launchPersistentContext(cfg.dir.browser, {
-    headless: false,
-    viewport: { width: cfg.width, height: cfg.height },
-    locale: siteLocale('gog'), // see siteLocale() for the per-site locale policy
-    timezoneId: cfg.timezone_id,
-    handleSIGINT: false,
-    args: ['--hide-crash-restore-bubble', ...localeArgs(siteLocale('gog'))],
+  const { context, page } = await launchContext('gog', {
+    record: false,
+    sigint: false,
+    contextOptions: { headless: false },
   });
-  const page = context.pages()[0] || await context.newPage();
   try { await page.setViewportSize({ width: cfg.width, height: cfg.height }); } catch {}
   context.setDefaultTimeout(0); // batch-redeem drives its own timeouts
 
@@ -1476,16 +1458,11 @@ async function startSteamRedeem() {
   if (!pending.length) throw new Error('No pending Steam keys to redeem.');
 
   console.log(`[${datetime()}] Starting Steam batch redeem for ${pending.length} key(s)...`);
-  cleanProfileLocks(cfg.dir.browser);
-  const context = await chromium.launchPersistentContext(cfg.dir.browser, {
-    headless: false,
-    viewport: { width: cfg.width, height: cfg.height },
-    locale: siteLocale('steam'), // see siteLocale() for the per-site locale policy
-    timezoneId: cfg.timezone_id,
-    handleSIGINT: false,
-    args: ['--hide-crash-restore-bubble', ...localeArgs(siteLocale('steam'))],
+  const { context, page } = await launchContext('steam', {
+    record: false,
+    sigint: false,
+    contextOptions: { headless: false },
   });
-  const page = context.pages()[0] || await context.newPage();
   try { await page.setViewportSize({ width: cfg.width, height: cfg.height }); } catch {}
   context.setDefaultTimeout(0);
 

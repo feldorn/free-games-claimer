@@ -1,6 +1,6 @@
 import { writeFileSync, readFileSync, existsSync } from 'node:fs';
-import { chromium } from 'patchright';
-import { datetime, notify, log, dataDir, handleSIGINT, cleanProfileLocks, localeArgs, siteLocale } from './src/util.js';
+import { datetime, notify, log, dataDir, handleSIGINT } from './src/util.js';
+import { launchContext } from './src/browser.js';
 import { cfg } from './src/config.js';
 import { siteVersion } from './src/sites.js';
 
@@ -58,20 +58,14 @@ function saveState(state) {
 let context, page;
 let captured = []; // accumulates products from any matching API responses
 try {
-  cleanProfileLocks(cfg.dir.browser);
-  context = await chromium.launchPersistentContext(cfg.dir.browser, {
-    // Match the project pattern (other site scripts use headed chromium
-    // because the container only ships the full chrome binary, not the
-    // separate chrome-headless-shell). The page renders into VNC; we
-    // close the context once the API response has been captured.
-    headless: false,
-    viewport: { width: cfg.width, height: cfg.height },
-    locale: siteLocale('humble-bundle'), // see siteLocale() for the per-site locale policy
-    timezoneId: cfg.timezone_id,
-    handleSIGINT: false,
-    args: ['--hide-crash-restore-bubble', ...localeArgs(siteLocale('humble-bundle'))],
-  });
-  page = context.pages()[0] || await context.newPage();
+  // headless:false — the container only ships the full chrome binary, not
+  // the separate chrome-headless-shell. The page renders into VNC; we close
+  // the context once the API response has been captured.
+  ({ context, page } = await launchContext('humble-bundle', {
+    record: false,
+    sigint: false, // handleSIGINT() already registered above
+    contextOptions: { headless: false },
+  }));
   context.setDefaultTimeout(30000);
 
   // Listen for the JSON the page itself fetches to populate the grid.

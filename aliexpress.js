@@ -2,8 +2,8 @@
 // services.aliexpress.active === true (Settings → Per-service → AliExpress).
 // If you run it standalone on the CLI, it always executes; the activation
 // gate lives in interactive-login.js.
-import { chromium } from 'patchright';
-import { datetime, filenamify, prompt, handleSIGINT, jsonDb, awaitUserCaptchaSolve, getOrCreateFingerprint, log, notify, cleanProfileLocks, localeArgs, siteLocale } from './src/util.js';
+import { datetime, prompt, jsonDb, awaitUserCaptchaSolve, getOrCreateFingerprint, log, notify } from './src/util.js';
+import { launchContext } from './src/browser.js';
 import { cfg } from './src/config.js';
 import { siteVersion } from './src/sites.js';
 import { FingerprintInjector } from 'fingerprint-injector';
@@ -33,31 +33,23 @@ const { fingerprint, headers, _persisted } = getOrCreateFingerprint(profileDir, 
 );
 log.status('Fingerprint', _persisted ? 'loaded from cache' : 'fresh (saved for next run)');
 
-cleanProfileLocks(profileDir);
-const context = await chromium.launchPersistentContext(profileDir, {
-  headless: cfg.headless,
-  locale: siteLocale('aliexpress'), // see siteLocale() for the per-site locale policy
-  timezoneId: cfg.timezone_id,
-  recordVideo: cfg.record ? { dir: 'data/record/', size: { width: cfg.width, height: cfg.height } } : undefined,
-  recordHar: cfg.record ? { path: `data/record/aliexpress-${filenamify(datetime())}.har` } : undefined,
-  handleSIGINT: false,
-  // mobile view is required — desktop URLs just show "install the app"
-  userAgent: fingerprint.navigator.userAgent,
-  viewport: {
-    width: fingerprint.screen.width,
-    height: fingerprint.screen.height,
+const { context, page } = await launchContext('aliexpress', {
+  profileDir,
+  contextOptions: {
+    // mobile view is required — desktop URLs just show "install the app"
+    userAgent: fingerprint.navigator.userAgent,
+    viewport: {
+      width: fingerprint.screen.width,
+      height: fingerprint.screen.height,
+    },
+    extraHTTPHeaders: {
+      'accept-language': headers['accept-language'],
+    },
   },
-  extraHTTPHeaders: {
-    'accept-language': headers['accept-language'],
-  },
-  args: ['--hide-crash-restore-bubble', ...localeArgs(siteLocale('aliexpress'))],
 });
-handleSIGINT(context);
 await new FingerprintInjector().attachFingerprintToPlaywright(context, { fingerprint, headers });
 
 context.setDefaultTimeout(cfg.debug ? 0 : cfg.timeout);
-
-const page = context.pages().length ? context.pages()[0] : await context.newPage();
 
 const auth = async url => {
   console.log('auth', url);

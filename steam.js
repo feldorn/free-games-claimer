@@ -1,6 +1,6 @@
-import { chromium } from 'patchright';
+import { launchContext } from './src/browser.js';
 import { writeFileSync } from 'node:fs';
-import { resolve, jsonDb, datetime, filenamify, prompt, notify, html_game_list, handleSIGINT, log, dataDir, cleanProfileLocks, matchKey, stripGpTail, getDiscoveryUserMarkedKeys, localeArgs, siteLocale } from './src/util.js';
+import { resolve, jsonDb, datetime, filenamify, prompt, notify, html_game_list, log, dataDir, matchKey, stripGpTail, getDiscoveryUserMarkedKeys } from './src/util.js';
 import { cfg } from './src/config.js';
 import { siteVersion } from './src/sites.js';
 import { fetchGamerPowerGiveaways, filterFor as filterGpFor, resolveGamerPowerHref } from './src/gamerpower.js';
@@ -72,26 +72,10 @@ for (const userRecords of Object.values(db.data || {})) {
   }
 }
 
-cleanProfileLocks(cfg.dir.browser);
-const context = await chromium.launchPersistentContext(cfg.dir.browser, {
-  headless: cfg.headless,
-  viewport: { width: cfg.width, height: cfg.height },
-  locale: siteLocale('steam'), // see siteLocale() for the per-site locale policy
-  timezoneId: cfg.timezone_id,
-  recordVideo: cfg.record ? { dir: 'data/record/', size: { width: cfg.width, height: cfg.height } } : undefined,
-  recordHar: cfg.record ? { path: `data/record/steam-${filenamify(datetime())}.har` } : undefined,
-  handleSIGINT: false,
-  args: [
-    '--hide-crash-restore-bubble',
-    ...localeArgs(siteLocale('steam')),
-  ],
-});
-
-handleSIGINT(context);
+const { context, page } = await launchContext('steam');
 
 if (!cfg.debug) context.setDefaultTimeout(cfg.timeout);
 
-const page = context.pages().length ? context.pages()[0] : await context.newPage();
 await page.setViewportSize({ width: cfg.width, height: cfg.height });
 
 const notify_games = [];

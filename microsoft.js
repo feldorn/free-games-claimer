@@ -1,7 +1,8 @@
-import { chromium, devices } from 'patchright';
+import { devices } from 'patchright';
+import { launchContext } from './src/browser.js';
 import { authenticator } from 'otplib';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
-import { delay, datetime, prompt, notify, log, dataDir, jsonDb, cleanProfileLocks, localeArgs, siteLocale } from './src/util.js';
+import { delay, datetime, prompt, notify, log, dataDir, jsonDb } from './src/util.js';
 import { cfg } from './src/config.js';
 import { describeConfig } from './src/app-config.js';
 import { siteVersion } from './src/sites.js';
@@ -290,31 +291,25 @@ async function createContext(isMobile) {
     height: cfg.height + Math.floor(Math.random() * 41) - 20, // ±20px
   };
 
-  cleanProfileLocks(browserDir);
-  const context = await chromium.launchPersistentContext(browserDir, {
-    headless: false,
-    viewport,
-    locale: siteLocale('microsoft'), // see siteLocale() for the per-site locale policy
-    timezoneId: cfg.timezone_id,
-    handleSIGINT: false,
-    args: [
-      '--hide-crash-restore-bubble',
-      // GPU / WebGL fingerprint hardening. In a container without GPU
-      // passthrough, Chromium without these flags can end up with WebGL
-      // either disabled or in a weird "broken-WebGL" state — both are
-      // stronger bot tells than the consistent "software-rendered WebGL"
-      // fingerprint you get with SwiftShader (vendor "Google Inc.",
-      // renderer "Google SwiftShader"). Suggested by @mzernetsch on #56
-      // as part of the set of changes that historically cleared MS's
-      // "Unusual search activity" banner. --enable-webgl is default-on
-      // in modern Chromium but kept explicit so the intent is readable.
-      '--use-gl=swiftshader',
-      '--enable-webgl',
-      '--ignore-gpu-blocklist',
-      '--enable-unsafe-webgpu',
-      ...localeArgs(siteLocale('microsoft')),
-    ],
-    ...deviceSettings, // for mobile: overrides viewport, sets userAgent/isMobile/hasTouch
+  const { context } = await launchContext('microsoft', {
+    profileDir: browserDir,
+    record: false,
+    sigint: false, // MS Rewards manages its own lifecycle; no SIGINT handler here
+    contextOptions: {
+      headless: false,
+      viewport,
+      ...deviceSettings, // for mobile: overrides viewport, sets userAgent/isMobile/hasTouch
+    },
+    // GPU / WebGL fingerprint hardening. In a container without GPU
+    // passthrough, Chromium without these flags can end up with WebGL
+    // either disabled or in a weird "broken-WebGL" state — both are
+    // stronger bot tells than the consistent "software-rendered WebGL"
+    // fingerprint you get with SwiftShader (vendor "Google Inc.",
+    // renderer "Google SwiftShader"). Suggested by @mzernetsch on #56
+    // as part of the set of changes that historically cleared MS's
+    // "Unusual search activity" banner. --enable-webgl is default-on
+    // in modern Chromium but kept explicit so the intent is readable.
+    extraArgs: ['--use-gl=swiftshader', '--enable-webgl', '--ignore-gpu-blocklist', '--enable-unsafe-webgpu'],
   });
 
   if (!cfg.debug) context.setDefaultTimeout(cfg.timeout);
