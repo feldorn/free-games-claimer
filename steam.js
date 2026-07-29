@@ -364,6 +364,13 @@ try {
       // nav items as button[type=submit] before the form, so a bare
       // button[type=submit].first() clicked those instead of signing in.
       await page.locator('button:has-text("Sign in")').first().click();
+      // Surface bad credentials instead of silently re-looping. Note Steam signs
+      // in with the account NAME, not the email — a common cause of this error.
+      page.getByText(/check your password and account name/i).first().waitFor({ timeout: cfg.login_timeout }).then(async () => {
+        log.error('Steam rejected the login — check STEAM_EMAIL (use your Steam account name, not your email address) and STEAM_PASSWORD');
+        await notify('steam: login failed — wrong account name or password.');
+        process.exit(1);
+      }).catch(() => {});
       page.waitForSelector('[class*="newlogindialog_AwaitingMobileConfLabel"], [class*="segmentedinputs"]').then(async () => {
         log.info('Steam Guard — enter the code from your authenticator app or email');
         const code = await prompt({ type: 'text', message: 'Enter Steam Guard code', validate: n => n.toString().length == 5 || 'The code must be 5 characters!' });
