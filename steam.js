@@ -349,8 +349,14 @@ try {
     const email = cfg.steam_email || await prompt({ message: 'Enter Steam email/username' });
     const password = email && (cfg.steam_password || await prompt({ type: 'password', message: 'Enter Steam password' }));
     if (email && password) {
-      await page.waitForTimeout(2000);
-      const usernameInput = page.locator('input[type="text"]._2GBWeup5cttgbTw8FM3tfx, input[type="text"][class*="newlogindialog"], input[type="text"]').first();
+      // Wait for the real login form to render — its password field is unique to
+      // the login dialog, whereas the store header only carries the search box.
+      // Then target the username input excluding that search box
+      // (#store_nav_search_term): the old bare `input[type="text"]` fallback
+      // matched it first when the React class selectors were stale, so the email
+      // was typed into store search and the login looped without ever signing in.
+      await page.waitForSelector('input[type="password"]', { timeout: cfg.login_timeout });
+      const usernameInput = page.locator('input[type="text"]._2GBWeup5cttgbTw8FM3tfx, input[type="text"][class*="newlogindialog"], input[type="text"]:not(#store_nav_search_term)').first();
       const passwordInput = page.locator('input[type="password"]').first();
       await usernameInput.fill(email);
       await passwordInput.fill(password);
