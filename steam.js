@@ -349,12 +349,28 @@ try {
     const email = cfg.steam_email || await prompt({ message: 'Enter Steam email/username' });
     const password = email && (cfg.steam_password || await prompt({ type: 'password', message: 'Enter Steam password' }));
     if (email && password) {
-      await page.waitForTimeout(2000);
-      const usernameInput = page.locator('input[type="text"]._2GBWeup5cttgbTw8FM3tfx, input[type="text"][class*="newlogindialog"], input[type="text"]').first();
+      // Wait for the real login form to render — its password field is unique to
+      // the login dialog, whereas the store header only carries the search box.
+      // Then target the username input excluding that search box
+      // (#store_nav_search_term): the old bare `input[type="text"]` fallback
+      // matched it first when the React class selectors were stale, so the email
+      // was typed into store search and the login looped without ever signing in.
+      await page.waitForSelector('input[type="password"]', { timeout: cfg.login_timeout });
+      const usernameInput = page.locator('input[type="text"]._2GBWeup5cttgbTw8FM3tfx, form:has(input[type="password"]) input[type="text"]:not([name="term"])').first();
       const passwordInput = page.locator('input[type="password"]').first();
       await usernameInput.fill(email);
       await passwordInput.fill(password);
-      await page.locator('button[type="submit"], button:has-text("Sign in")').first().click();
+      // Match the login form's "Sign in" by text — the store header renders its
+      // nav items as button[type=submit] before the form, so a bare
+      // button[type=submit].first() clicked those instead of signing in.
+      await page.locator('button:has-text("Sign in")').first().click();
+      // Surface bad credentials instead of silently re-looping. Note Steam signs
+      // in with the account NAME, not the email — a common cause of this error.
+      page.getByText(/check your password and account name/i).first().waitFor({ timeout: cfg.login_timeout }).then(async () => {
+        log.error('Steam rejected the login — check STEAM_EMAIL (use your Steam account name, not your email address) and STEAM_PASSWORD');
+        await notify('steam: login failed — wrong account name or password.');
+        process.exit(1);
+      }).catch(() => {});
       page.waitForSelector('[class*="newlogindialog_AwaitingMobileConfLabel"], [class*="segmentedinputs"]').then(async () => {
         log.info('Steam Guard — enter the code from your authenticator app or email');
         const code = await prompt({ type: 'text', message: 'Enter Steam Guard code', validate: n => n.toString().length == 5 || 'The code must be 5 characters!' });
@@ -365,8 +381,8 @@ try {
               await inputs[i].fill(code[i]);
             }
           } else {
-            await page.locator('input[type="text"]').first().fill(code);
-            await page.locator('button[type="submit"], button:has-text("Submit")').first().click();
+            await page.locator('#twofactorcode_entry, input[type="text"]:not([name="term"])').first().fill(code);
+            await page.locator('button:has-text("Submit"), #login_twofactorauth_buttonset_entercode button').first().click();
           }
         }
       }).catch(_ => {});
