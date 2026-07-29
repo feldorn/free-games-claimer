@@ -356,11 +356,14 @@ try {
       // matched it first when the React class selectors were stale, so the email
       // was typed into store search and the login looped without ever signing in.
       await page.waitForSelector('input[type="password"]', { timeout: cfg.login_timeout });
-      const usernameInput = page.locator('input[type="text"]._2GBWeup5cttgbTw8FM3tfx, input[type="text"][class*="newlogindialog"], input[type="text"]:not(#store_nav_search_term)').first();
+      const usernameInput = page.locator('input[type="text"]._2GBWeup5cttgbTw8FM3tfx, form:has(input[type="password"]) input[type="text"]:not([name="term"])').first();
       const passwordInput = page.locator('input[type="password"]').first();
       await usernameInput.fill(email);
       await passwordInput.fill(password);
-      await page.locator('button[type="submit"], button:has-text("Sign in")').first().click();
+      // Match the login form's "Sign in" by text — the store header renders its
+      // nav items as button[type=submit] before the form, so a bare
+      // button[type=submit].first() clicked those instead of signing in.
+      await page.locator('button:has-text("Sign in")').first().click();
       page.waitForSelector('[class*="newlogindialog_AwaitingMobileConfLabel"], [class*="segmentedinputs"]').then(async () => {
         log.info('Steam Guard — enter the code from your authenticator app or email');
         const code = await prompt({ type: 'text', message: 'Enter Steam Guard code', validate: n => n.toString().length == 5 || 'The code must be 5 characters!' });
@@ -371,8 +374,8 @@ try {
               await inputs[i].fill(code[i]);
             }
           } else {
-            await page.locator('input[type="text"]').first().fill(code);
-            await page.locator('button[type="submit"], button:has-text("Submit")').first().click();
+            await page.locator('#twofactorcode_entry, input[type="text"]:not([name="term"])').first().fill(code);
+            await page.locator('button:has-text("Submit"), #login_twofactorauth_buttonset_entercode button').first().click();
           }
         }
       }).catch(_ => {});
