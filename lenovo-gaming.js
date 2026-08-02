@@ -38,6 +38,9 @@ process.on('exit', code => {
 });
 
 const URL_LISTING = cfg.lenovo_page_url || 'https://gaming.lenovo.com/game-key-drops'; // LENOVO_PAGE_URL override
+
+// Retry policy shared by this site's top-level navigations.
+const LENOVO_NAV = { attempts: 2, backoffMs: 5000, siteId: 'lenovo-gaming' };
 const STATE_FILE = dataDir('lenovo-gaming-watch.json');
 
 function loadState() {
@@ -102,7 +105,7 @@ try {
   context.setDefaultTimeout(cfg.debug ? 0 : cfg.timeout);
 
   log.status('Fetching', URL_LISTING);
-  await gotoWithRetry(page, URL_LISTING, { attempts: 2, backoffMs: 5000, siteId: 'lenovo-gaming' });
+  await gotoWithRetry(page, URL_LISTING, LENOVO_NAV);
   // Bettermode is JS-driven; the drop cards mount after first paint.
   await page.waitForTimeout(8000);
 

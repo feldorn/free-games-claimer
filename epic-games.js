@@ -102,8 +102,7 @@ const isRecoverableEpicPageError = (err) => {
 // flow): one 30s-delayed retry on the transient family above, everything else
 // throws at once so real bugs aren't masked. Per-game gotos in the claim loop
 // stay retry-free — one bad game shouldn't cost 30s of the batch. (#104, #105)
-const gotoWithNavRetry = (targetPage, targetUrl, opts, label) =>
-  gotoWithRetry(targetPage, targetUrl, { attempts: 2, backoffMs: 30000, isRecoverable: isRecoverableEpicPageError, gotoOpts: opts, label });
+const EPIC_NAV = { attempts: 2, backoffMs: 30000, isRecoverable: isRecoverableEpicPageError, siteId: 'epic-games' };
 
 try {
   await context.addCookies([
@@ -112,7 +111,7 @@ try {
   ]);
 
   // 'domcontentloaded' faster than default 'load' https://playwright.dev/docs/api/class-page#page-goto
-  await gotoWithNavRetry(page, URL_CLAIM, { waitUntil: 'domcontentloaded' }, 'URL_CLAIM');
+  await gotoWithRetry(page, URL_CLAIM, EPIC_NAV);
 
   if (cfg.time) console.timeEnd('startup');
   if (cfg.time) console.time('login');
@@ -126,7 +125,7 @@ try {
     if (cfg.novnc_port) log.info(`Open http://localhost:${cfg.novnc_port} to login inside the docker container`);
     if (!cfg.debug) context.setDefaultTimeout(cfg.login_timeout); // give user some extra time to log in
     log.status('Login timeout', `${cfg.login_timeout / 1000}s`);
-    await gotoWithNavRetry(page, URL_LOGIN, { waitUntil: 'domcontentloaded' }, 'URL_LOGIN');
+    await gotoWithRetry(page, URL_LOGIN, EPIC_NAV);
     if (cfg.eg_email && cfg.eg_password) log.info('Using credentials from environment');
     else log.info('Press ESC to login in browser (not possible in headless mode)');
     const notifyBrowserLogin = async () => {

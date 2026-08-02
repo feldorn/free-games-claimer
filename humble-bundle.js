@@ -42,6 +42,9 @@ process.on('exit', code => {
 // /store/promo/<slug>) once one is identified would make this
 // runner sharper.
 const URL_PAGE = cfg.humble_page_url || 'https://www.humblebundle.com/store/search?sort=newest'; // HUMBLE_PAGE_URL override
+
+// Retry policy shared by this site's top-level navigations.
+const HUMBLE_NAV = { attempts: 2, backoffMs: 5000, gotoOpts: { waitUntil: 'domcontentloaded', timeout: 30000 }, siteId: 'humble-bundle' };
 const STATE_FILE = dataDir('humble-bundle-watch.json');
 
 function loadState() {
@@ -87,7 +90,7 @@ try {
     } catch { /* swallow per-response parse errors */ }
   });
 
-  await gotoWithRetry(page, URL_PAGE, { attempts: 2, backoffMs: 5000, gotoOpts: { waitUntil: 'domcontentloaded', timeout: 30000 }, siteId: 'humble-bundle' });
+  await gotoWithRetry(page, URL_PAGE, HUMBLE_NAV);
   // Give the SPA a moment to fire its product fetch and Cloudflare to
   // settle. We don't wait on a specific selector because Humble's
   // tile classnames are React-hashed and shift between deploys; the

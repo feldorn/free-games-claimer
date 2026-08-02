@@ -9,6 +9,10 @@ import { siteVersion } from './src/sites.js';
 
 const BING_REWARDS_URL = 'https://rewards.bing.com';
 const BING_URL = 'https://www.bing.com';
+
+// Retry policy shared by this site's top-level navigations. isRecoverableMsNavError
+// is a hoisted function declaration, so referencing it here is fine.
+const MS_NAV = { attempts: 2, backoffMs: 5000, isRecoverable: isRecoverableMsNavError, siteId: 'microsoft' };
 // Two selectors comma-unioned so we match both dashboard variants MS
 // currently ships:
 //   - Legacy Angular dashboard: <mee-card> with an "AddMedium" plus-icon
@@ -403,7 +407,7 @@ async function isLoggedIn(page) {
   try {
     // Retry here so a transient blip doesn't read as "logged out" and kick off
     // a full re-login.
-    await gotoWithRetry(page, BING_REWARDS_URL, { attempts: 2, backoffMs: 5000, isRecoverable: isRecoverableMsNavError, siteId: 'microsoft' });
+    await gotoWithRetry(page, BING_REWARDS_URL, MS_NAV);
     await page.waitForTimeout(3000); // allow JS-based redirects to settle
     const url = page.url();
     log.status('Login check URL', url);
@@ -443,7 +447,7 @@ async function login(page) {
   // rewards.bing.com may JS-redirect to a /welcome landing page rather than
   // the Microsoft login form. Wait for that client-side redirect to settle
   // before checking the URL, then find and follow the sign-in link.
-  await gotoWithRetry(page, BING_REWARDS_URL, { attempts: 2, backoffMs: 5000, isRecoverable: isRecoverableMsNavError, siteId: 'microsoft' });
+  await gotoWithRetry(page, BING_REWARDS_URL, MS_NAV);
   await page.waitForTimeout(3000); // allow JS-based redirects to complete
   const loginStartUrl = page.url();
   log.status('Login start URL', loginStartUrl);

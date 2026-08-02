@@ -11,6 +11,9 @@ const screenshot = (...a) => resolve(cfg.dir.screenshots, 'steam', ...a);
 const URL_STORE = cfg.steam_page_url || 'https://store.steampowered.com'; // STEAM_PAGE_URL override
 const URL_LOGIN = `${URL_STORE}/login/`;
 
+// Retry policy shared by this site's top-level navigations.
+const STEAM_NAV = { attempts: 2, backoffMs: 5000, siteId: 'steam' };
+
 // All our store-page selectors and success indicators key off English text
 // ("Add to Account", "has been added to your account", etc.). The
 // Steam_Language=english cookie set at context-init time is supposed to keep
@@ -314,7 +317,7 @@ try {
     { name: 'Steam_Language', value: 'english', domain: 'store.steampowered.com', path: '/' },
   ]);
 
-  await gotoWithRetry(page, withEnglish(URL_STORE), { attempts: 2, backoffMs: 5000, siteId: 'steam', label: 'URL_STORE' });
+  await gotoWithRetry(page, withEnglish(URL_STORE), STEAM_NAV);
   await page.waitForTimeout(3000);
 
   const isLoggedIn = async () => {
@@ -325,7 +328,7 @@ try {
   while (!await isLoggedIn()) {
     log.warn('Not signed in to Steam');
     if (cfg.nowait) process.exit(1);
-    await gotoWithRetry(page, withEnglish(URL_LOGIN), { attempts: 2, backoffMs: 5000, siteId: 'steam', label: 'URL_LOGIN' });
+    await gotoWithRetry(page, withEnglish(URL_LOGIN), STEAM_NAV);
     if (!cfg.debug) context.setDefaultTimeout(cfg.login_timeout);
     log.status('Login timeout', `${cfg.login_timeout / 1000}s`);
     if (cfg.steam_email && cfg.steam_password) log.info('Using credentials from environment');
@@ -390,7 +393,7 @@ try {
       await page.waitForSelector('#account_pulldown', { timeout: cfg.login_timeout });
     }
     if (!cfg.debug) context.setDefaultTimeout(cfg.timeout);
-    await gotoWithRetry(page, withEnglish(URL_STORE), { attempts: 2, backoffMs: 5000, siteId: 'steam', label: 'URL_STORE' });
+    await gotoWithRetry(page, withEnglish(URL_STORE), STEAM_NAV);
     await page.waitForTimeout(2000);
   }
 

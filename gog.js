@@ -43,6 +43,9 @@ const screenshot = (...a) => resolve(cfg.dir.screenshots, 'gog', ...a);
 
 const URL_CLAIM = cfg.gog_page_url || 'https://www.gog.com/en'; // GOG_PAGE_URL override
 
+// Retry policy shared by this site's top-level navigations.
+const GOG_NAV = { attempts: 2, backoffMs: 5000, siteId: 'gog' };
+
 log.section(`GOG (v${siteVersion('gog')})`);
 
 const db = await jsonDb('gog.json', {});
@@ -71,7 +74,7 @@ let catalogNew = null;
 try {
   await context.addCookies([{ name: 'CookieConsent', value: '{stamp:%274oR8MJL+bxVlG6g+kl2we5+suMJ+Tv7I4C5d4k+YY4vrnhCD+P23RQ==%27%2Cnecessary:true%2Cpreferences:true%2Cstatistics:true%2Cmarketing:true%2Cmethod:%27explicit%27%2Cver:1%2Cutc:1672331618201%2Cregion:%27de%27}', domain: 'www.gog.com', path: '/' }]); // to not waste screen space when non-headless
 
-  await gotoWithRetry(page, URL_CLAIM, { attempts: 2, backoffMs: 5000, siteId: 'gog' }); // domcontentloaded; default 'load' takes forever
+  await gotoWithRetry(page, URL_CLAIM, GOG_NAV); // domcontentloaded; default 'load' takes forever
 
   // page.click('#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll').catch(_ => { }); // does not work reliably, solved by setting CookieConsent above
   const signIn = page.locator('a:has-text("Sign in"), [hook-test="menuAnonymousButton"]').first();

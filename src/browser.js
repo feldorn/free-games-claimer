@@ -70,7 +70,7 @@ export async function launchContext(siteId, {
  * @param {(err: Error) => boolean} [opts.isRecoverable]  false rethrows at once instead of spending an attempt (default: retry anything).
  * @param {object} [opts.gotoOpts]  passed to page.goto — a per-attempt `timeout` belongs here (default: { waitUntil: 'domcontentloaded' }).
  * @param {string} [opts.siteId]  registry id, supplies the default log label (SITES_BY_ID[siteId].name).
- * @param {string} [opts.label]  log label; wins over siteId when a site has several distinct gotos. Falls back to the URL.
+ * @param {string} [opts.label]  log label; wins over siteId. The URL is logged either way, so this is only for a name the registry doesn't carry.
  */
 export async function gotoWithRetry(page, url, {
   attempts = 2,
@@ -81,16 +81,19 @@ export async function gotoWithRetry(page, url, {
   label,
 } = {}) {
   const name = label || (siteId && SITES_BY_ID[siteId]?.name) || url;
+  // URL always in the log: a site's several top-level gotos share one policy
+  // object, so the URL is what tells them apart when one fails.
+  const target = name === url ? url : `${name} (${url})`;
   for (let attempt = 1; attempt <= attempts; attempt++) {
     try {
       const res = await page.goto(url, gotoOpts);
-      if (attempt > 1) log.info(`goto ${name} — ok on attempt ${attempt}/${attempts}`);
+      if (attempt > 1) log.info(`goto ${target} — ok on attempt ${attempt}/${attempts}`);
       return res;
     } catch (e) {
       // Rethrow the original error so the caller's catch keeps the real stack.
       if (attempt === attempts || !isRecoverable(e) || page.isClosed()) throw e;
       const wait = typeof backoffMs === 'function' ? backoffMs(attempt) : backoffMs;
-      log.warn(`goto ${name} ${attempt}/${attempts}: ${String(e.message || e).split('\n')[0]}${wait ? ` — retry in ${wait / 1000}s` : ' — retrying'}`);
+      log.warn(`goto ${target} ${attempt}/${attempts}: ${String(e.message || e).split('\n')[0]}${wait ? ` — retry in ${wait / 1000}s` : ' — retrying'}`);
       if (wait) await page.waitForTimeout(wait);
     }
   }
