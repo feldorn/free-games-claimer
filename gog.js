@@ -1,4 +1,4 @@
-import { launchContext } from './src/browser.js';
+import { launchContext, gotoWithRetry } from './src/browser.js';
 import { existsSync, readFileSync, appendFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { resolve, jsonDb, datetime, filenamify, prompt, confirm, notify, html_game_list, log, normalizeTitle, awaitUserCaptchaSolve, matchKey, stripGpTail, getDiscoveryUserMarkedKeys, delay, dataDir } from './src/util.js';
@@ -71,7 +71,7 @@ let catalogNew = null;
 try {
   await context.addCookies([{ name: 'CookieConsent', value: '{stamp:%274oR8MJL+bxVlG6g+kl2we5+suMJ+Tv7I4C5d4k+YY4vrnhCD+P23RQ==%27%2Cnecessary:true%2Cpreferences:true%2Cstatistics:true%2Cmarketing:true%2Cmethod:%27explicit%27%2Cver:1%2Cutc:1672331618201%2Cregion:%27de%27}', domain: 'www.gog.com', path: '/' }]); // to not waste screen space when non-headless
 
-  await page.goto(URL_CLAIM, { waitUntil: 'domcontentloaded' }); // default 'load' takes forever
+  await gotoWithRetry(page, URL_CLAIM, { attempts: 2, backoffMs: 5000, siteId: 'gog' }); // domcontentloaded; default 'load' takes forever
 
   // page.click('#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll').catch(_ => { }); // does not work reliably, solved by setting CookieConsent above
   const signIn = page.locator('a:has-text("Sign in"), [hook-test="menuAnonymousButton"]').first();

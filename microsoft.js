@@ -1,5 +1,5 @@
 import { devices } from 'patchright';
-import { launchContext } from './src/browser.js';
+import { launchContext, gotoWithRetry } from './src/browser.js';
 import { authenticator } from 'otplib';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { delay, datetime, prompt, notify, log, dataDir, jsonDb } from './src/util.js';
@@ -401,7 +401,9 @@ async function createContext(isMobile) {
 
 async function isLoggedIn(page) {
   try {
-    await page.goto(BING_REWARDS_URL, { waitUntil: 'domcontentloaded' });
+    // Retry here so a transient blip doesn't read as "logged out" and kick off
+    // a full re-login.
+    await gotoWithRetry(page, BING_REWARDS_URL, { attempts: 2, backoffMs: 5000, isRecoverable: isRecoverableMsNavError, siteId: 'microsoft' });
     await page.waitForTimeout(3000); // allow JS-based redirects to settle
     const url = page.url();
     log.status('Login check URL', url);
@@ -441,7 +443,7 @@ async function login(page) {
   // rewards.bing.com may JS-redirect to a /welcome landing page rather than
   // the Microsoft login form. Wait for that client-side redirect to settle
   // before checking the URL, then find and follow the sign-in link.
-  await page.goto(BING_REWARDS_URL, { waitUntil: 'domcontentloaded' });
+  await gotoWithRetry(page, BING_REWARDS_URL, { attempts: 2, backoffMs: 5000, isRecoverable: isRecoverableMsNavError, siteId: 'microsoft' });
   await page.waitForTimeout(3000); // allow JS-based redirects to complete
   const loginStartUrl = page.url();
   log.status('Login start URL', loginStartUrl);

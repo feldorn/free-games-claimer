@@ -1,6 +1,6 @@
 import { writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { datetime, notify, log, dataDir, handleSIGINT } from './src/util.js';
-import { launchContext } from './src/browser.js';
+import { launchContext, gotoWithRetry } from './src/browser.js';
 import { cfg } from './src/config.js';
 import { siteVersion } from './src/sites.js';
 
@@ -107,7 +107,7 @@ try {
     } catch { /* swallow per-response parse errors */ }
   });
 
-  await page.goto(URL_PAGE, { waitUntil: 'domcontentloaded', timeout: 30000 });
+  await gotoWithRetry(page, URL_PAGE, { attempts: 2, backoffMs: 5000, gotoOpts: { waitUntil: 'domcontentloaded', timeout: 30000 }, siteId: 'fanatical' });
   await page.waitForLoadState('networkidle', { timeout: 20000 }).catch(() => {});
   await page.waitForTimeout(2000);
 } catch (e) {

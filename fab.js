@@ -2,7 +2,7 @@ import { chromium } from 'patchright';
 import { authenticator } from 'otplib';
 import { existsSync } from 'fs';
 import { resolve, jsonDb, datetime, filenamify, prompt, confirm, notify, html_game_list, closeContextSafely, log } from './src/util.js';
-import { launchContext } from './src/browser.js';
+import { launchContext, gotoWithRetry } from './src/browser.js';
 import { cfg } from './src/config.js';
 import { siteVersion } from './src/sites.js';
 
@@ -137,7 +137,7 @@ const loginEpic = async () => {
 };
 
 try {
-  await page.goto(URL_FREE, { waitUntil: 'domcontentloaded' });
+  await gotoWithRetry(page, URL_FREE, { attempts: 2, backoffMs: 5000, siteId: 'fab', label: 'URL_FREE' });
   dismissCookieBanner();
 
   if (cfg.time) console.timeEnd('startup');
@@ -151,7 +151,7 @@ try {
     if (!cfg.debug) context.setDefaultTimeout(cfg.login_timeout);
     log.status('Login timeout', `${cfg.login_timeout / 1000}s`);
 
-    await page.goto(URL_HOME, { waitUntil: 'domcontentloaded' });
+    await gotoWithRetry(page, URL_HOME, { attempts: 2, backoffMs: 5000, siteId: 'fab', label: 'URL_HOME' });
     dismissCookieBanner();
     // FAB's sign-in is an icon-only avatar button (aria-label="Sign in").
     const signIn = page.locator('[aria-label="Sign in" i], a[href*="/login" i], a:has-text("Sign In"), button:has-text("Sign In")').first();
@@ -172,7 +172,7 @@ try {
   // Discover free assets — scrape listing links off the Limited-Time Free
   // page (mirrors Epic's "Free Now" scrape). A FAB API path could replace
   // this later if a stable public endpoint is identified.
-  await page.goto(URL_FREE, { waitUntil: 'domcontentloaded' });
+  await gotoWithRetry(page, URL_FREE, { attempts: 2, backoffMs: 5000, siteId: 'fab', label: 'URL_FREE' });
   dismissCookieBanner();
   const listingLoc = page.locator('a[href*="/listings/"]');
   await listingLoc.first().waitFor().catch(() => {

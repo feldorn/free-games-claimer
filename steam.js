@@ -1,4 +1,4 @@
-import { launchContext } from './src/browser.js';
+import { launchContext, gotoWithRetry } from './src/browser.js';
 import { writeFileSync } from 'node:fs';
 import { resolve, jsonDb, datetime, filenamify, prompt, notify, html_game_list, log, dataDir, matchKey, stripGpTail, getDiscoveryUserMarkedKeys } from './src/util.js';
 import { cfg } from './src/config.js';
@@ -314,7 +314,7 @@ try {
     { name: 'Steam_Language', value: 'english', domain: 'store.steampowered.com', path: '/' },
   ]);
 
-  await page.goto(withEnglish(URL_STORE), { waitUntil: 'domcontentloaded' });
+  await gotoWithRetry(page, withEnglish(URL_STORE), { attempts: 2, backoffMs: 5000, siteId: 'steam', label: 'URL_STORE' });
   await page.waitForTimeout(3000);
 
   const isLoggedIn = async () => {
@@ -325,7 +325,7 @@ try {
   while (!await isLoggedIn()) {
     log.warn('Not signed in to Steam');
     if (cfg.nowait) process.exit(1);
-    await page.goto(withEnglish(URL_LOGIN), { waitUntil: 'domcontentloaded' });
+    await gotoWithRetry(page, withEnglish(URL_LOGIN), { attempts: 2, backoffMs: 5000, siteId: 'steam', label: 'URL_LOGIN' });
     if (!cfg.debug) context.setDefaultTimeout(cfg.login_timeout);
     log.status('Login timeout', `${cfg.login_timeout / 1000}s`);
     if (cfg.steam_email && cfg.steam_password) log.info('Using credentials from environment');
@@ -390,7 +390,7 @@ try {
       await page.waitForSelector('#account_pulldown', { timeout: cfg.login_timeout });
     }
     if (!cfg.debug) context.setDefaultTimeout(cfg.timeout);
-    await page.goto(withEnglish(URL_STORE), { waitUntil: 'domcontentloaded' });
+    await gotoWithRetry(page, withEnglish(URL_STORE), { attempts: 2, backoffMs: 5000, siteId: 'steam', label: 'URL_STORE' });
     await page.waitForTimeout(2000);
   }
 

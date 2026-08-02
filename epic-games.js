@@ -3,7 +3,7 @@ import { authenticator } from 'otplib';
 import path from 'path';
 import { existsSync, writeFileSync } from 'fs';
 import { resolve, jsonDb, datetime, filenamify, prompt, confirm, notify, html_game_list, closeContextSafely, log } from './src/util.js';
-import { launchContext } from './src/browser.js';
+import { launchContext, gotoWithRetry } from './src/browser.js';
 import { cfg } from './src/config.js';
 import { siteVersion } from './src/sites.js';
 import { getMobileGames } from './src/epic-games-mobile.js';
@@ -98,34 +98,12 @@ const isRecoverableEpicPageError = (err) => {
       || /ERR_ADDRESS_UNREACHABLE|ERR_INTERNET_DISCONNECTED|ERR_NAME_NOT_RESOLVED|ERR_NETWORK_CHANGED|ERR_CONNECTION_RESET|ERR_TIMED_OUT/i.test(msg);
 };
 
-// Retry-once wrapper for the critical-path gotos (URL_CLAIM run-start,
-// URL_LOGIN sign-in flow). Recoverable failures — the target-closed
-// family above — trigger a single 30s backoff + retry. If the retry also
-// fails, the error propagates so the outer catch still reports it as an
-// exception; the retry is a cheap chance for a transient to resolve
-// itself, not a way to hide persistent problems. Unrecoverable errors
-// throw immediately (no retry) — an infinite CTA-wait or a real bug
-// shouldn't be masked by a delayed second attempt. Per-game gotos inside
-// the claim loop deliberately don't retry — one bad game shouldn't cost
-// 30s of wall-clock delay against the rest of the batch, and the guard
-// in the loop already breaks cleanly if the whole tab is gone. (fl-99's
-// #105 — same run just after v2.8.57 shipped for #104.)
-const gotoWithNavRetry = async (targetPage, targetUrl, opts, label) => {
-  try {
-    await targetPage.goto(targetUrl, opts);
-  } catch (e) {
-    if (!isRecoverableEpicPageError(e)) throw e;
-    log.warn(`page.goto ${label} (${targetUrl}) — ${String(e.message || e).split('\n')[0]} — retrying in 30s`);
-    await targetPage.waitForTimeout(30000);
-    if (targetPage.isClosed()) {
-      // Whole tab is gone — no point retrying. Rethrow original so the
-      // outer catch surfaces the exception with the original stack.
-      throw e;
-    }
-    await targetPage.goto(targetUrl, opts);
-    log.info(`page.goto ${label} — retry succeeded`);
-  }
-};
+// Critical-path gotos only (URL_CLAIM at run start, URL_LOGIN in the sign-in
+// flow): one 30s-delayed retry on the transient family above, everything else
+// throws at once so real bugs aren't masked. Per-game gotos in the claim loop
+// stay retry-free — one bad game shouldn't cost 30s of the batch. (#104, #105)
+const gotoWithNavRetry = (targetPage, targetUrl, opts, label) =>
+  gotoWithRetry(targetPage, targetUrl, { attempts: 2, backoffMs: 30000, isRecoverable: isRecoverableEpicPageError, gotoOpts: opts, label });
 
 try {
   await context.addCookies([

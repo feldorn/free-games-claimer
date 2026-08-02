@@ -88,7 +88,7 @@ export const SITES = [
   {
     id: 'prime-gaming',
     name: 'Prime Gaming',
-    version: '2.0',
+    version: '2.1',
     subtitle: null,
     script: 'prime-gaming.js',
     claimOrder: 2,
@@ -160,7 +160,7 @@ export const SITES = [
   {
     id: 'epic-games',
     name: 'Epic Games',
-    version: '2.1',
+    version: '2.2',
     subtitle: null,
     script: 'epic-games.js',
     claimOrder: 3,
@@ -208,7 +208,7 @@ export const SITES = [
   {
     id: 'fab',
     name: 'FAB',
-    version: '0.1',
+    version: '0.2',
     subtitle: 'Claims the monthly "Limited-Time Free" assets on fab.com (Epic\'s 3D content marketplace) using your existing Epic Games session. Opt-in. Scaffolded — fab.com\'s DOM/selectors may need iteration as Epic updates the store.',
     script: 'fab.js',
     // Runs right after Epic so the shared browser profile already holds a
@@ -275,7 +275,7 @@ export const SITES = [
   {
     id: 'gog',
     name: 'GOG',
-    version: '2.2',
+    version: '2.3',
     subtitle: null,
     script: 'gog.js',
     // Runs AFTER Prime Gaming (claimOrder 2) so Prime→GOG cross-store
@@ -388,7 +388,7 @@ export const SITES = [
   {
     id: 'steam',
     name: 'Steam',
-    version: '2.0',
+    version: '2.1',
     subtitle: null,
     script: 'steam.js',
     claimOrder: 4,
@@ -513,7 +513,7 @@ export const SITES = [
   {
     id: 'microsoft',
     name: 'Microsoft Rewards',
-    version: '2.1',
+    version: '2.2',
     subtitle: 'Runs both desktop and mobile sessions in one script.',
     script: 'microsoft.js',
     claimOrder: 9,
@@ -656,7 +656,7 @@ export const SITES = [
   {
     id: 'humble-bundle',
     name: 'Humble Bundle',
-    version: '0.1',
+    version: '0.2',
     subtitle: 'Watch-only: pings you when new free items appear at humblebundle.com store. No login, no auto-claim — go grab manually. Scaffolded scratch — selectors and URL paths may need iteration as Humble updates their store layout.',
     script: 'humble-bundle.js',
     claimOrder: 7,
@@ -676,7 +676,7 @@ export const SITES = [
   {
     id: 'fanatical',
     name: 'Fanatical',
-    version: '0.1',
+    version: '0.2',
     subtitle: 'Watch-only: pings you when new free Steam keys appear at fanatical.com/en/free-games-keys. No login, no auto-claim — go grab manually. Scaffolded — Fanatical\'s API endpoint and product shape may need iteration over time.',
     script: 'fanatical.js',
     claimOrder: 8,
@@ -701,7 +701,7 @@ export const SITES = [
   {
     id: 'lenovo-gaming',
     name: 'Lenovo Gaming Key Drops',
-    version: '0.1',
+    version: '0.2',
     subtitle: 'Watch-only: tracks scheduled key-drops at gaming.lenovo.com/game-key-drops. Notifies on discovery + 1h before / 5min before / at drop time. Drops are first-come-first-served once they go live, so the script is paired with a per-drop wake scheduler that fires push notifications on time. Auto-claim is a future phase — keys are first-come-first-served and the redemption flow goes through GamesPlanet.',
     script: 'lenovo-gaming.js',
     claimOrder: 10,

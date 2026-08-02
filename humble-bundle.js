@@ -1,6 +1,6 @@
 import { writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { datetime, notify, log, dataDir, handleSIGINT } from './src/util.js';
-import { launchContext } from './src/browser.js';
+import { launchContext, gotoWithRetry } from './src/browser.js';
 import { cfg } from './src/config.js';
 import { siteVersion } from './src/sites.js';
 
@@ -87,7 +87,7 @@ try {
     } catch { /* swallow per-response parse errors */ }
   });
 
-  await page.goto(URL_PAGE, { waitUntil: 'domcontentloaded', timeout: 30000 });
+  await gotoWithRetry(page, URL_PAGE, { attempts: 2, backoffMs: 5000, gotoOpts: { waitUntil: 'domcontentloaded', timeout: 30000 }, siteId: 'humble-bundle' });
   // Give the SPA a moment to fire its product fetch and Cloudflare to
   // settle. We don't wait on a specific selector because Humble's
   // tile classnames are React-hashed and shift between deploys; the

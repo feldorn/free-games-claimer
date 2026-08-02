@@ -23,7 +23,7 @@
 // canonically. Listing-fetch is one HTTP round trip; detail fetches only
 // run for drops that are new or whose schedule we don't have cached.
 
-import { launchContext } from './src/browser.js';
+import { launchContext, gotoWithRetry } from './src/browser.js';
 import { writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { datetime, notify, log, dataDir, handleSIGINT } from './src/util.js';
 import { cfg } from './src/config.js';
@@ -102,7 +102,7 @@ try {
   context.setDefaultTimeout(cfg.debug ? 0 : cfg.timeout);
 
   log.status('Fetching', URL_LISTING);
-  await page.goto(URL_LISTING, { waitUntil: 'domcontentloaded' });
+  await gotoWithRetry(page, URL_LISTING, { attempts: 2, backoffMs: 5000, siteId: 'lenovo-gaming' });
   // Bettermode is JS-driven; the drop cards mount after first paint.
   await page.waitForTimeout(8000);
 

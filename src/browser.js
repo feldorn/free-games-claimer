@@ -3,8 +3,9 @@ import { chromium } from 'patchright';
 // dataDir from util.js; util.js reads cfg from config.js at module top-level).
 // Since claim scripts now import this module first, util-first is the order
 // that lets cfg finish initializing before util's top-level code runs it.
-import { cleanProfileLocks, localeArgs, siteLocale, handleSIGINT, datetime, filenamify } from './util.js';
+import { cleanProfileLocks, localeArgs, siteLocale, handleSIGINT, datetime, filenamify, log } from './util.js';
 import { cfg } from './config.js';
+import { SITES_BY_ID } from './sites.js'; // after config.js — sites.js reads cfg
 
 // Shared browser-context factory. Every claim script used to repeat the same
 // preamble verbatim — cleanProfileLocks + launchPersistentContext with the same
@@ -53,4 +54,44 @@ export async function launchContext(siteId, {
   if (sigint) handleSIGINT(context);
   const page = context.pages().length ? context.pages()[0] : await context.newPage(); // should always exist
   return { context, page };
+}
+
+/**
+ * page.goto with retry. Loop/log/throw live here; the policy is injected per
+ * call site, since "recoverable" and "worth waiting for" differ by site.
+ * Use it for top-level navigations only — per-item gotos inside claim loops
+ * shouldn't cost the rest of the batch a retry delay.
+ *
+ * @param {import('patchright').Page} page
+ * @param {string} url
+ * @param {object} [opts]
+ * @param {number} [opts.attempts]  total attempts including the first (default 2).
+ * @param {number|((attempt: number) => number)} [opts.backoffMs]  wait before each retry; 0 retries immediately (default 0).
+ * @param {(err: Error) => boolean} [opts.isRecoverable]  false rethrows at once instead of spending an attempt (default: retry anything).
+ * @param {object} [opts.gotoOpts]  passed to page.goto — a per-attempt `timeout` belongs here (default: { waitUntil: 'domcontentloaded' }).
+ * @param {string} [opts.siteId]  registry id, supplies the default log label (SITES_BY_ID[siteId].name).
+ * @param {string} [opts.label]  log label; wins over siteId when a site has several distinct gotos. Falls back to the URL.
+ */
+export async function gotoWithRetry(page, url, {
+  attempts = 2,
+  backoffMs = 0,
+  isRecoverable = () => true,
+  gotoOpts = { waitUntil: 'domcontentloaded' },
+  siteId,
+  label,
+} = {}) {
+  const name = label || (siteId && SITES_BY_ID[siteId]?.name) || url;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      const res = await page.goto(url, gotoOpts);
+      if (attempt > 1) log.info(`goto ${name} — ok on attempt ${attempt}/${attempts}`);
+      return res;
+    } catch (e) {
+      // Rethrow the original error so the caller's catch keeps the real stack.
+      if (attempt === attempts || !isRecoverable(e) || page.isClosed()) throw e;
+      const wait = typeof backoffMs === 'function' ? backoffMs(attempt) : backoffMs;
+      log.warn(`goto ${name} ${attempt}/${attempts}: ${String(e.message || e).split('\n')[0]}${wait ? ` — retry in ${wait / 1000}s` : ' — retrying'}`);
+      if (wait) await page.waitForTimeout(wait);
+    }
+  }
 }

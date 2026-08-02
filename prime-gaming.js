@@ -1,4 +1,4 @@
-import { launchContext } from './src/browser.js';
+import { launchContext, gotoWithRetry } from './src/browser.js';
 import { authenticator } from 'otplib';
 import { resolve, jsonDb, datetime, filenamify, prompt, confirm, notify, html_game_list, log } from './src/util.js';
 import { cfg } from './src/config.js';
@@ -44,12 +44,22 @@ if (!cfg.debug) context.setDefaultTimeout(cfg.timeout);
 await page.setViewportSize({ width: cfg.width, height: cfg.height }); // TODO workaround for https://github.com/vogler/free-games-claimer/issues/277 until Playwright fixes it
 // console.debug('userAgent:', await page.evaluate(() => navigator.userAgent));
 
+// Amazon tarpits Luna navigations intermittently, holding the document past
+// 60s while an immediate re-navigation loads in ~1.5s. Fail fast per attempt
+// and retry without backoff rather than sit out the stall. (#134)
+const LUNA_NAV = {
+  attempts: 4,
+  gotoOpts: { waitUntil: 'domcontentloaded', timeout: 30000 }, // default 'load' takes forever
+  siteId: 'prime-gaming',
+  label: 'Luna',
+};
+
 const notify_games = [];
 const notify_pending = []; // separate list — sent in chunks to avoid Pushover body truncation
 let user;
 
 try {
-  await page.goto(URL_CLAIM, { waitUntil: 'domcontentloaded' }); // default 'load' takes forever
+  await gotoWithRetry(page, URL_CLAIM, LUNA_NAV);
   // need to wait for some elements to exist before checking if signed in or accepting cookies:
   await Promise.any(['button:has-text("Sign in")', '[data-a-target="user-dropdown-first-name-text"]'].map(s => page.waitForSelector(s)));
   page.click('[aria-label="Cookies usage disclaimer banner"] button:has-text("Accept Cookies")').catch(_ => { }); // to not waste screen space when non-headless, TODO does not work reliably, need to wait for something else first?
@@ -468,7 +478,7 @@ try {
       await page.screenshot({ path: screenshot('external', `${filenamify(title)}.png`), fullPage: true });
     }
   }
-  await page.goto(URL_CLAIM, { waitUntil: 'domcontentloaded' });
+  await gotoWithRetry(page, URL_CLAIM, LUNA_NAV);
   await page.click('button[data-type="Game"]');
 
   if (notify_games.length) { // make screenshot of all games if something was claimed
@@ -557,7 +567,7 @@ try {
         if (cfg.debug) console.error(error);
         failedCount++;
       } finally {
-        await page.goto(URL_CLAIM, { waitUntil: 'domcontentloaded' });
+        await gotoWithRetry(page, URL_CLAIM, LUNA_NAV);
         await page.click('button[data-type="InGameLoot"]');
       }
     }
