@@ -87,7 +87,7 @@ export const cfg = {
   // Priority for time-sensitive captcha notifications. Default high so it
   // breaks through DnD; user can dial down via Settings → Notifications.
   captcha_notify_priority: notif.captchaPriority || 'high',
-  // scheduler (moved out of interactive-login.js so Settings can override)
+  // scheduler (moved out of src/panel/panel.js so Settings can override)
   loop: sched.loopSeconds ?? 0,
   daily_start_time: sched.dailyStartTime ?? '',
   ms_schedule_hours: sched.msScheduleHours ?? 0,

@@ -134,7 +134,7 @@ export const getOrCreateFingerprint = (profileDir, generate) => {
 // foreign-host check. Once present, the lock never clears on its own.
 //
 // We can safely remove these files because the app's runtime mutex
-// (browserBusy in interactive-login.js) prevents two Chromium processes
+// (browserBusy in src/panel/panel.js) prevents two Chromium processes
 // from racing on the same profile dir. Called from launchPersistentContext
 // sites before launch, and from the panel's startup as a clean-room
 // sweep across all known profile dirs. (Fix per feldorn#37, 2026-05-15
@@ -257,7 +257,7 @@ async function _appendDigest(entry) {
   }
   return Promise.resolve();
 }
-// Read-only accessor for interactive-login.js's digest scheduler.
+// Read-only accessor for src/panel/panel.js's digest scheduler.
 // Returns { buffer, lastFlushedAt } or an empty shape if the file
 // doesn't exist yet.
 export function readDigestBuffer() {
@@ -324,7 +324,7 @@ export const notify = (html, opts = {}) => {
   if (level === 'off') return Promise.resolve();
   if (level === 'actions' && kind === 'summary') return Promise.resolve();
   // Digest tier: buffer per-run summaries into a persistent file that
-  // the panel's dedicated digest scheduler (interactive-login.js)
+  // the panel's dedicated digest scheduler (src/panel/panel.js)
   // drains at notify_digest_hour local time each day. Action-kind
   // notifications (captchas, stale sessions, apprise errors, watcher
   // new-items) still fire real-time — the whole point of the digest

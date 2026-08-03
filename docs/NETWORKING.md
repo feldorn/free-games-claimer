@@ -8,7 +8,7 @@ Reverse-proxy configurations for serving the panel and noVNC behind your own dom
 
 ## Reverse-Proxy Setup
 
-The interactive-login panel can be served behind a reverse proxy. There are three
+The control panel can be served behind a reverse proxy. There are three
 common deployment shapes, each with its own env vars. Pick the one that matches
 how your proxy routes traffic — the others stay unset.
 

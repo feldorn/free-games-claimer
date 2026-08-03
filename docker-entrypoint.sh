@@ -155,4 +155,4 @@ fi
 if [ "$LOGIN_MODE" = "1" ]; then
   echo "  (LOGIN_MODE=1 is deprecated — panel is always running; you can remove this env var)"
 fi
-exec tini -s -g -- node interactive-login.js
+exec tini -s -g -- node src/panel/panel.js

@@ -1,17 +1,15 @@
 import http from 'node:http';
 import { spawn, execFile } from 'node:child_process';
 import { watch, readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-const __panelDirname = path.dirname(fileURLToPath(import.meta.url));
-import { datetime, notify, jsonDb, normalizeTitle, cleanProfileLocks, readDigestBuffer, markDigestFlushed, stripGpTail } from './src/util.js';
-import { launchContext } from './src/browser.js';
-import { cfg } from './src/config.js';
-import { describeConfig, patchConfig, describeEnv, getSchedulerConfig, CONFIG_FILE_PATH } from './src/app-config.js';
-import { SITES as SITE_REGISTRY, getLoginSitesById, getClaimScriptOrder, getLinkedActiveMap, getClaimDbFiles, getServiceRows } from './src/sites.js';
-import { fetchGamerPowerGiveaways, filterFor as filterGpFor, COLLECTOR_PATTERNS as GP_COLLECTOR_PATTERNS, GP_TITLE_HINTS } from './src/gamerpower.js';
-import { fetchFGFPosts, filterFor as filterFgfFor, cleanTitle as fgfCleanTitle, COLLECTOR_TITLE_PATTERNS as FGF_COLLECTOR_PATTERNS } from './src/freegamefindings.js';
-import { pollGithubReplies, getWatchState as getGithubWatchState, markIssueRead as markGithubIssueRead } from './src/github-watch.js';
+import { datetime, notify, jsonDb, normalizeTitle, cleanProfileLocks, readDigestBuffer, markDigestFlushed, stripGpTail, dataDir, rootDir } from '#src/util.js';
+import { launchContext } from '#src/browser.js';
+import { cfg } from '#src/config.js';
+import { describeConfig, patchConfig, describeEnv, getSchedulerConfig, CONFIG_FILE_PATH } from '#src/app-config.js';
+import { SITES as SITE_REGISTRY, getLoginSitesById, getClaimScriptOrder, getLinkedActiveMap, getClaimDbFiles, getServiceRows } from '#src/sites.js';
+import { fetchGamerPowerGiveaways, filterFor as filterGpFor, COLLECTOR_PATTERNS as GP_COLLECTOR_PATTERNS, GP_TITLE_HINTS } from '#src/gamerpower.js';
+import { fetchFGFPosts, filterFor as filterFgfFor, cleanTitle as fgfCleanTitle, COLLECTOR_TITLE_PATTERNS as FGF_COLLECTOR_PATTERNS } from '#src/freegamefindings.js';
+import { pollGithubReplies, getWatchState as getGithubWatchState, markIssueRead as markGithubIssueRead } from '#src/github-watch.js';
 
 const PANEL_PORT = Number(process.env.PANEL_PORT) || 7080;
 const NOVNC_PORT = process.env.NOVNC_PORT || 6080;
@@ -26,7 +24,7 @@ const PANEL_PASSWORD = process.env.PANEL_PASSWORD || process.env.VNC_PASSWORD ||
 const BASE_PATH = cfg.base_path; // e.g. "/free-games" when behind a subfolder proxy, or ""
 const PUBLIC_URL = cfg.public_url || `http://localhost:${PANEL_PORT}${BASE_PATH}`;
 const APP_VERSION = (() => {
-  try { return JSON.parse(readFileSync(path.join(__panelDirname, 'package.json'), 'utf8')).version || ''; }
+  try { return JSON.parse(readFileSync(rootDir('package.json'), 'utf8')).version || ''; }
   catch { return ''; }
 })();
 
@@ -1834,7 +1832,7 @@ let nextMainRun = null;       // Date | null — main chain wake
 let nextMsRun = null;         // Date | null — MS-only wake (decoupled mode)
 let msTodayState = null;      // last-read MS schedule state, for getState()
 
-const MS_SCHEDULE_FILE = path.resolve(__panelDirname, 'data', 'ms-schedule-today.json');
+const MS_SCHEDULE_FILE = dataDir('ms-schedule-today.json');
 
 function todayKey(d = new Date()) {
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
@@ -1896,7 +1894,7 @@ function pickMsTargetFor(dateKey, c) {
 // emit their `[RUN-SUCCESS] service=<id>` marker (parsed in the stdout
 // handler), persisted to data/last-runs.json so the Sessions tab can show
 // "Last Successful Run …" on each card across panel restarts.
-const LAST_RUNS_FILE = path.resolve(__panelDirname, 'data', 'last-runs.json');
+const LAST_RUNS_FILE = dataDir('last-runs.json');
 let lastRunSuccess = {};
 function loadLastRuns() {
   try {
@@ -2413,7 +2411,7 @@ async function msSchedulerLoop() {
 // notification and stamps the per-drop notifications.* field so the same wake
 // doesn't re-fire on next loop iteration.
 
-const LENOVO_STATE_FILE = path.resolve(__panelDirname, 'data', 'lenovo-gaming-watch.json');
+const LENOVO_STATE_FILE = dataDir('lenovo-gaming-watch.json');
 let nextLenovoWake = null; // { dropId, kind, target } | null
 
 function readLenovoState() {
@@ -9590,7 +9588,7 @@ const server = http.createServer(async (req, res) => {
         if (rel && !rel.includes('..') && !rel.includes('/')) assetPath = rel;
       }
       if (assetPath) {
-        const full = path.join(__panelDirname, 'assets', assetPath);
+        const full = path.join(rootDir('assets'), assetPath);
         if (existsSync(full)) {
           const ext = path.extname(assetPath).toLowerCase();
           const ct = { '.png': 'image/png', '.ico': 'image/x-icon', '.svg': 'image/svg+xml', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg' }[ext] || 'application/octet-stream';

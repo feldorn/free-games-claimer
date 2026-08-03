@@ -1,6 +1,6 @@
 // Site registry — the single declarative source of truth for every service
 // the engine knows about. Phase 0 of the engine refactor (issue #11): this
-// file holds the data; engine code in interactive-login.js + app-config.js
+// file holds the data; engine code in src/panel/panel.js + app-config.js
 // is migrated commit-by-commit to derive its hand-edited tables from here.
 //
 // Each entry carries everything the engine needs about a service:
@@ -116,7 +116,7 @@ export const SITES = [
     script: platformScript('prime-gaming'),
     claimOrder: 2,
     // Getter so PG_BASE_URL takes effect at access time. Reads on each
-    // cookie-import (interactive-login.js#deriveTargetHost) and each
+    // cookie-import (src/panel/panel.js#deriveTargetHost) and each
     // panel-opened browser-login — both happen long after module load,
     // so this resolves to the live cfg value without a restart.
     get loginUrl() { return `${cfg.pg_base_url}/claims`; },
@@ -239,7 +239,7 @@ export const SITES = [
     // login is needed in the common case. 3.5 slots between epic-games (3)
     // and steam (4) in the claim chain ordering.
     claimOrder: 3.5,
-    // FAB sign-in redirects to Epic's OAuth. Point the interactive-login
+    // FAB sign-in redirects to Epic's OAuth. Point the panel's login
     // target at the free-assets page; an unauthenticated visit surfaces the
     // Sign In control, and an authenticated one lands where the user wants.
     loginUrl: 'https://www.fab.com/limited-time-free',

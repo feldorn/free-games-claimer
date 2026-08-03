@@ -14,7 +14,7 @@
 //     only — GitHub's not involved in the read-tracking.
 //
 // This module is CommonJS-style ESM: only exports the top-level poll +
-// state accessors. The Alerts-tab wiring lives in interactive-login.js.
+// state accessors. The Alerts-tab wiring lives in src/panel/panel.js.
 
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { dataDir } from './util.js';

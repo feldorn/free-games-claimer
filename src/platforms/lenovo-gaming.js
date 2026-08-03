@@ -10,7 +10,7 @@
 //   - restock detected (title contains "(Restocked!)")
 //
 // Pre-drop "1 hour before" / "5 minutes before" notifications come from
-// the engine-side lenovoSchedulerLoop in interactive-login.js, which reads
+// the engine-side lenovoSchedulerLoop in src/panel/panel.js, which reads
 // this same JSON file and wakes at the dynamic per-drop times. The watcher
 // just keeps the file fresh.
 //

@@ -430,7 +430,7 @@ function maskLast4(s) {
 }
 
 // Live scheduler config read — bypasses the module-level cfg so the scheduler
-// loop (which lives in interactive-login.js) can re-read after a config save
+// loop (which lives in src/panel/panel.js) can re-read after a config save
 // and reschedule without a panel restart.
 export function getSchedulerConfig() {
   const s = describeConfig().effective.scheduler || {};
