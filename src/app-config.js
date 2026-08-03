@@ -18,10 +18,11 @@ import { SITES } from './sites.js';
 
 // Compute the data-dir path directly instead of importing dataDir from util.js.
 // util.js itself imports cfg from config.js (for top-level enquirer setup),
-// and config.js is now our caller — importing from util.js here recreates the
-// cycle and dataDir ends up in TDZ when we need it.
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const CONFIG_FILE = path.resolve(__dirname, '..', 'data', 'config.json');
+// and config.js is now our caller — importing dataDir from util.js here
+// recreates the cycle and it lands in TDZ when we need it. Resolving the alias
+// directly gives the same anchor with no import, and without depending on how
+// deep this file sits.
+const CONFIG_FILE = path.resolve(fileURLToPath(import.meta.resolve('#dataDir')), 'config.json');
 
 const toBool = v => v === '1' || v === 'true' || v === true;
 // EG_MOBILE is inverted in the original: absent or truthy → true, only '0'/'false' → false.

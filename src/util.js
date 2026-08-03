@@ -1,12 +1,17 @@
-// https://stackoverflow.com/questions/46745014/alternative-for-dirname-in-node-js-when-using-es6-modules
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, unlinkSync, lstatSync } from 'node:fs';
-// not the same since these will give the absolute paths for this file instead of for the file using them
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+// Both anchors come from the package.json `imports` map rather than from this
+// file's own depth. Resolving them off __dirname only held while util.js sat
+// exactly one level below the root — moving the file would have silently
+// pointed data/ at src/data/, writing outside the mounted volume. Resolved
+// once at load; a missing alias throws here rather than at first use.
+const DATA_DIR = fileURLToPath(import.meta.resolve('#dataDir'));
+const ROOT_DIR = fileURLToPath(import.meta.resolve('#rootDir'));
 // explicit object instead of Object.fromEntries since the built-in type would loose the keys, better type: https://dev.to/svehla/typescript-object-fromentries-389c
-export const dataDir = s => path.resolve(__dirname, '..', 'data', s);
+export const dataDir = s => path.resolve(DATA_DIR, s);
+// for root-level paths that aren't under data/ (package.json, assets/)
+export const rootDir = s => path.resolve(ROOT_DIR, s);
 
 // modified path.resolve to return null if first argument is '0', used to disable screenshots
 export const resolve = (...a) => a.length && a[0] == '0' ? null : path.resolve(...a);
