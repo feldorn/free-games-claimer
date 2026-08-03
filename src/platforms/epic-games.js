@@ -2,13 +2,13 @@ import { chromium } from 'patchright';
 import { authenticator } from 'otplib';
 import path from 'path';
 import { existsSync, writeFileSync } from 'fs';
-import { resolve, jsonDb, datetime, filenamify, prompt, confirm, notify, html_game_list, closeContextSafely, log } from './src/util.js';
-import { launchContext, gotoWithRetry } from './src/browser.js';
-import { cfg } from './src/config.js';
-import { siteVersion } from './src/sites.js';
-import { getMobileGames } from './src/epic-games-mobile.js';
-import { fetchGamerPowerGiveaways, filterFor as filterGpFor, resolveGamerPowerHref, unhandledPlatforms as gpUnhandled } from './src/gamerpower.js';
-import { fetchFGFPosts, filterFor as filterFgfFor, unhandledPlatforms as fgfUnhandled, cleanTitle as fgfClean } from './src/freegamefindings.js';
+import { resolve, jsonDb, datetime, filenamify, prompt, confirm, notify, html_game_list, closeContextSafely, log } from '#src/util.js';
+import { launchContext, gotoWithRetry } from '#src/browser.js';
+import { cfg } from '#src/config.js';
+import { siteVersion } from '#src/sites.js';
+import { getMobileGames } from '#src/epic-games-mobile.js';
+import { fetchGamerPowerGiveaways, filterFor as filterGpFor, resolveGamerPowerHref, unhandledPlatforms as gpUnhandled } from '#src/gamerpower.js';
+import { fetchFGFPosts, filterFor as filterFgfFor, unhandledPlatforms as fgfUnhandled, cleanTitle as fgfClean } from '#src/freegamefindings.js';
 
 const screenshot = (...a) => resolve(cfg.dir.screenshots, 'epic-games', ...a);
 

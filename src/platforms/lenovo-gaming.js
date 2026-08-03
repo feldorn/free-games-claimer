@@ -23,11 +23,11 @@
 // canonically. Listing-fetch is one HTTP round trip; detail fetches only
 // run for drops that are new or whose schedule we don't have cached.
 
-import { launchContext, gotoWithRetry } from './src/browser.js';
+import { launchContext, gotoWithRetry } from '#src/browser.js';
 import { writeFileSync, readFileSync, existsSync } from 'node:fs';
-import { datetime, notify, log, dataDir, handleSIGINT } from './src/util.js';
-import { cfg } from './src/config.js';
-import { siteVersion } from './src/sites.js';
+import { datetime, notify, log, dataDir, handleSIGINT } from '#src/util.js';
+import { cfg } from '#src/config.js';
+import { siteVersion } from '#src/sites.js';
 
 handleSIGINT();
 log.section(`Lenovo Gaming (v${siteVersion('lenovo-gaming')})`);

@@ -1,7 +1,7 @@
 import { writeFileSync, readFileSync, existsSync } from 'node:fs';
-import { datetime, notify, log, dataDir, handleSIGINT } from './src/util.js';
-import { cfg } from './src/config.js';
-import { siteVersion } from './src/sites.js';
+import { datetime, notify, log, dataDir, handleSIGINT } from '#src/util.js';
+import { cfg } from '#src/config.js';
+import { siteVersion } from '#src/sites.js';
 
 // Watch-only Ubisoft Connect free-games tracker. No login, no claim — just
 // diffs the current /free-games page against a saved baseline and pushes a

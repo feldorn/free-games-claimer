@@ -1765,7 +1765,8 @@ function runAllScripts({ source = 'panel', sites = null, extraEnv = null } = {})
       // per-card test), mark today's MS schedule fired so the decoupled MS
       // loop won't re-fire later the same day. Without this, a manual
       // 09:00 click + scheduled 10:48 fire would double-run MS.
-      if (code === 0 && /\bnode microsoft\.js\b/.test(cmd)) {
+      // Basename, not `node <path>`: the registry owns the path, and it moves.
+      if (code === 0 && /\bmicrosoft\.js\b/.test(cmd)) {
         try { markMsRunFiredToday(); } catch {}
       }
       // Persist the scheduler-main completion timestamp so a panel

@@ -1,8 +1,8 @@
 import { writeFileSync, readFileSync, existsSync } from 'node:fs';
-import { datetime, notify, log, dataDir, handleSIGINT } from './src/util.js';
-import { launchContext, gotoWithRetry } from './src/browser.js';
-import { cfg } from './src/config.js';
-import { siteVersion } from './src/sites.js';
+import { datetime, notify, log, dataDir, handleSIGINT } from '#src/util.js';
+import { launchContext, gotoWithRetry } from '#src/browser.js';
+import { cfg } from '#src/config.js';
+import { siteVersion } from '#src/sites.js';
 
 // Watch-only Humble Bundle free-items tracker. No login, no auto-claim —
 // loads humblebundle.com/store/search?priceMax=0 in a real browser

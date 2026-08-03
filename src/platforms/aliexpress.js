@@ -2,10 +2,10 @@
 // services.aliexpress.active === true (Settings → Per-service → AliExpress).
 // If you run it standalone on the CLI, it always executes; the activation
 // gate lives in interactive-login.js.
-import { datetime, prompt, jsonDb, awaitUserCaptchaSolve, getOrCreateFingerprint, log, notify } from './src/util.js';
-import { launchContext } from './src/browser.js';
-import { cfg } from './src/config.js';
-import { siteVersion } from './src/sites.js';
+import { datetime, prompt, jsonDb, awaitUserCaptchaSolve, getOrCreateFingerprint, log, notify } from '#src/util.js';
+import { launchContext } from '#src/browser.js';
+import { cfg } from '#src/config.js';
+import { siteVersion } from '#src/sites.js';
 import { FingerprintInjector } from 'fingerprint-injector';
 import { FingerprintGenerator } from 'fingerprint-generator';
 

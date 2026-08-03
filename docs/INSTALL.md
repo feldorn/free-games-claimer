@@ -65,7 +65,7 @@ volumes:
   fgc:
 ```
 
-> **Important:** Don't override `command:` or `entrypoint:`. The image's entrypoint launches the control panel, and the panel owns scheduling, the Run-Now button, and the per-service active toggles. Replacing it with a hand-rolled `node prime-gaming; node epic-games; …` pipeline disables all of that.
+> **Important:** Don't override `command:` or `entrypoint:`. The image's entrypoint launches the control panel, and the panel owns scheduling, the Run-Now button, and the per-service active toggles. Replacing it with a hand-rolled `node src/platforms/prime-gaming; node src/platforms/epic-games; …` pipeline disables all of that.
 
 ---
 
@@ -105,10 +105,10 @@ The panel's update pill works fine alongside any of these — it just stops appe
    ```
 4. Run individual claimers:
    ```sh
-   node prime-gaming
-   node epic-games
-   node gog
-   node steam
+   node src/platforms/prime-gaming
+   node src/platforms/epic-games
+   node src/platforms/gog
+   node src/platforms/steam
    ```
 5. Optional: install [apprise](https://github.com/caronc/apprise) for notifications (`pipx install apprise`)
 6. To update: `git pull && npm install`

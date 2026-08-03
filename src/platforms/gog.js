@@ -1,11 +1,11 @@
-import { launchContext, gotoWithRetry } from './src/browser.js';
+import { launchContext, gotoWithRetry } from '#src/browser.js';
 import { existsSync, readFileSync, appendFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
-import { resolve, jsonDb, datetime, filenamify, prompt, confirm, notify, html_game_list, log, normalizeTitle, awaitUserCaptchaSolve, matchKey, stripGpTail, getDiscoveryUserMarkedKeys, delay, dataDir } from './src/util.js';
-import { cfg } from './src/config.js';
-import { siteVersion } from './src/sites.js';
-import { fetchGamerPowerGiveaways, filterFor as filterGpFor, resolveGamerPowerHref } from './src/gamerpower.js';
-import { fetchFGFPosts, filterFor as filterFgfFor, cleanTitle as fgfClean } from './src/freegamefindings.js';
+import { resolve, jsonDb, datetime, filenamify, prompt, confirm, notify, html_game_list, log, normalizeTitle, awaitUserCaptchaSolve, matchKey, stripGpTail, getDiscoveryUserMarkedKeys, delay, dataDir } from '#src/util.js';
+import { cfg } from '#src/config.js';
+import { siteVersion } from '#src/sites.js';
+import { fetchGamerPowerGiveaways, filterFor as filterGpFor, resolveGamerPowerHref } from '#src/gamerpower.js';
+import { fetchFGFPosts, filterFor as filterFgfFor, cleanTitle as fgfClean } from '#src/freegamefindings.js';
 
 // GOG 2FA backup-code consumption. Codes are configured comma-separated
 // via GOG_OTP_BACKUP_CODES; used codes are appended to

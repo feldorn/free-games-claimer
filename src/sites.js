@@ -8,8 +8,11 @@
 //   id              stable identifier used in config keys + UI deep links
 //   name            human-readable label shown in cards and notifications
 //   subtitle        optional second-line note rendered under name (Settings)
-//   script          per-service runner ('foo.js') or null for sub-services
-//                   that share their parent's script (microsoft-mobile)
+//   script          per-service runner as a repo-root-relative path, so the
+//                   spawned `node <script>` resolves from the process cwd.
+//                   Always build it with platformScript('foo') rather than
+//                   writing the path by hand. null for sub-services that
+//                   share their parent's script (microsoft-mobile)
 //   loginUrl        page to navigate to for interactive login (null = no
 //                   login flow, e.g. ubisoft watch-only)
 //   browserDir      persistent profile dir; null if no browser is launched
@@ -47,8 +50,28 @@
 // SERVICE_ROWS, …) that read these fields. Until then the new fields are
 // metadata-only and safe to ignore.
 
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { devices } from 'patchright';
 import { cfg } from './config.js';
+
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+
+// Resolves a runner through the '#platforms/*' alias in package.json, so the
+// directory is declared once and serves both `import` and the spawned
+// `node <script>`. Returns a repo-root-relative path on purpose: the value
+// lands in shell commands, run logs and the CLAIM_CMD docs, where an absolute
+// container path would be noise.
+//
+// Tolerant on input — 'gog', 'gog.js' and even 'gog.js.js' all give
+// 'src/platforms/gog.js', so a call site that spells out the extension can't
+// double it. import.meta.resolve validates the alias, not the target, so a
+// misspelled name still returns a path and surfaces when the runner spawns.
+function platformScript(name) {
+  const file = String(name).replace(/(?:\.js)+$/, '') + '.js';
+  const abs = fileURLToPath(import.meta.resolve(`#platforms/${file}`));
+  return path.relative(REPO_ROOT, abs).split(path.sep).join('/');
+}
 
 // Read the signed-in Microsoft Rewards user via the dashboard's own
 // dapi/me endpoint. page.request inherits the browser context's cookies, so a
@@ -90,7 +113,7 @@ export const SITES = [
     name: 'Prime Gaming',
     version: '2.1',
     subtitle: null,
-    script: 'prime-gaming.js',
+    script: platformScript('prime-gaming'),
     claimOrder: 2,
     // Getter so PG_BASE_URL takes effect at access time. Reads on each
     // cookie-import (interactive-login.js#deriveTargetHost) and each
@@ -162,7 +185,7 @@ export const SITES = [
     name: 'Epic Games',
     version: '2.2',
     subtitle: null,
-    script: 'epic-games.js',
+    script: platformScript('epic-games'),
     claimOrder: 3,
     loginUrl: 'https://www.epicgames.com/id/login?lang=en-US&noHostRedirect=true&redirectUrl=https://store.epicgames.com/en-US/free-games',
     // Sessions tab "open in new tab" target. loginUrl points to the login
@@ -210,7 +233,7 @@ export const SITES = [
     name: 'FAB',
     version: '0.2',
     subtitle: 'Claims the monthly "Limited-Time Free" assets on fab.com (Epic\'s 3D content marketplace) using your existing Epic Games session. Opt-in. Scaffolded — fab.com\'s DOM/selectors may need iteration as Epic updates the store.',
-    script: 'fab.js',
+    script: platformScript('fab'),
     // Runs right after Epic so the shared browser profile already holds a
     // warm Epic session — FAB authenticates via Epic SSO, so no second
     // login is needed in the common case. 3.5 slots between epic-games (3)
@@ -277,7 +300,7 @@ export const SITES = [
     name: 'GOG',
     version: '2.3',
     subtitle: null,
-    script: 'gog.js',
+    script: platformScript('gog'),
     // Runs AFTER Prime Gaming (claimOrder 2) so Prime→GOG cross-store
     // keys discovered on a given run can be redeemed same-day rather
     // than waiting for the next scheduled gog.js. Before v2.8.80 GOG
@@ -390,7 +413,7 @@ export const SITES = [
     name: 'Steam',
     version: '2.1',
     subtitle: null,
-    script: 'steam.js',
+    script: platformScript('steam'),
     claimOrder: 4,
     loginUrl: 'https://store.steampowered.com/login/',
     homeUrl: 'https://store.steampowered.com/',
@@ -444,7 +467,7 @@ export const SITES = [
     name: 'AliExpress',
     version: '2.3',
     subtitle: 'Deprecated by AliExpress — web coin collection is being phased out in favor of the mobile app. Works for some accounts on a degradation curve. See README → Bot detection.',
-    script: 'aliexpress.js',
+    script: platformScript('aliexpress'),
     claimOrder: 5,
     // AliExpress's coin collector only works on the mobile site; desktop just
     // says "install the app". Use a dedicated browser profile so its
@@ -515,7 +538,7 @@ export const SITES = [
     name: 'Microsoft Rewards',
     version: '2.2',
     subtitle: 'Runs both desktop and mobile sessions in one script.',
-    script: 'microsoft.js',
+    script: platformScript('microsoft'),
     claimOrder: 9,
     loginUrl: 'https://rewards.bing.com',
     get browserDir() { return cfg.dir.browser; },
@@ -638,7 +661,7 @@ export const SITES = [
     name: 'Ubisoft Connect',
     version: '2.0',
     subtitle: 'Watch-only: pings you when a new free game appears at store.ubisoft.com/us/free-games. No login, no auto-claim — go grab it manually.',
-    script: 'ubisoft.js',
+    script: platformScript('ubisoft'),
     claimOrder: 6,
     loginUrl: null,
     homeUrl: 'https://store.ubisoft.com/us/free-games',
@@ -658,7 +681,7 @@ export const SITES = [
     name: 'Humble Bundle',
     version: '0.2',
     subtitle: 'Watch-only: pings you when new free items appear at humblebundle.com store. No login, no auto-claim — go grab manually. Scaffolded scratch — selectors and URL paths may need iteration as Humble updates their store layout.',
-    script: 'humble-bundle.js',
+    script: platformScript('humble-bundle'),
     claimOrder: 7,
     loginUrl: null,
     homeUrl: 'https://www.humblebundle.com/store/search?sort=discount&filter=onsale&min=0&max=0',
@@ -678,7 +701,7 @@ export const SITES = [
     name: 'Fanatical',
     version: '0.2',
     subtitle: 'Watch-only: pings you when new free Steam keys appear at fanatical.com/en/free-games-keys. No login, no auto-claim — go grab manually. Scaffolded — Fanatical\'s API endpoint and product shape may need iteration over time.',
-    script: 'fanatical.js',
+    script: platformScript('fanatical'),
     claimOrder: 8,
     loginUrl: null,
     // Fanatical removed the dedicated /en/free-games-keys landing page from
@@ -703,7 +726,7 @@ export const SITES = [
     name: 'Lenovo Gaming Key Drops',
     version: '0.2',
     subtitle: 'Watch-only: tracks scheduled key-drops at gaming.lenovo.com/game-key-drops. Notifies on discovery + 1h before / 5min before / at drop time. Drops are first-come-first-served once they go live, so the script is paired with a per-drop wake scheduler that fires push notifications on time. Auto-claim is a future phase — keys are first-come-first-served and the redemption flow goes through GamesPlanet.',
-    script: 'lenovo-gaming.js',
+    script: platformScript('lenovo-gaming'),
     claimOrder: 10,
     loginUrl: null,
     homeUrl: 'https://gaming.lenovo.com/game-key-drops',

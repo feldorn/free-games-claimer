@@ -1,11 +1,11 @@
 import { devices } from 'patchright';
-import { launchContext, gotoWithRetry } from './src/browser.js';
+import { launchContext, gotoWithRetry } from '#src/browser.js';
 import { authenticator } from 'otplib';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
-import { delay, datetime, prompt, notify, log, dataDir, jsonDb } from './src/util.js';
-import { cfg } from './src/config.js';
-import { describeConfig } from './src/app-config.js';
-import { siteVersion } from './src/sites.js';
+import { delay, datetime, prompt, notify, log, dataDir, jsonDb } from '#src/util.js';
+import { cfg } from '#src/config.js';
+import { describeConfig } from '#src/app-config.js';
+import { siteVersion } from '#src/sites.js';
 
 const BING_REWARDS_URL = 'https://rewards.bing.com';
 const BING_URL = 'https://www.bing.com';

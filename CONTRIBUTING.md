@@ -12,7 +12,7 @@
 
 ## Adding a new collector
 
-The engine routes everything through `src/sites.js` (the registry) plus a per-site runner script. To add a new claim/watch site, two files change: a registry entry and a `<id>.js` runner.
+The engine routes everything through `src/sites.js` (the registry) plus a per-site runner script. To add a new claim/watch site, two files change: a registry entry and a `src/platforms/<id>.js` runner.
 
 ### 1. Register it in `src/sites.js`
 
@@ -22,7 +22,7 @@ Append an entry to the `SITES` array. Required fields:
 |---|---|
 | `id` | stable identifier (lowercase, hyphenated) — used in config keys, deep links, claim DB filename |
 | `name` | human-readable label shown in cards and notifications |
-| `script` | runner filename at repo root (`'foo.js'`); `null` for sub-services that share a parent's script |
+| `script` | `platformScript('foo')` — resolves through the `#platforms/*` alias and returns a repo-root-relative path. The extension is optional: `'foo'`, `'foo.js'` and `'foo.js.js'` all yield `src/platforms/foo.js`. `null` for sub-services that share a parent's script |
 | `loginUrl` | page to navigate to for interactive login; `null` for no-login services (watchers) |
 | `browserDir` | getter (`get browserDir() { return cfg.dir.browser; }`) — most services share the profile; suffix it (`+ '-foo'`) for an isolated profile |
 | `defaultActive` | `true` for default-on, `false` for opt-in |
@@ -65,19 +65,19 @@ Coerce descriptors recognized by `src/app-config.js`:
 
 A new kind needs a case added to `coerceFromDescriptor` in `src/app-config.js`.
 
-### 3. Write the runner script (`<id>.js` at repo root)
+### 3. Write the runner script (`src/platforms/<id>.js`)
 
-Spawned as a standalone Node process by the panel. Use `epic-games.js` or `gog.js` as a starting template. Contract:
+Spawned as a standalone Node process by the panel. Use `src/platforms/epic-games.js` or `src/platforms/gog.js` as a starting template. Contract:
 
 - Read settings from `cfg.<field>` (loader flattens registry settings into `cfg` — see `src/config.js`).
 - Read credentials directly from `process.env.<NAME>` (credentials stay env-only by design — never put them in the registry).
 - Launch the browser via `chromium.launchPersistentContext(cfg.dir.browser, …)` (or your isolated profile if `browserDir` differs).
 - Per game/event, write an entry to the claim DB via `jsonDb('<id>.json', {})` from `src/util.js`.
 - For human-solvable captchas, wrap the wait in `awaitUserCaptchaSolve(page, { service, captchaCheck, … })` from `src/util.js` — emits the `[CAPTCHA-START]` / `[CAPTCHA-END]` markers the panel watches for, and the user solves via the embedded VNC.
-- Stamp the script's run-log header with the registry-defined version. Import `siteVersion` from `./src/sites.js` and use it as the first log line, matching the project convention:
+- Stamp the script's run-log header with the registry-defined version. Import `siteVersion` via the `#src/*` alias (see *Import paths*) and use it as the first log line, matching the project convention:
 
   ```js
-  import { siteVersion } from './src/sites.js';
+  import { siteVersion } from '#src/sites.js';
   log.section(`Your Site Name (v${siteVersion('your-site-id')})`);
   log.status('Time', datetime());
   ```

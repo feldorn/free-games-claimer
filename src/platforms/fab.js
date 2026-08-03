@@ -1,10 +1,10 @@
 import { chromium } from 'patchright';
 import { authenticator } from 'otplib';
 import { existsSync } from 'fs';
-import { resolve, jsonDb, datetime, filenamify, prompt, confirm, notify, html_game_list, closeContextSafely, log } from './src/util.js';
-import { launchContext, gotoWithRetry } from './src/browser.js';
-import { cfg } from './src/config.js';
-import { siteVersion } from './src/sites.js';
+import { resolve, jsonDb, datetime, filenamify, prompt, confirm, notify, html_game_list, closeContextSafely, log } from '#src/util.js';
+import { launchContext, gotoWithRetry } from '#src/browser.js';
+import { cfg } from '#src/config.js';
+import { siteVersion } from '#src/sites.js';
 
 // FAB (fab.com) is Epic's unified 3D-content marketplace. Each month it
 // gives away a set of "Limited-Time Free" assets that can be permanently

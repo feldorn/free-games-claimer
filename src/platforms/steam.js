@@ -1,10 +1,10 @@
-import { launchContext, gotoWithRetry } from './src/browser.js';
+import { launchContext, gotoWithRetry } from '#src/browser.js';
 import { writeFileSync } from 'node:fs';
-import { resolve, jsonDb, datetime, filenamify, prompt, notify, html_game_list, log, dataDir, matchKey, stripGpTail, getDiscoveryUserMarkedKeys } from './src/util.js';
-import { cfg } from './src/config.js';
-import { siteVersion } from './src/sites.js';
-import { fetchGamerPowerGiveaways, filterFor as filterGpFor, resolveGamerPowerHref } from './src/gamerpower.js';
-import { fetchFGFPosts, filterFor as filterFgfFor, cleanTitle as fgfClean } from './src/freegamefindings.js';
+import { resolve, jsonDb, datetime, filenamify, prompt, notify, html_game_list, log, dataDir, matchKey, stripGpTail, getDiscoveryUserMarkedKeys } from '#src/util.js';
+import { cfg } from '#src/config.js';
+import { siteVersion } from '#src/sites.js';
+import { fetchGamerPowerGiveaways, filterFor as filterGpFor, resolveGamerPowerHref } from '#src/gamerpower.js';
+import { fetchFGFPosts, filterFor as filterFgfFor, cleanTitle as fgfClean } from '#src/freegamefindings.js';
 
 const screenshot = (...a) => resolve(cfg.dir.screenshots, 'steam', ...a);
 

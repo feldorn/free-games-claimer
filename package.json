@@ -25,7 +25,7 @@
     "#rootDir": "./"
   },
   "engines": {
-    "node": ">=17"
+    "node": ">=20.6.0"
   },
   "dependencies": {
     "chalk": "^5.4.1",
