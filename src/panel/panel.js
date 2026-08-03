@@ -6,7 +6,7 @@ import { datetime, notify, jsonDb, normalizeTitle, cleanProfileLocks, readDigest
 import { launchContext } from '#src/browser.js';
 import { cfg } from '#src/config.js';
 import { describeConfig, patchConfig, describeEnv, getSchedulerConfig, CONFIG_FILE_PATH } from '#src/app-config.js';
-import { SITES as SITE_REGISTRY, getLoginSitesById, getClaimScriptOrder, getLinkedActiveMap, getClaimDbFiles, getServiceRows } from '#src/sites.js';
+import { SITES as SITE_REGISTRY, getLoginSitesById, getClaimScriptOrder, getLinkedActiveMap, getClaimDbFiles, getServiceRows, normalizeClaimCommand } from '#src/sites.js';
 import { fetchGamerPowerGiveaways, filterFor as filterGpFor, COLLECTOR_PATTERNS as GP_COLLECTOR_PATTERNS, GP_TITLE_HINTS } from '#src/gamerpower.js';
 import { fetchFGFPosts, filterFor as filterFgfFor, cleanTitle as fgfCleanTitle, COLLECTOR_TITLE_PATTERNS as FGF_COLLECTOR_PATTERNS } from '#src/freegamefindings.js';
 import { pollGithubReplies, getWatchState as getGithubWatchState, markIssueRead as markGithubIssueRead } from '#src/github-watch.js';
@@ -886,7 +886,13 @@ function buildClaimCommand({ manual = false, sites = null } = {}) {
 function resolveClaimCommand({ manual, sites = null }) {
   if (!sites) {
     const envKey = manual ? 'CLAIM_CMD_MANUAL' : 'CLAIM_CMD';
-    if (process.env[envKey]) return process.env[envKey];
+    const raw = process.env[envKey];
+    if (raw) {
+      const cmd = normalizeClaimCommand(raw);
+      // Running something other than what the user wrote should be visible.
+      if (cmd !== raw) console.log(`[${datetime()}] ${envKey}: resolved runner paths — running \`${cmd}\``);
+      return cmd;
+    }
   }
   return buildClaimCommand({ manual, sites });
 }

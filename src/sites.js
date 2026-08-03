@@ -799,6 +799,40 @@ export function getClaimScriptOrder() {
       : { id: s.id, script: s.script });
 }
 
+// Runner basenames the registry knows: 'gog', 'epic-games', … Entries with
+// script: null (microsoft-mobile) are skipped.
+const RUNNER_NAMES = new Set(
+  SITES.filter(s => s.script).map(s => path.basename(s.script, '.js')),
+);
+
+// Rewrites the command word of one segment, preserving inline env and args:
+//   'node gog.js'  → 'node src/platforms/gog.js'
+//   'steam'        → 'node src/platforms/steam.js'
+//   'echo gog'     → unchanged; the command word is 'echo', not 'gog'
+function normalizeClaimSegment(seg) {
+  const m = /^(\s*(?:\w+=\S*\s+)*)(?:node\s+)?(\S+)([\s\S]*)$/.exec(seg);
+  if (!m) return seg;
+  const [, lead, word, rest] = m;
+  const name = word.replace(/\.js$/, '').replace(/^.*\//, '');
+  // Rewritten: a known runner in any spelling ('gog', 'gog.js', './gog.js',
+  // 'src/platforms/gog.js'), or a bare '<file>.js' — nothing executable sits at
+  // the repo root anymore, so the name can only mean a scraper.
+  // Left alone: 'echo', './x.sh', '/opt/mine/pre.js', 'gogg' (typo, no .js).
+  if (!RUNNER_NAMES.has(name) && !/^[^/]+\.js$/.test(word)) return seg;
+  return `${lead}node ${platformScript(name)}${rest}`;
+}
+
+// CLAIM_CMD / CLAIM_CMD_MANUAL name scrapers by path, so an override written for
+// an older layout breaks on the next move. Resolve each command through the
+// registry instead: 'gog.js; steam.js' runs as
+// 'node src/platforms/gog.js; node src/platforms/steam.js'. A step that isn't a
+// runner ('./x.sh', 'echo done') comes back byte-identical.
+export function normalizeClaimCommand(cmd) {
+  if (typeof cmd !== 'string') return cmd;
+  // Separators are never part of a match, so they survive untouched.
+  return cmd.replace(/[^;&|\n]+/g, seg => normalizeClaimSegment(seg));
+}
+
 // Settings-tab "Active" toggle linking. Each parent entry's linkedWith
 // pointer fans out to a list whose first element is the parent and second
 // element is the linked sub-service — toggling either id flips both. Today

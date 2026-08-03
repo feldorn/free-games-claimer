@@ -49,7 +49,7 @@ for `BASE_PATH`, `PUBLIC_URL`, and `NOVNC_URL`.
 |--------|---------|-------------|
 | `NOTIFY_TITLE` | | Optional title for notifications |
 | `NOTIFY_ATTACH_SCREENSHOTS` | `1` | Attach the most recent screenshot to failure notifications. Set to `0` to keep notifications text-only (privacy / bandwidth). Also editable in **Settings → Notifications**. |
-| `CLAIM_CMD` | (active services in claim order) | Shell command the scheduler runs at its anchored wake. Built dynamically from the active services in the registry's claim order; set this to override with a fixed pipeline. |
+| `CLAIM_CMD` | (active services in claim order) | Shell command the scheduler runs at its anchored wake. Built dynamically from the active services in the registry's claim order; set this to override with a fixed pipeline. Name the scripts however you like — `gog.js`, `gog`, `node gog.js` and a full path all resolve to the current location of the runner, so an override written for an older layout keeps working. Steps that aren't recognized scripts (a custom pre/post command, anything with its own directory) run exactly as written. |
 | `CLAIM_CMD_MANUAL` | (active services minus microsoft) | Shell command for a manual chain run *with no sites picker* (e.g. driven from an external invocation). Since 2.5.3 the panel's **Run Now** button opens a per-run picker modal where the user checks specific services for that run; the picker defaults match this exclusion (everything except microsoft.js, since a paced MS run adds ~30-45 min). Override this env only if you have a CLI / cron caller that needs a fixed pipeline. |
 | `SHOW` | `1` (Docker) | Show browser GUI. Default is headless outside Docker. |
 | `WIDTH` | `1920` | Browser/screen width |
