@@ -112,6 +112,27 @@ The DB is a `{ user: { gameId: entry } }` map. The redeemers scan every claim DB
 If you find yourself needing engine changes to make your script work — a new `scheduleKind`, a new `coerce` kind, a new `feature` flag consumer — open an issue describing the gap rather than working around it locally. The whole point of the registry is that *normal* collectors don't need engine touches.
 
 
+## Import paths
+
+`package.json` declares two subpath aliases, so an import never counts `../`
+levels and moving a file leaves its imports untouched:
+
+| Alias | Resolves to | Use for |
+|---|---|---|
+| `#src/*` | `./src/*` | shared modules — `#src/util.js`, `#src/config.js`, `#src/sites.js` |
+| `#platforms/*` | `./src/platforms/*` | the per-store runner scripts |
+
+```js
+import { cfg } from '#src/config.js';   // same line from any depth
+```
+
+New and moved files should use the aliases. Files that predate them still use
+relative paths and are migrated as they are touched, so both styles appear in
+the tree.
+
+These are an *import* mechanism only: `#platforms/gog.js` is not a valid
+argument to `node`, so anything that shells out to a runner needs a real path.
+
 ## Building and publishing docker images
 
 Setup the secrets for DOCKERHUB_USERNAME and [DOCKERHUB_TOKEN](https://hub.docker.com/settings/security) in `https://github.com/YOUR_USERNAME/free-games-claimer/settings/secrets/actions` to be able to run the docker.yml workflows.

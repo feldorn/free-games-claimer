@@ -18,6 +18,12 @@
     "deps:update": "npx taze major -w && npm i"
   },
   "type": "module",
+  "imports": {
+    "#src/*": "./src/*",
+    "#platforms/*": "./src/platforms/*",
+    "#dataDir": "./data",
+    "#rootDir": "./"
+  },
   "engines": {
     "node": ">=17"
   },
