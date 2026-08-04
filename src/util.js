@@ -7,7 +7,10 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, unlink
 // pointed data/ at src/data/, writing outside the mounted volume. Resolved
 // once at load; a missing alias throws here rather than at first use.
 const DATA_DIR = fileURLToPath(import.meta.resolve('#dataDir'));
-const ROOT_DIR = fileURLToPath(import.meta.resolve('#rootDir'));
+// #rootDir points at package.json, not the directory: a bare './' target is
+// matched by trailing slash, which Node deprecated (DEP0166) and warns about
+// once per process — including every spawned scraper.
+const ROOT_DIR = path.dirname(fileURLToPath(import.meta.resolve('#rootDir')));
 // explicit object instead of Object.fromEntries since the built-in type would loose the keys, better type: https://dev.to/svehla/typescript-object-fromentries-389c
 export const dataDir = s => path.resolve(DATA_DIR, s);
 // for root-level paths that aren't under data/ (package.json, assets/)

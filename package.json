@@ -22,7 +22,7 @@
     "#src/*": "./src/*",
     "#platforms/*": "./src/platforms/*",
     "#dataDir": "./data",
-    "#rootDir": "./"
+    "#rootDir": "./package.json"
   },
   "engines": {
     "node": ">=20.6.0"
