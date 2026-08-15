@@ -959,9 +959,10 @@ async function clickNewUiActivityCards(page) {
   // trips MS's "unusual activity" gate. Class-based lookup is
   // locale-portable. (JLMael's #110 follow-up, 2026-07-07.)
   const pages = [
-    { url: BING_REWARDS_URL + '/dashboard', label: 'dailyset',      ariaLabel: 'Daily set',       selector: '#dailyset a:not([href$="/earn"]):not(:has(.bg-statusSuccessRewardsBg))' },
-    { url: BING_REWARDS_URL + '/earn',      label: 'exploreonbing', ariaLabel: 'Explore on Bing', selector: '#exploreonbing a:not(:has(.grayscale)):not(:has(.bg-statusSuccessRewardsBg))' },
-      ];
+    { url: BING_REWARDS_URL + '/dashboard', label: 'dailyset',       ariaLabel: 'Daily set',       selector: '#dailyset a:not([href$="/earn"]):not(:has(.bg-statusSuccessRewardsBg))' },
+    { url: BING_REWARDS_URL + '/earn',      label: 'exploreonbing',  ariaLabel: 'Explore on Bing', selector: '#exploreonbing a:not(:has(.grayscale)):not(:has(.bg-statusSuccessRewardsBg))' },
+    { url: BING_REWARDS_URL + '/earn',      label: 'moreactivities', ariaLabel: 'Keep earning',    selector: '#moreactivities p.text-metadata.leading-none.text-statusInformativeTintFg' },
+  ];
   let attempted = 0, clicked = 0, errors = 0, savedDiag = false;
   for (const { url, label, ariaLabel, selector } of pages) {
     if (page.isClosed()) break;
