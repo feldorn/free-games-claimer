@@ -9,6 +9,7 @@ import { siteVersion } from '#src/sites.js';
 
 const BING_REWARDS_URL = 'https://rewards.bing.com';
 const BING_URL = 'https://www.bing.com';
+const BING_DEFAULT_SEARCH_ENGINE_URL = 'https://www.bing.com?FORM=CHROMN&PC=U316&q=';
 
 // Retry policy shared by this site's top-level navigations. isRecoverableMsNavError
 // is a hoisted function declaration, so referencing it here is fine.
@@ -960,7 +961,7 @@ async function clickNewUiActivityCards(page) {
   const pages = [
     { url: BING_REWARDS_URL + '/dashboard', label: 'dailyset',      ariaLabel: 'Daily set',       selector: '#dailyset a:not([href$="/earn"]):not(:has(.bg-statusSuccessRewardsBg))' },
     { url: BING_REWARDS_URL + '/earn',      label: 'exploreonbing', ariaLabel: 'Explore on Bing', selector: '#exploreonbing a:not(:has(.grayscale)):not(:has(.bg-statusSuccessRewardsBg))' },
-  ];
+      ];
   let attempted = 0, clicked = 0, errors = 0, savedDiag = false;
   for (const { url, label, ariaLabel, selector } of pages) {
     if (page.isClosed()) break;
@@ -1162,6 +1163,12 @@ async function executeBingSearch(page, searchTerm, preEnterMs) {
   }
 }
 
+async function executeBingSearchAsDefaultSearchEngine(page, searchTerm) {
+  await page.goto(`${BING_DEFAULT_SEARCH_ENGINE_URL}${encodeURIComponent(searchTerm)}`, { waitUntil: 'load' });
+
+  await page.locator('#b_results').waitFor({ timeout: 60000 });
+}
+
 // A "browser closed" / "context closed" Playwright error means the
 // underlying Chromium process is gone (user closed the window in VNC,
 // container OOM-killed it, etc.). No amount of retry will recover —
@@ -1271,7 +1278,7 @@ process.on('SIGINT', async () => {
 const _jitter = () => Math.floor(Math.random() * 5) - 2; // -2..+2
 const desktopSearchCount = Math.max(1, (cfg.ms_desktop_search_count || 35) + _jitter());
 const mobileSearchCount  = Math.max(1, (cfg.ms_mobile_search_count  || 25) + _jitter());
-const searchTerms = await buildSearchList(desktopSearchCount + mobileSearchCount);
+const searchTerms = await buildSearchList(1 + desktopSearchCount + mobileSearchCount);
 
 // Per-run point balance history used by the web panel's Stats tab.
 const msDb = await jsonDb('microsoft-rewards.json', { runs: [] });
@@ -1331,7 +1338,8 @@ log.section('Desktop');
       await clickEveryPendingActivityCard(page);
       await claimPendingBonusPoints(page);
       await claimReadyToClaimCard(page);
-      await executeBingSearches(page, searchTerms.slice(0, desktopSearchCount), { startingBalance: before });
+      await executeBingSearchAsDefaultSearchEngine(page, searchTerms[0]);
+      await executeBingSearches(page, searchTerms.slice(1, desktopSearchCount), { startingBalance: before });
       after = await readPointsBalance(page);
       if (after != null) log.status('Points after', after + (before != null ? ` (+${after - before})` : ''));
       log.summary({
