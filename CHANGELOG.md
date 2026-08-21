@@ -4,6 +4,22 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.11.11
+
+**Fix: FAB checkout CTA race now searches child iframes, not just the main page ([#127](https://github.com/feldorn/free-games-claimer/issues/127) — Duwaynef on v2.11.10).**
+
+Duwaynef reported v2.11.10 still failing on FAB's Nordic Fishing Hut listing with `no place-order CTA matched any known label`. Their attached screenshot decisively shows an "Add to library" button clearly rendered in a modal headed **"Checkout"** with an **Epic Games logo** in the top-left. Every one of v2.11.6's 12 candidate labels was present in the DOM — but not the main-frame DOM. FAB (Epic-owned since Epic's 2024 acquisition) has evidently moved its €0 checkout modal into an Epic-Games-hosted iframe.
+
+Playwright's `page.locator()` scopes to the main frame; a locator that looks for a button in an iframe returns zero hits. That's why the entire 15s race timed out with the button visible on-screen.
+
+**Fix:** the checkout candidate race now iterates over `[page, ...page.frames().filter(f => f !== page.mainFrame())]` — main-frame-first (preserves prior fast path) then every child iframe. Debug logging annotates the matched scope (`Add to library (text) @ frame(https://…)`), and the failure diagnostic dumps the child-frame URLs seen so a subsequent report can pinpoint which Epic iframe hosts the modal.
+
+Backward compatible for the pre-iframe FAB flow: if the button is in the main frame (older listings, or non-Epic ones), the main-frame check wins the race on the first inner loop just as it did before.
+
+Zero user action needed post-upgrade. Existing users on v2.11.10 who were hitting this specific "checkout modal renders but v2.11.10 never clicks" trap will start claiming these listings automatically.
+
+---
+
 ## What's new in 2.11.10
 
 **Feature: collect additional Microsoft Rewards points from the new-UI 'Keep earning' section ([PR #144](https://github.com/feldorn/free-games-claimer/pull/144) — credit @keloru).**

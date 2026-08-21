@@ -293,37 +293,53 @@ try {
         // Try each candidate label in order; first visible one wins. Logging the
         // match on debug tells us exactly which label FAB is using in production,
         // so the next iteration can prune the list to the real one.
+        // v2.11.11: candidates are now scope-parameterized builders instead
+        // of pre-bound locators. FAB (Epic-owned since 2024) began serving
+        // its checkout modal from an Epic Games iframe — Duwaynef's #127
+        // screenshot on v2.11.10 shows "Add to library" clearly visible in
+        // a modal headed "Checkout" with the Epic Games logo, yet all 12
+        // top-level candidates missed. Playwright's page.locator() scopes
+        // to the main frame; the button lives inside a child iframe.
+        // We now race each candidate across [main page, ...child frames].
         const candidates = [
-          // v2.11.6: "Add to library" was missing — FAB's checkout modal
-          // uses this text now (Steggl's #127 followup, same pattern as
-          // Epic's 2026-05-28 relabel per amphoterism's #59). Placed at
-          // the top so it wins the race when present. Both role and text
-          // matchers to catch either locator style. "Add to my library"
+          // v2.11.6: "Add to library" — FAB's checkout modal uses this
+          // text (Steggl's #127 followup, same pattern as Epic's
+          // 2026-05-28 relabel per amphoterism's #59). "Add to my library"
           // (with "my") is the catalog-page variant already handled
           // earlier in the flow — the checkout-modal variant drops "my".
-          { name: 'Add to library (role)', loc: page.getByRole('button', { name: /^add\s*to\s*(my\s*)?library$/i }).first() },
-          { name: 'Add to library (text)', loc: page.locator('button:has-text("Add to library")').first() },
-          { name: 'Place Order (role)',  loc: page.getByRole('button', { name: /place\s*order/i }).first() },
-          { name: 'Complete Order (role)', loc: page.getByRole('button', { name: /complete\s*(order|purchase|checkout)/i }).first() },
-          { name: 'Confirm Order (role)', loc: page.getByRole('button', { name: /confirm\s*(order|purchase)?/i }).first() },
-          { name: 'Get It Now (role)',   loc: page.getByRole('button', { name: /get\s*it\s*now/i }).first() },
-          { name: 'Checkout (role)',      loc: page.getByRole('button', { name: /^checkout$|proceed\s*to\s*checkout/i }).first() },
-          { name: 'Place Order (text)',  loc: page.locator('button:has-text("Place Order"), button:has-text("Place order")').first() },
-          { name: 'Complete Order (text)', loc: page.locator('button:has-text("Complete Order"), button:has-text("Complete order"), button:has-text("Complete Purchase")').first() },
-          { name: 'Confirm (text)',       loc: page.locator('button:has-text("Confirm")').first() },
-          { name: 'Get It Now (text)',   loc: page.locator('button:has-text("Get it now"), button:has-text("Get It Now"), button:has-text("Get for free")').first() },
-          { name: 'Dialog Buy Now',       loc: page.locator('[role="dialog"] button:has-text("Buy now"), [role="dialog"] button:has-text("Buy Now")').first() },
+          { name: 'Add to library (role)', build: (s) => s.getByRole('button', { name: /^add\s*to\s*(my\s*)?library$/i }).first() },
+          { name: 'Add to library (text)', build: (s) => s.locator('button:has-text("Add to library")').first() },
+          { name: 'Place Order (role)',    build: (s) => s.getByRole('button', { name: /place\s*order/i }).first() },
+          { name: 'Complete Order (role)', build: (s) => s.getByRole('button', { name: /complete\s*(order|purchase|checkout)/i }).first() },
+          { name: 'Confirm Order (role)',  build: (s) => s.getByRole('button', { name: /confirm\s*(order|purchase)?/i }).first() },
+          { name: 'Get It Now (role)',     build: (s) => s.getByRole('button', { name: /get\s*it\s*now/i }).first() },
+          { name: 'Checkout (role)',       build: (s) => s.getByRole('button', { name: /^checkout$|proceed\s*to\s*checkout/i }).first() },
+          { name: 'Place Order (text)',    build: (s) => s.locator('button:has-text("Place Order"), button:has-text("Place order")').first() },
+          { name: 'Complete Order (text)', build: (s) => s.locator('button:has-text("Complete Order"), button:has-text("Complete order"), button:has-text("Complete Purchase")').first() },
+          { name: 'Confirm (text)',        build: (s) => s.locator('button:has-text("Confirm")').first() },
+          { name: 'Get It Now (text)',     build: (s) => s.locator('button:has-text("Get it now"), button:has-text("Get It Now"), button:has-text("Get for free")').first() },
+          { name: 'Dialog Buy Now',        build: (s) => s.locator('[role="dialog"] button:has-text("Buy now"), [role="dialog"] button:has-text("Buy Now")').first() },
         ];
-        // Wait up to 15s for ANY candidate to be visible, then click it.
+        // Scopes we search each iteration: the main page plus every child
+        // frame (excluding the main frame itself since page.locator() covers
+        // it). Frame list is snapshotted each iteration since checkout
+        // iframes can attach late.
+        const scopesFn = () => [page, ...page.frames().filter(f => f !== page.mainFrame())];
+        // Wait up to 15s for ANY candidate to be visible in ANY scope, then click it.
         const raceStart = Date.now();
         let picked = null;
         while (Date.now() - raceStart < 15000) {
-          for (const c of candidates) {
-            const n = await c.loc.count().catch(() => 0);
-            if (n > 0 && await c.loc.isVisible().catch(() => false)) {
-              picked = c;
-              break;
+          for (const scope of scopesFn()) {
+            for (const c of candidates) {
+              const loc = c.build(scope);
+              const n = await loc.count().catch(() => 0);
+              if (n > 0 && await loc.isVisible().catch(() => false)) {
+                const scopeLabel = scope === page ? 'page' : `frame(${scope.url() || '<detached>'})`;
+                picked = { name: `${c.name} @ ${scopeLabel}`, loc };
+                break;
+              }
             }
+            if (picked) break;
           }
           if (picked) break;
           await page.waitForTimeout(400);
@@ -332,7 +348,9 @@ try {
           if (cfg.debug) console.log(`  place-order CTA matched: ${picked.name}`);
           await picked.loc.click({ delay: 11 }).catch(() => {});
         } else if (cfg.debug) {
+          const frameUrls = page.frames().filter(f => f !== page.mainFrame()).map(f => f.url()).filter(Boolean);
           console.log('  no place-order CTA matched any known label — capturing full URL:', page.url());
+          if (frameUrls.length) console.log('  child frames present:', frameUrls);
         }
       }
 
