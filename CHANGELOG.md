@@ -4,6 +4,20 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.11.13
+
+**Hotfix: v2.11.12 client JS syntax error — panel got stuck at "Loading…".**
+
+The v2.11.12 Web-UI Auth section included an inline `onclick="window.open('...', '_blank')"` docs link. That HTML lived inside a JS single-quoted string, which lived inside the outer PANEL_HTML template literal. My `\'` escape survived the template-literal collapse as a bare `'`, which then terminated the surrounding JS string. Every browser dumped the script with `SyntaxError: Unexpected identifier 'https'`, the client bootstrap never ran, and the Sessions-tab placeholder never advanced past "Loading…". Reported live on iPad Brave.
+
+**Fix:** replaced the `onclick`+`window.open` link with a plain `<a href="…" target="_blank" rel="noopener">` anchor. Zero `'` in the HTML → nothing to escape → nothing to break. Verified by piping the served client-JS through `node --check` (added the same check to my pre-push script). Everything else in the Auth section (Settings UI, set-password, disable-auth, noVNC proxy) is unchanged from v2.11.12.
+
+Filed under `feedback_panel_html_no_backticks` — the standing rule "no inner backticks in PANEL_HTML" got a companion: **no bare single quotes inside a JS single-quoted string** either. `onclick="fn('…')"` in inline HTML is the specific trap; use `<a href>`, or entity-encode the apostrophes as `&#39;`, or move the handler to a named function referenced by an id.
+
+Landing on v2.11.13 rather than a re-tag of v2.11.12 so users on the update banner see an unambiguously-newer version — v2.11.12 itself sat on GHCR for a few minutes broken; the update-check would otherwise report "already on latest" for anyone who pulled during that window.
+
+---
+
 ## What's new in 2.11.12
 
 **Feature: full Web-UI authentication with noVNC-through-panel proxy ([D#145](https://github.com/feldorn/free-games-claimer/discussions/145) — @Steggl asked for a login screen so the panel can be exposed to the internet via reverse proxy).**

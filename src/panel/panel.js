@@ -6129,7 +6129,7 @@ function renderWebUiAuthSection() {
         logoutBtn +
       '</div>' +
       '<div style="padding:0 12px 12px 12px;color:#a0a0b0;font-size:0.9em;line-height:1.45">' +
-        'When auth is enabled, the panel requires a login cookie for every request and also proxies the noVNC browser view under <code>/novnc/*</code> — the same session cookie gates both. Direct <code>:6080</code> port access, if published in your compose, is <b>not</b> gated by this password. Close that port at your firewall or reverse proxy if you don\\'t want it exposed. See <a href="#" onclick="window.open(\'https://github.com/feldorn/free-games-claimer/blob/main/docs/PANEL.md#authentication\',\'_blank\');return false">docs/PANEL.md</a> for reverse-proxy examples.' +
+        'When auth is enabled, the panel requires a login cookie for every request and also proxies the noVNC browser view under <code>/novnc/*</code> — the same session cookie gates both. Direct <code>:6080</code> port access, if published in your compose, is <b>not</b> gated by this password. Close that port at your firewall or reverse proxy if you don\\'t want it exposed. See <a href="https://github.com/feldorn/free-games-claimer/blob/main/docs/PANEL.md#authentication" target="_blank" rel="noopener">docs/PANEL.md</a> for reverse-proxy examples.' +
       '</div>' +
     '</div>';
 
