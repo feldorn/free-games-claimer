@@ -178,8 +178,8 @@ export const CONFIG_SCHEMA = [
   // /api/state or /api/config responses; the UI receives a boolean set/unset.
   // `env: null` on both — no direct env override for the config-layer
   // path; the env-plaintext path lives in panel.js (PANEL_PASSWORD).
-  { path: 'panel.authEnabled',               env: null,                         type: 'boolean', default: false, coerce: toBool },
-  { path: 'panel.passwordHash',              env: null,                         type: 'string',  default: '', sensitive: true, redactEffective: true },
+  { path: 'panel.authEnabled',               env: null,                         type: 'boolean', default: false, coerce: toBool, readOnly: true },
+  { path: 'panel.passwordHash',              env: null,                         type: 'string',  default: '', sensitive: true, redactEffective: true, readOnly: true },
   // GitHub username for the in-panel reply-alert feature. When set, the
   // panel polls this user's issues in feldorn/free-games-claimer once a
   // day (anonymous REST — no token) and surfaces new comment activity
@@ -508,6 +508,11 @@ export function patchConfig(patches) {
   for (const [p, value] of Object.entries(patches)) {
     const field = schemaByPath.get(p);
     if (!field) { errors.push({ path: p, error: 'unknown setting' }); continue; }
+    // Fields marked readOnly are managed by dedicated endpoints
+    // (e.g. panel.passwordHash flows through POST /api/auth/set-password
+    // only). Reject writes via the generic PUT /api/config route so a
+    // client cannot bypass bcrypt hashing / current-password verification.
+    if (field.readOnly) { errors.push({ path: p, error: 'this setting is managed by a dedicated endpoint (not writable via /api/config)' }); continue; }
     if (value === null) { deleteByPath(app, p); continue; }
     if (field.type === 'number' && typeof value !== 'number') {
       errors.push({ path: p, error: 'expected number, got ' + typeof value }); continue;

@@ -5,7 +5,7 @@ import path from 'node:path';
 import { datetime, notify, jsonDb, normalizeTitle, cleanProfileLocks, readDigestBuffer, markDigestFlushed, stripGpTail, dataDir, rootDir } from '#src/util.js';
 import { launchContext } from '#src/browser.js';
 import { cfg } from '#src/config.js';
-import { describeConfig, patchConfig, describeEnv, getSchedulerConfig, CONFIG_FILE_PATH } from '#src/app-config.js';
+import { describeConfig, patchConfig, describeEnv, getSchedulerConfig, CONFIG_FILE_PATH, readConfigFile, writeConfigFile, setByPath as cfgSetByPath, deleteByPath as cfgDeleteByPath } from '#src/app-config.js';
 import { SITES as SITE_REGISTRY, getLoginSitesById, getClaimScriptOrder, getLinkedActiveMap, getClaimDbFiles, getServiceRows, normalizeClaimCommand } from '#src/sites.js';
 import { fetchGamerPowerGiveaways, filterFor as filterGpFor, COLLECTOR_PATTERNS as GP_COLLECTOR_PATTERNS, GP_TITLE_HINTS } from '#src/gamerpower.js';
 import { fetchFGFPosts, filterFor as filterFgfFor, cleanTitle as fgfCleanTitle, COLLECTOR_TITLE_PATTERNS as FGF_COLLECTOR_PATTERNS } from '#src/freegamefindings.js';
@@ -4130,6 +4130,11 @@ const PANEL_HTML = `<!DOCTYPE html>
   .status-strip.warn { background: #2a2a1e; color: #f0c040; }
   .status-strip.err  { background: #2a1a1e; color: #e94560; }
   .status-strip.info { background: #12203a; color: #a0b4d4; }
+
+  /* v2.11.12 Web UI Auth section badges (Status header pill). */
+  .webui-badge { display: inline-block; padding: 2px 10px; border-radius: 10px; font-size: 12px; font-weight: 600; letter-spacing: 0.06em; }
+  .webui-badge.ok   { background: #0e2a1f; color: #4ecca3; }
+  .webui-badge.warn { background: #2a2a1e; color: #f0c040; }
   .status-strip .strip-primary   { font-weight: 500; }
   .status-strip .strip-secondary { margin-left: auto; opacity: 0.72; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
@@ -4440,6 +4445,7 @@ const PANEL_HTML = `<!DOCTYPE html>
         <button class="rail-btn active" data-section="scheduler"     onclick="selectSettingsSection('scheduler')">Scheduler</button>
         <button class="rail-btn"        data-section="notifications" onclick="selectSettingsSection('notifications')">Notifications</button>
         <button class="rail-btn"        data-section="services"      onclick="selectSettingsSection('services')">Services</button>
+        <button class="rail-btn"        data-section="webui"         onclick="selectSettingsSection('webui')">Web UI Auth</button>
         <button class="rail-btn"        data-section="advanced"      onclick="selectSettingsSection('advanced')">Advanced</button>
         <div class="settings-rail-version" title="App version (from package.json)">v${APP_VERSION}</div>
       </nav>
@@ -6082,6 +6088,215 @@ function settingGroup(title, body) {
   '</div>';
 }
 
+// ─── Web UI auth (v2.11.12) ────────────────────────────────────────────
+// Renders the Settings-tab "Web UI Auth" section. Password state is driven
+// off /api/config's authState field (active + source) — the actual hash is
+// redacted server-side. Password change flows through /api/auth/set-password
+// (bcrypt server-side); disable flows through /api/auth/disable-auth. Both
+// require the current password when auth is already active.
+function renderWebUiAuthSection() {
+  var authState = (settingsData && settingsData.authState) || { active: false, source: 'none' };
+  var sourceLabel =
+    authState.source === 'config' ? 'Config (hash in data/config.json)' :
+    authState.source === 'env'    ? 'Env (PANEL_PASSWORD — legacy plaintext, hashed at boot)' :
+    'None';
+  var statusClass = authState.active ? 'ok' : 'warn';
+  var statusText  = authState.active ? 'ENABLED' : 'DISABLED';
+
+  // Status header + short primer + Logout (visible only when auth is on)
+  var logoutBtn = authState.active
+    ? '<button class="btn btn-cancel" style="margin-left:auto" onclick="panelLogout()">Log out</button>'
+    : '';
+  var header =
+    '<div class="settings-pane-title">Web UI Authentication</div>' +
+    '<div class="setting-group">' +
+      '<div class="setting-group-head">Status</div>' +
+      '<div style="display:flex;flex-wrap:wrap;gap:14px;align-items:center;padding:0 12px 8px 12px">' +
+        '<div><b>Auth is: <span class="webui-badge ' + statusClass + '">' + statusText + '</span></b></div>' +
+        '<div style="color:#888;font-size:0.92em">Source: ' + escapeHtml(sourceLabel) + '</div>' +
+        logoutBtn +
+      '</div>' +
+      '<div style="padding:0 12px 12px 12px;color:#a0a0b0;font-size:0.9em;line-height:1.45">' +
+        'When auth is enabled, the panel requires a login cookie for every request and also proxies the noVNC browser view under <code>/novnc/*</code> — the same session cookie gates both. Direct <code>:6080</code> port access, if published in your compose, is <b>not</b> gated by this password. Close that port at your firewall or reverse proxy if you don\\'t want it exposed. See <a href="#" onclick="window.open(\'https://github.com/feldorn/free-games-claimer/blob/main/docs/PANEL.md#authentication\',\'_blank\');return false">docs/PANEL.md</a> for reverse-proxy examples.' +
+      '</div>' +
+    '</div>';
+
+  // If disabled, show the enable / set-password form only (no current
+  // password field needed).
+  if (!authState.active) {
+    return header +
+      '<div class="setting-group">' +
+        '<div class="setting-group-head">Enable authentication</div>' +
+        '<div style="padding:8px 12px 16px 12px;display:flex;flex-direction:column;gap:10px;max-width:520px">' +
+          '<label style="display:flex;flex-direction:column;gap:4px">New password' +
+            '<input type="password" id="webuiNextPw" autocomplete="new-password" style="padding:8px 10px;border-radius:6px;border:1px solid #0f3460;background:#1a1a2e;color:#e0e0e0" placeholder="At least 6 characters">' +
+          '</label>' +
+          '<label style="display:flex;flex-direction:column;gap:4px">Confirm new password' +
+            '<input type="password" id="webuiNextPw2" autocomplete="new-password" style="padding:8px 10px;border-radius:6px;border:1px solid #0f3460;background:#1a1a2e;color:#e0e0e0" placeholder="Type the same password again">' +
+          '</label>' +
+          '<div id="webuiPwError" style="color:#e94560;font-size:0.9em;min-height:18px"></div>' +
+          '<div style="display:flex;gap:10px;flex-wrap:wrap">' +
+            '<button class="btn btn-run" id="btnSetPassword" onclick="submitSetPassword()">Enable authentication</button>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+  }
+
+  // Auth is active — offer change-password + disable-auth flows. Change
+  // requires current + next; disable requires current only.
+  return header +
+    '<div class="setting-group">' +
+      '<div class="setting-group-head">Change password</div>' +
+      '<div style="padding:8px 12px 16px 12px;display:flex;flex-direction:column;gap:10px;max-width:520px">' +
+        '<label style="display:flex;flex-direction:column;gap:4px">Current password' +
+          '<input type="password" id="webuiCurPw" autocomplete="current-password" style="padding:8px 10px;border-radius:6px;border:1px solid #0f3460;background:#1a1a2e;color:#e0e0e0">' +
+        '</label>' +
+        '<label style="display:flex;flex-direction:column;gap:4px">New password' +
+          '<input type="password" id="webuiNextPw" autocomplete="new-password" style="padding:8px 10px;border-radius:6px;border:1px solid #0f3460;background:#1a1a2e;color:#e0e0e0" placeholder="At least 6 characters">' +
+        '</label>' +
+        '<label style="display:flex;flex-direction:column;gap:4px">Confirm new password' +
+          '<input type="password" id="webuiNextPw2" autocomplete="new-password" style="padding:8px 10px;border-radius:6px;border:1px solid #0f3460;background:#1a1a2e;color:#e0e0e0">' +
+        '</label>' +
+        '<div id="webuiPwError" style="color:#e94560;font-size:0.9em;min-height:18px"></div>' +
+        '<div style="color:#a0a0b0;font-size:0.85em">Changing the password logs out every session, including this one — you\\'ll be sent back to the login page.</div>' +
+        '<div style="display:flex;gap:10px;flex-wrap:wrap">' +
+          '<button class="btn btn-run" id="btnSetPassword" onclick="submitSetPassword()">Change password</button>' +
+        '</div>' +
+      '</div>' +
+    '</div>' +
+    '<div class="setting-group">' +
+      '<div class="setting-group-head">Disable authentication</div>' +
+      '<div style="padding:8px 12px 16px 12px;display:flex;flex-direction:column;gap:10px;max-width:520px">' +
+        '<div style="color:#e94560;font-size:0.9em">This exposes the panel and noVNC to anyone on the network. Only turn this off if you\\'re on a trusted LAN and the panel is not reachable from the internet.</div>' +
+        (authState.source === 'env'
+          ? '<div style="color:#a0a0b0;font-size:0.85em"><b>Note:</b> auth is currently active via the <code>PANEL_PASSWORD</code> env var. Disabling here only clears any Settings-tab password; the env plaintext will keep auth on until you unset that env var in your compose and restart the container.</div>'
+          : '<div style="color:#a0a0b0;font-size:0.85em">You will be logged out and returned to the panel without a login screen.</div>') +
+        '<label style="display:flex;flex-direction:column;gap:4px;max-width:520px">Current password (to confirm)' +
+          '<input type="password" id="webuiDisableCurPw" autocomplete="current-password" style="padding:8px 10px;border-radius:6px;border:1px solid #0f3460;background:#1a1a2e;color:#e0e0e0">' +
+        '</label>' +
+        '<div id="webuiDisableError" style="color:#e94560;font-size:0.9em;min-height:18px"></div>' +
+        '<div style="display:flex;gap:10px;flex-wrap:wrap">' +
+          '<button class="btn btn-cancel" id="btnDisableAuth" onclick="confirmDisableAuth()">Disable authentication</button>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+}
+
+async function submitSetPassword() {
+  var authState = (settingsData && settingsData.authState) || { active: false };
+  var curEl = document.getElementById('webuiCurPw');
+  var pw1El = document.getElementById('webuiNextPw');
+  var pw2El = document.getElementById('webuiNextPw2');
+  var errEl = document.getElementById('webuiPwError');
+  var btn   = document.getElementById('btnSetPassword');
+  errEl.textContent = '';
+  var current = curEl ? curEl.value : '';
+  var next    = pw1El ? pw1El.value : '';
+  var next2   = pw2El ? pw2El.value : '';
+  if (next.length < 6) { errEl.textContent = 'New password must be at least 6 characters.'; return; }
+  if (next !== next2)  { errEl.textContent = 'Passwords do not match.'; return; }
+  if (authState.active && !current) { errEl.textContent = 'Enter your current password to change it.'; return; }
+  btn.disabled = true;
+  try {
+    var r = await fetch(BASE_PATH + '/api/auth/set-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ current: current, next: next }),
+    });
+    var j = await r.json().catch(function(){ return {}; });
+    if (!r.ok || !j.success) {
+      errEl.textContent = j.error || ('Request failed (' + r.status + ').');
+      btn.disabled = false;
+      return;
+    }
+    // Success — every session was invalidated including ours. The next
+    // request will 401 and the browser will land on the login page.
+    // Reload rather than wait for the next click.
+    location.href = BASE_PATH + '/';
+  } catch (e) {
+    errEl.textContent = 'Network error.';
+    btn.disabled = false;
+  }
+}
+
+// Custom confirm modal (no native confirm() per landmine
+// feedback_no_native_confirm — auto-cancels under pop-up blockers /
+// iframe / kiosk). Renders inline, focuses the OK button, wires Escape.
+function confirmDisableAuth() {
+  var errEl = document.getElementById('webuiDisableError');
+  errEl.textContent = '';
+  var curEl = document.getElementById('webuiDisableCurPw');
+  if (!curEl || !curEl.value) { errEl.textContent = 'Enter your current password first.'; return; }
+  // Reuse the disable-modal pattern from the disable-auth flow.
+  var backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop';
+  backdrop.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9999;display:flex;align-items:center;justify-content:center';
+  var box = document.createElement('div');
+  box.style.cssText = 'background:#16213e;border:1px solid #0f3460;border-radius:12px;padding:24px;max-width:460px;color:#e0e0e0;font-size:14px';
+  box.innerHTML =
+    '<h3 style="margin:0 0 12px 0;color:#e94560;font-size:18px">Disable Web UI authentication?</h3>' +
+    '<p style="margin:0 0 16px 0;line-height:1.5">This removes the login requirement for the panel and noVNC. Anyone on the network will be able to reach the panel, view your live gaming-account sessions in noVNC, and trigger claim runs.</p>' +
+    '<p style="margin:0 0 16px 0;line-height:1.5">Continue?</p>' +
+    '<div style="display:flex;gap:10px;justify-content:flex-end">' +
+      '<button class="btn btn-cancel" id="_modalCancel">Keep enabled</button>' +
+      '<button class="btn btn-run" id="_modalOk" style="background:#e94560">Disable auth</button>' +
+    '</div>';
+  backdrop.appendChild(box);
+  document.body.appendChild(backdrop);
+  function cleanup() { try { document.body.removeChild(backdrop); } catch(e){} document.removeEventListener('keydown', escHandler); }
+  function escHandler(e) { if (e.key === 'Escape') { cleanup(); } }
+  document.addEventListener('keydown', escHandler);
+  document.getElementById('_modalCancel').onclick = cleanup;
+  document.getElementById('_modalOk').onclick = async function() {
+    cleanup();
+    await submitDisableAuth();
+  };
+  setTimeout(function(){ var b = document.getElementById('_modalCancel'); if (b) b.focus(); }, 0);
+}
+
+async function submitDisableAuth() {
+  var curEl = document.getElementById('webuiDisableCurPw');
+  var errEl = document.getElementById('webuiDisableError');
+  var btn   = document.getElementById('btnDisableAuth');
+  errEl.textContent = '';
+  var current = curEl ? curEl.value : '';
+  btn.disabled = true;
+  try {
+    var r = await fetch(BASE_PATH + '/api/auth/disable-auth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ current: current }),
+    });
+    var j = await r.json().catch(function(){ return {}; });
+    if (!r.ok || !j.success) {
+      errEl.textContent = j.error || ('Request failed (' + r.status + ').');
+      btn.disabled = false;
+      return;
+    }
+    if (j.envStillActive) {
+      // env is still forcing auth on — the user needs to know they still
+      // have to unset PANEL_PASSWORD in compose. Reload the panel; they
+      // will be sent back to the login screen.
+      alert('Config-layer password cleared, but auth is still active via the PANEL_PASSWORD env var. Unset it in your compose and restart the container to fully disable auth. You will now be logged out.');
+      location.href = BASE_PATH + '/';
+    } else {
+      // Fully disabled. Everyone was logged out; land back on the panel
+      // (no login screen this time).
+      location.href = BASE_PATH + '/';
+    }
+  } catch (e) {
+    errEl.textContent = 'Network error.';
+    btn.disabled = false;
+  }
+}
+
+// Convenience client-side logout — invalidates the token server-side then
+// bounces the tab back to the login page.
+async function panelLogout() {
+  try { await fetch(BASE_PATH + '/api/logout', { method: 'POST' }); } catch(e) {}
+  location.href = BASE_PATH + '/';
+}
+
 // Inline "Error reporting" group inside Notifications. The toggle isn't a
 // cfg field — it lives in diagnostics-state.json and is driven by the same
 // /enable + /disable endpoints the Never Share banner button uses. Keeps
@@ -6543,6 +6758,8 @@ function paintSettings() {
       '<div class="svc-list">' +
         svcInner +
       '</div>';
+  } else if (currentSettingsSection === 'webui') {
+    html = renderWebUiAuthSection();
   } else if (currentSettingsSection === 'advanced') {
     // Order reflects what someone opening Advanced is usually there for:
     // first timeouts (most common debug tweak), then dry-run / recording,
@@ -9376,7 +9593,94 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'GET' && req.url === '/api/config') {
-      sendJson(res, describeConfig());
+      // Enrich with runtime authState so the Settings tab knows the active
+      // source (config-hash / env-plaintext / none) even when both are set.
+      // describeConfig alone can't tell env from none since PANEL_PASSWORD
+      // lives outside the schema.
+      sendJson(res, { ...describeConfig(), authState: { active: authIsActive(), source: authSource() } });
+      return;
+    }
+
+    // ─── Web-UI auth management (v2.11.12) ────────────────────────────
+    // Set (or change) the panel password. Requires an authenticated
+    // session; if auth is currently active, ALSO requires the current
+    // password. Writes bcrypt hash + panel.authEnabled=true to
+    // data/config.json in one atomic file rewrite. Invalidates every
+    // existing session (including the caller's) — the caller re-logs
+    // with the new password on the next request.
+    if (req.method === 'POST' && req.url === '/api/auth/set-password') {
+      let body;
+      try { body = await parseBody(req); }
+      catch (e) { sendJson(res, { error: e.message || 'invalid request' }, e?.statusCode || 400); return; }
+      const current = String(body?.current ?? '');
+      const next    = String(body?.next ?? '');
+      if (next.length < 6) { sendJson(res, { error: 'Password must be at least 6 characters.' }, 400); return; }
+      if (next.length > 200) { sendJson(res, { error: 'Password must be at most 200 characters.' }, 400); return; }
+      const wasActive = authIsActive();
+      if (wasActive) {
+        const hash = activeHash();
+        let ok = false;
+        try { ok = await bcrypt.compare(current, hash); } catch { ok = false; }
+        if (!ok) {
+          // Reuse the login rate-limit map — repeated bad current-passwords
+          // from the set-password path count against the same IP quota.
+          recordAuthFail(clientIp(req));
+          sendJson(res, { error: 'Current password is incorrect.' }, 401);
+          return;
+        }
+      }
+      let newHash;
+      try { newHash = await bcrypt.hash(next, 10); }
+      catch (e) { sendJson(res, { error: 'Failed to hash password: ' + e.message }, 500); return; }
+      try {
+        const app = readConfigFile();
+        cfgSetByPath(app, 'panel.passwordHash', newHash);
+        cfgSetByPath(app, 'panel.authEnabled', true);
+        writeConfigFile(app);
+      } catch (e) { sendJson(res, { error: 'Failed to persist password: ' + e.message }, 500); return; }
+      // Invalidate every session (including the caller's — they get a
+      // fresh cookie via /api/auth on their next login). Belt-and-braces
+      // for the "change password from a shared machine" scenario.
+      invalidateAllSessions();
+      recordAuthSuccess(clientIp(req));
+      sendJson(res, { success: true, active: authIsActive(), source: authSource() });
+      return;
+    }
+
+    // Turn Web-UI auth off. Requires the current password. Clears both
+    // panel.passwordHash and panel.authEnabled. If PANEL_PASSWORD env is
+    // still set, auth stays on via that path — the response reports
+    // authState.active in that case so the UI can flag it.
+    if (req.method === 'POST' && req.url === '/api/auth/disable-auth') {
+      let body;
+      try { body = await parseBody(req); }
+      catch (e) { sendJson(res, { error: e.message || 'invalid request' }, e?.statusCode || 400); return; }
+      const current = String(body?.current ?? '');
+      if (!authIsActive()) { sendJson(res, { error: 'Auth is already disabled.' }, 400); return; }
+      const hash = activeHash();
+      let ok = false;
+      try { ok = await bcrypt.compare(current, hash); } catch { ok = false; }
+      if (!ok) {
+        recordAuthFail(clientIp(req));
+        sendJson(res, { error: 'Current password is incorrect.' }, 401);
+        return;
+      }
+      try {
+        const app = readConfigFile();
+        cfgDeleteByPath(app, 'panel.passwordHash');
+        cfgDeleteByPath(app, 'panel.authEnabled');
+        writeConfigFile(app);
+      } catch (e) { sendJson(res, { error: 'Failed to update config: ' + e.message }, 500); return; }
+      invalidateAllSessions();
+      recordAuthSuccess(clientIp(req));
+      sendJson(res, {
+        success: true,
+        active: authIsActive(),
+        source: authSource(),
+        // Flag the "config-cleared but env-still-active" case so the UI can
+        // tell the user why the panel still shows a login screen.
+        envStillActive: authSource() === 'env',
+      });
       return;
     }
     if (req.method === 'GET' && req.url.startsWith('/api/env')) {
