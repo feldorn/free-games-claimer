@@ -1,11 +1,12 @@
 import http from 'node:http';
+import net from 'node:net';
 import { spawn, execFile } from 'node:child_process';
 import { watch, readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { datetime, notify, jsonDb, normalizeTitle, cleanProfileLocks, readDigestBuffer, markDigestFlushed, stripGpTail, dataDir, rootDir } from '#src/util.js';
 import { launchContext } from '#src/browser.js';
 import { cfg } from '#src/config.js';
-import { describeConfig, patchConfig, describeEnv, getSchedulerConfig, CONFIG_FILE_PATH } from '#src/app-config.js';
+import { describeConfig, patchConfig, describeEnv, getSchedulerConfig, CONFIG_FILE_PATH, readConfigFile, writeConfigFile, setByPath as cfgSetByPath, deleteByPath as cfgDeleteByPath } from '#src/app-config.js';
 import { SITES as SITE_REGISTRY, getLoginSitesById, getClaimScriptOrder, getLinkedActiveMap, getClaimDbFiles, getServiceRows, normalizeClaimCommand } from '#src/sites.js';
 import { fetchGamerPowerGiveaways, filterFor as filterGpFor, COLLECTOR_PATTERNS as GP_COLLECTOR_PATTERNS, GP_TITLE_HINTS } from '#src/gamerpower.js';
 import { fetchFGFPosts, filterFor as filterFgfFor, cleanTitle as fgfCleanTitle, COLLECTOR_TITLE_PATTERNS as FGF_COLLECTOR_PATTERNS } from '#src/freegamefindings.js';
@@ -21,7 +22,11 @@ const NOVNC_PORT = process.env.NOVNC_PORT || 6080;
 // can't reach it). When set, buildNovncUrl() returns this verbatim and
 // skips host/port assembly. Issue #20.
 const NOVNC_URL = (process.env.NOVNC_URL || '').replace(/\/+$/, '');
-const PANEL_PASSWORD = process.env.PANEL_PASSWORD || process.env.VNC_PASSWORD || '';
+// v2.11.12: legacy env-plaintext still supported. The panel bcrypt-hashes
+// it at boot into a memory-only variable; Settings-configured hash in
+// config.json takes precedence when both are set. `VNC_PASSWORD` fallback
+// preserved for the historical composed-together deployment.
+const ENV_PANEL_PASSWORD = process.env.PANEL_PASSWORD || process.env.VNC_PASSWORD || '';
 const BASE_PATH = cfg.base_path; // e.g. "/free-games" when behind a subfolder proxy, or ""
 const PUBLIC_URL = cfg.public_url || `http://localhost:${PANEL_PORT}${BASE_PATH}`;
 const APP_VERSION = (() => {
@@ -30,22 +35,181 @@ const APP_VERSION = (() => {
 })();
 
 import crypto from 'node:crypto';
-const sessionTokens = new Set();
+import bcrypt from 'bcryptjs';
+
+// ─── Web-UI auth (v2.11.12) ────────────────────────────────────────────
+// Precedence: config.json panel.passwordHash > env PANEL_PASSWORD > off.
+// Env plaintext is hashed at boot into `runtimeEnvHash` — never stored on
+// disk. Live `activeHash` is a getter that re-reads config each call so
+// the panel picks up Settings-tab changes without a restart (per landmine
+// `feedback_stale_cfg_use_describeconfig`).
+const SESSIONS_FILE = dataDir('panel-sessions.json');
+const SESSION_TTL_MS = 24 * 60 * 60 * 1000;      // 24h
+const SESSION_SLIDE_MS = 60 * 60 * 1000;          // renew if lastUsed > 1h ago
+const AUTH_MAX_FAILS = 5;
+const AUTH_LOCKOUT_MS = 15 * 60 * 1000;
+
+let runtimeEnvHash = '';
+if (ENV_PANEL_PASSWORD) {
+  try { runtimeEnvHash = bcrypt.hashSync(ENV_PANEL_PASSWORD, 10); }
+  catch (e) { console.error(`[${datetime()}] Failed to hash env PANEL_PASSWORD: ${e.message}`); }
+}
+
+// Read the config-layer hash live. Returns '' when unset.
+function configHash() {
+  try { return describeConfig().effective?.panel?.passwordHash ? _readConfigHashRaw() : ''; }
+  catch { return ''; }
+}
+// describeConfig redacts panel.passwordHash to a boolean; go to disk for
+// the real hash. Cache is lightweight — bcrypt.compare dominates.
+function _readConfigHashRaw() {
+  try {
+    const raw = JSON.parse(readFileSync(CONFIG_FILE_PATH, 'utf8'));
+    return String(raw?.panel?.passwordHash || '');
+  } catch { return ''; }
+}
+
+// The hash actually used to gate the panel this instant. config > env > ''.
+function activeHash() {
+  const c = _readConfigHashRaw();
+  if (c) return c;
+  return runtimeEnvHash;
+}
+function authIsActive() { return !!activeHash(); }
+function authSource() {
+  if (_readConfigHashRaw()) return 'config';
+  if (runtimeEnvHash) return 'env';
+  return 'none';
+}
+
+// Session store — persisted so container restarts don't invalidate
+// browser cookies. Shape: { <token>: {createdAt, lastUsed} }.
+let sessions = {};
+try {
+  if (existsSync(SESSIONS_FILE)) {
+    const parsed = JSON.parse(readFileSync(SESSIONS_FILE, 'utf8'));
+    if (parsed && typeof parsed === 'object') {
+      const now = Date.now();
+      for (const [tok, meta] of Object.entries(parsed)) {
+        if (meta && typeof meta === 'object' && (now - (meta.lastUsed || 0)) < SESSION_TTL_MS) {
+          sessions[tok] = { createdAt: meta.createdAt || now, lastUsed: meta.lastUsed || now };
+        }
+      }
+    }
+  }
+} catch (e) { console.error(`[${datetime()}] Sessions load failed: ${e.message}`); }
+
+let sessionsDirty = false;
+function persistSessionsSoon() { sessionsDirty = true; }
+setInterval(() => {
+  if (!sessionsDirty) return;
+  sessionsDirty = false;
+  try {
+    const dir = path.dirname(SESSIONS_FILE);
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    writeFileSync(SESSIONS_FILE, JSON.stringify(sessions), { mode: 0o600 });
+  } catch (e) { console.error(`[${datetime()}] Sessions flush failed: ${e.message}`); }
+}, 5 * 60 * 1000).unref();
 
 function generateToken() {
   const token = crypto.randomBytes(32).toString('hex');
-  sessionTokens.add(token);
+  const now = Date.now();
+  sessions[token] = { createdAt: now, lastUsed: now };
+  persistSessionsSoon();
   return token;
 }
 
-function isAuthenticated(req) {
-  if (!PANEL_PASSWORD) return true;
+function invalidateAllSessions() {
+  sessions = {};
+  persistSessionsSoon();
+}
+
+function invalidateToken(token) {
+  if (sessions[token]) { delete sessions[token]; persistSessionsSoon(); }
+}
+
+function tokenValid(token) {
+  const meta = sessions[token];
+  if (!meta) return false;
+  if (Date.now() - meta.lastUsed > SESSION_TTL_MS) { invalidateToken(token); return false; }
+  return true;
+}
+
+// Called from every authenticated request path. Returns whether the token
+// should be re-issued (Set-Cookie again) with a fresh Max-Age, i.e. sliding
+// renewal — we only rewrite the cookie when the last-used stamp has drifted
+// past SESSION_SLIDE_MS to avoid Set-Cookie on every request.
+function touchToken(token) {
+  const meta = sessions[token];
+  if (!meta) return false;
+  const now = Date.now();
+  if (now - meta.lastUsed < SESSION_SLIDE_MS) { meta.lastUsed = now; return false; }
+  meta.lastUsed = now;
+  persistSessionsSoon();
+  return true;
+}
+
+// Rate limit on /api/auth by client IP. Simple in-memory Map, hour-purged.
+const authFailMap = new Map(); // ip → { fails, blockedUntil }
+function clientIp(req) {
+  const xff = req.headers['x-forwarded-for'];
+  if (xff) return String(xff).split(',')[0].trim();
+  return req.socket?.remoteAddress || 'unknown';
+}
+function authLockoutRemainingMs(ip) {
+  const rec = authFailMap.get(ip);
+  if (!rec) return 0;
+  const remain = rec.blockedUntil - Date.now();
+  return remain > 0 ? remain : 0;
+}
+function recordAuthFail(ip) {
+  const rec = authFailMap.get(ip) || { fails: 0, blockedUntil: 0 };
+  rec.fails += 1;
+  if (rec.fails >= AUTH_MAX_FAILS) rec.blockedUntil = Date.now() + AUTH_LOCKOUT_MS;
+  authFailMap.set(ip, rec);
+}
+function recordAuthSuccess(ip) { authFailMap.delete(ip); }
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, rec] of authFailMap.entries()) {
+    if (rec.blockedUntil && rec.blockedUntil < now) authFailMap.delete(ip);
+  }
+}, 60 * 60 * 1000).unref();
+
+// Should the Secure cookie flag be set? True when the request or the
+// configured PUBLIC_URL says HTTPS. Best-effort — reverse proxies must set
+// X-Forwarded-Proto (documented in docs/PANEL.md).
+function shouldMarkSecure(req) {
+  const xfp = req?.headers?.['x-forwarded-proto'];
+  if (xfp && String(xfp).toLowerCase().includes('https')) return true;
+  if (typeof PUBLIC_URL === 'string' && PUBLIC_URL.toLowerCase().startsWith('https://')) return true;
+  return false;
+}
+function sessionCookie(token, req, { clear = false } = {}) {
+  const parts = [`fgc_token=${clear ? '' : token}`, `Path=/`, `HttpOnly`, `SameSite=Strict`];
+  parts.push(clear ? 'Max-Age=0' : `Max-Age=${Math.floor(SESSION_TTL_MS / 1000)}`);
+  if (shouldMarkSecure(req)) parts.push('Secure');
+  return parts.join('; ');
+}
+
+// Extract token from cookie or Authorization: Bearer header.
+function extractToken(req) {
   const cookie = req.headers.cookie || '';
   const match = cookie.match(/fgc_token=([a-f0-9]+)/);
-  if (match && sessionTokens.has(match[1])) return true;
+  if (match) return match[1];
   const auth = req.headers.authorization;
-  if (auth && auth.startsWith('Bearer ') && sessionTokens.has(auth.slice(7))) return true;
-  return false;
+  if (auth && auth.startsWith('Bearer ')) return auth.slice(7);
+  return '';
+}
+
+// NOTE on CSRF: cookie is `SameSite=Strict`, which fully blocks
+// cross-site POST/GET from third-party origins. That covers the CSRF
+// threat model for this single-user tool. Explicit CSRF tokens deferred.
+function isAuthenticated(req) {
+  if (!authIsActive()) return true;
+  const token = extractToken(req);
+  if (!token) return false;
+  return tokenValid(token);
 }
 
 const LOGIN_HTML = `<!DOCTYPE html>
@@ -60,25 +224,56 @@ const LOGIN_HTML = `<!DOCTYPE html>
   .login-box h1 { color: #e94560; margin-bottom: 8px; font-size: 22px; }
   .login-box p { color: #888; margin-bottom: 24px; font-size: 14px; }
   .login-box input { width: 100%; padding: 10px 14px; border-radius: 6px; border: 1px solid #0f3460; background: #1a1a2e; color: #e0e0e0; font-size: 14px; margin-bottom: 16px; }
+  .login-box input:disabled { opacity: 0.6; }
   .login-box button { width: 100%; padding: 10px; border-radius: 6px; border: none; background: #e94560; color: white; font-size: 14px; font-weight: 600; cursor: pointer; }
-  .login-box button:hover { background: #d63851; }
-  .error { color: #e94560; font-size: 13px; margin-bottom: 12px; display: none; }
+  .login-box button:hover:not(:disabled) { background: #d63851; }
+  .login-box button:disabled { opacity: 0.6; cursor: not-allowed; }
+  .error { color: #e94560; font-size: 13px; margin-bottom: 12px; min-height: 18px; }
 </style></head><body>
 <div class="login-box">
   <h1>Free Games Claimer</h1>
   <p>Enter the panel password to continue.</p>
-  <div class="error" id="error">Incorrect password.</div>
+  <div class="error" id="error"></div>
   <input type="password" id="pw" placeholder="Password" autofocus>
-  <button onclick="login()">Login</button>
+  <button id="btn" onclick="login()">Login</button>
 </div>
 <script>
-document.getElementById('pw').addEventListener('keydown', e => { if (e.key === 'Enter') login(); });
+var basePath = ${JSON.stringify(BASE_PATH || '')};
+var errEl = document.getElementById('error');
+var pwEl  = document.getElementById('pw');
+var btn   = document.getElementById('btn');
+pwEl.addEventListener('keydown', function(e){ if (e.key === 'Enter') login(); });
+function nextTarget() {
+  var m = location.search.match(/[?&]next=([^&]*)/);
+  if (!m) return basePath + '/';
+  var raw = decodeURIComponent(m[1]);
+  // Only allow same-origin, absolute paths starting with basePath so a
+  // crafted ?next=https://evil/ or ?next=//evil.com can't bounce a user
+  // there after login.
+  if (raw.startsWith(basePath + '/') && !raw.startsWith('//')) return raw;
+  return basePath + '/';
+}
 async function login() {
-  const pw = document.getElementById('pw').value;
-  const r = await fetch('${BASE_PATH}/api/auth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: pw }) });
-  const j = await r.json();
-  if (j.success) { location.reload(); }
-  else { document.getElementById('error').style.display = 'block'; }
+  var pw = pwEl.value;
+  btn.disabled = true; pwEl.disabled = true; errEl.textContent = '';
+  try {
+    var r = await fetch(basePath + '/api/auth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: pw }),
+    });
+    var j = await r.json().catch(function(){ return {}; });
+    if (r.ok && j.success) { location.href = nextTarget(); return; }
+    if (r.status === 429) {
+      errEl.textContent = j.error || 'Too many attempts — try again later.';
+    } else {
+      errEl.textContent = 'Incorrect password.';
+    }
+  } catch (e) {
+    errEl.textContent = 'Network error — try again.';
+  } finally {
+    btn.disabled = false; pwEl.disabled = false; pwEl.focus(); pwEl.select();
+  }
 }
 </script></body></html>`;
 
@@ -2856,6 +3051,11 @@ async function getState() {
   const msState = msScheduled ? (msTodayState || readMsScheduleToday()) : null;
 
   return {
+    // v2.11.12: Web-UI auth state — the client refreshes AUTH_ENABLED
+    // from this on every /api/state poll so buildNovncUrl() routes through
+    // /novnc/* when auth is active. envStillActive helps the Settings UI
+    // explain the "cleared config but env keeps it on" case.
+    authState: { active: authIsActive(), source: authSource() },
     sites: Object.entries(SITES).map(([id, site]) => ({
       id,
       name: site.name,
@@ -3317,19 +3517,43 @@ async function getActivity(limit = 10) {
   }));
 }
 
+// v2.11.12: cap body size at 100 KB. No panel endpoint legitimately posts
+// larger than this — cookie imports run into the tens of KB, everything
+// else is small JSON. Above the cap we abort the connection with 413
+// rather than accepting the payload and rejecting it after parse.
+const PARSE_BODY_LIMIT = 100 * 1024;
 function parseBody(req) {
   return new Promise((resolve, reject) => {
     let body = '';
-    req.on('data', chunk => body += chunk);
+    let size = 0;
+    let aborted = false;
+    req.on('data', chunk => {
+      if (aborted) return;
+      size += chunk.length;
+      if (size > PARSE_BODY_LIMIT) {
+        aborted = true;
+        const err = new Error('request body exceeds 100 KB limit');
+        err.statusCode = 413;
+        reject(err);
+        req.destroy();
+        return;
+      }
+      body += chunk;
+    });
     req.on('end', () => {
+      if (aborted) return;
       try { resolve(body ? JSON.parse(body) : {}); }
       catch (e) { reject(e); }
     });
+    req.on('error', reject);
   });
 }
 
 function sendJson(res, data, status = 200) {
-  res.writeHead(status, { 'Content-Type': 'application/json' });
+  res.writeHead(status, {
+    'Content-Type': 'application/json',
+    'X-Content-Type-Options': 'nosniff',
+  });
   res.end(JSON.stringify(data));
 }
 
@@ -3912,6 +4136,11 @@ const PANEL_HTML = `<!DOCTYPE html>
   .status-strip.warn { background: #2a2a1e; color: #f0c040; }
   .status-strip.err  { background: #2a1a1e; color: #e94560; }
   .status-strip.info { background: #12203a; color: #a0b4d4; }
+
+  /* v2.11.12 Web UI Auth section badges (Status header pill). */
+  .webui-badge { display: inline-block; padding: 2px 10px; border-radius: 10px; font-size: 12px; font-weight: 600; letter-spacing: 0.06em; }
+  .webui-badge.ok   { background: #0e2a1f; color: #4ecca3; }
+  .webui-badge.warn { background: #2a2a1e; color: #f0c040; }
   .status-strip .strip-primary   { font-weight: 500; }
   .status-strip .strip-secondary { margin-left: auto; opacity: 0.72; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
@@ -4222,6 +4451,7 @@ const PANEL_HTML = `<!DOCTYPE html>
         <button class="rail-btn active" data-section="scheduler"     onclick="selectSettingsSection('scheduler')">Scheduler</button>
         <button class="rail-btn"        data-section="notifications" onclick="selectSettingsSection('notifications')">Notifications</button>
         <button class="rail-btn"        data-section="services"      onclick="selectSettingsSection('services')">Services</button>
+        <button class="rail-btn"        data-section="webui"         onclick="selectSettingsSection('webui')">Web UI Auth</button>
         <button class="rail-btn"        data-section="advanced"      onclick="selectSettingsSection('advanced')">Advanced</button>
         <div class="settings-rail-version" title="App version (from package.json)">v${APP_VERSION}</div>
       </nav>
@@ -4405,6 +4635,12 @@ const PANEL_HTML = `<!DOCTYPE html>
 const NOVNC_PORT = ${NOVNC_PORT};
 const NOVNC_URL = '${NOVNC_URL}';
 const BASE_PATH = '${BASE_PATH}';
+// v2.11.12: whether the panel is running with Web-UI auth active. Drives
+// buildNovncUrl() to route through the same-origin /novnc/* proxy so the
+// session cookie gates both HTTP and the WebSocket upgrade. Refreshed on
+// every /api/state fetch (see refreshState) — buildNovncUrl is called
+// from user-initiated buttons well after the first state fetch resolves.
+let AUTH_ENABLED = false;
 let state = { sites: [], activeBrowser: null, allLoggedIn: false, runStatus: 'idle' };
 let busy = false;
 let showingLog = false;
@@ -5864,6 +6100,215 @@ function settingGroup(title, body) {
   '</div>';
 }
 
+// ─── Web UI auth (v2.11.12) ────────────────────────────────────────────
+// Renders the Settings-tab "Web UI Auth" section. Password state is driven
+// off /api/config's authState field (active + source) — the actual hash is
+// redacted server-side. Password change flows through /api/auth/set-password
+// (bcrypt server-side); disable flows through /api/auth/disable-auth. Both
+// require the current password when auth is already active.
+function renderWebUiAuthSection() {
+  var authState = (settingsData && settingsData.authState) || { active: false, source: 'none' };
+  var sourceLabel =
+    authState.source === 'config' ? 'Config (hash in data/config.json)' :
+    authState.source === 'env'    ? 'Env (PANEL_PASSWORD — legacy plaintext, hashed at boot)' :
+    'None';
+  var statusClass = authState.active ? 'ok' : 'warn';
+  var statusText  = authState.active ? 'ENABLED' : 'DISABLED';
+
+  // Status header + short primer + Logout (visible only when auth is on)
+  var logoutBtn = authState.active
+    ? '<button class="btn btn-cancel" style="margin-left:auto" onclick="panelLogout()">Log out</button>'
+    : '';
+  var header =
+    '<div class="settings-pane-title">Web UI Authentication</div>' +
+    '<div class="setting-group">' +
+      '<div class="setting-group-head">Status</div>' +
+      '<div style="display:flex;flex-wrap:wrap;gap:14px;align-items:center;padding:0 12px 8px 12px">' +
+        '<div><b>Auth is: <span class="webui-badge ' + statusClass + '">' + statusText + '</span></b></div>' +
+        '<div style="color:#888;font-size:0.92em">Source: ' + escapeHtml(sourceLabel) + '</div>' +
+        logoutBtn +
+      '</div>' +
+      '<div style="padding:0 12px 12px 12px;color:#a0a0b0;font-size:0.9em;line-height:1.45">' +
+        'When auth is enabled, the panel requires a login cookie for every request and also proxies the noVNC browser view under <code>/novnc/*</code> — the same session cookie gates both. Direct <code>:6080</code> port access, if published in your compose, is <b>not</b> gated by this password. Close that port at your firewall or reverse proxy if you don\\'t want it exposed. See <a href="#" onclick="window.open(\'https://github.com/feldorn/free-games-claimer/blob/main/docs/PANEL.md#authentication\',\'_blank\');return false">docs/PANEL.md</a> for reverse-proxy examples.' +
+      '</div>' +
+    '</div>';
+
+  // If disabled, show the enable / set-password form only (no current
+  // password field needed).
+  if (!authState.active) {
+    return header +
+      '<div class="setting-group">' +
+        '<div class="setting-group-head">Enable authentication</div>' +
+        '<div style="padding:8px 12px 16px 12px;display:flex;flex-direction:column;gap:10px;max-width:520px">' +
+          '<label style="display:flex;flex-direction:column;gap:4px">New password' +
+            '<input type="password" id="webuiNextPw" autocomplete="new-password" style="padding:8px 10px;border-radius:6px;border:1px solid #0f3460;background:#1a1a2e;color:#e0e0e0" placeholder="At least 6 characters">' +
+          '</label>' +
+          '<label style="display:flex;flex-direction:column;gap:4px">Confirm new password' +
+            '<input type="password" id="webuiNextPw2" autocomplete="new-password" style="padding:8px 10px;border-radius:6px;border:1px solid #0f3460;background:#1a1a2e;color:#e0e0e0" placeholder="Type the same password again">' +
+          '</label>' +
+          '<div id="webuiPwError" style="color:#e94560;font-size:0.9em;min-height:18px"></div>' +
+          '<div style="display:flex;gap:10px;flex-wrap:wrap">' +
+            '<button class="btn btn-run" id="btnSetPassword" onclick="submitSetPassword()">Enable authentication</button>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+  }
+
+  // Auth is active — offer change-password + disable-auth flows. Change
+  // requires current + next; disable requires current only.
+  return header +
+    '<div class="setting-group">' +
+      '<div class="setting-group-head">Change password</div>' +
+      '<div style="padding:8px 12px 16px 12px;display:flex;flex-direction:column;gap:10px;max-width:520px">' +
+        '<label style="display:flex;flex-direction:column;gap:4px">Current password' +
+          '<input type="password" id="webuiCurPw" autocomplete="current-password" style="padding:8px 10px;border-radius:6px;border:1px solid #0f3460;background:#1a1a2e;color:#e0e0e0">' +
+        '</label>' +
+        '<label style="display:flex;flex-direction:column;gap:4px">New password' +
+          '<input type="password" id="webuiNextPw" autocomplete="new-password" style="padding:8px 10px;border-radius:6px;border:1px solid #0f3460;background:#1a1a2e;color:#e0e0e0" placeholder="At least 6 characters">' +
+        '</label>' +
+        '<label style="display:flex;flex-direction:column;gap:4px">Confirm new password' +
+          '<input type="password" id="webuiNextPw2" autocomplete="new-password" style="padding:8px 10px;border-radius:6px;border:1px solid #0f3460;background:#1a1a2e;color:#e0e0e0">' +
+        '</label>' +
+        '<div id="webuiPwError" style="color:#e94560;font-size:0.9em;min-height:18px"></div>' +
+        '<div style="color:#a0a0b0;font-size:0.85em">Changing the password logs out every session, including this one — you\\'ll be sent back to the login page.</div>' +
+        '<div style="display:flex;gap:10px;flex-wrap:wrap">' +
+          '<button class="btn btn-run" id="btnSetPassword" onclick="submitSetPassword()">Change password</button>' +
+        '</div>' +
+      '</div>' +
+    '</div>' +
+    '<div class="setting-group">' +
+      '<div class="setting-group-head">Disable authentication</div>' +
+      '<div style="padding:8px 12px 16px 12px;display:flex;flex-direction:column;gap:10px;max-width:520px">' +
+        '<div style="color:#e94560;font-size:0.9em">This exposes the panel and noVNC to anyone on the network. Only turn this off if you\\'re on a trusted LAN and the panel is not reachable from the internet.</div>' +
+        (authState.source === 'env'
+          ? '<div style="color:#a0a0b0;font-size:0.85em"><b>Note:</b> auth is currently active via the <code>PANEL_PASSWORD</code> env var. Disabling here only clears any Settings-tab password; the env plaintext will keep auth on until you unset that env var in your compose and restart the container.</div>'
+          : '<div style="color:#a0a0b0;font-size:0.85em">You will be logged out and returned to the panel without a login screen.</div>') +
+        '<label style="display:flex;flex-direction:column;gap:4px;max-width:520px">Current password (to confirm)' +
+          '<input type="password" id="webuiDisableCurPw" autocomplete="current-password" style="padding:8px 10px;border-radius:6px;border:1px solid #0f3460;background:#1a1a2e;color:#e0e0e0">' +
+        '</label>' +
+        '<div id="webuiDisableError" style="color:#e94560;font-size:0.9em;min-height:18px"></div>' +
+        '<div style="display:flex;gap:10px;flex-wrap:wrap">' +
+          '<button class="btn btn-cancel" id="btnDisableAuth" onclick="confirmDisableAuth()">Disable authentication</button>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+}
+
+async function submitSetPassword() {
+  var authState = (settingsData && settingsData.authState) || { active: false };
+  var curEl = document.getElementById('webuiCurPw');
+  var pw1El = document.getElementById('webuiNextPw');
+  var pw2El = document.getElementById('webuiNextPw2');
+  var errEl = document.getElementById('webuiPwError');
+  var btn   = document.getElementById('btnSetPassword');
+  errEl.textContent = '';
+  var current = curEl ? curEl.value : '';
+  var next    = pw1El ? pw1El.value : '';
+  var next2   = pw2El ? pw2El.value : '';
+  if (next.length < 6) { errEl.textContent = 'New password must be at least 6 characters.'; return; }
+  if (next !== next2)  { errEl.textContent = 'Passwords do not match.'; return; }
+  if (authState.active && !current) { errEl.textContent = 'Enter your current password to change it.'; return; }
+  btn.disabled = true;
+  try {
+    var r = await fetch(BASE_PATH + '/api/auth/set-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ current: current, next: next }),
+    });
+    var j = await r.json().catch(function(){ return {}; });
+    if (!r.ok || !j.success) {
+      errEl.textContent = j.error || ('Request failed (' + r.status + ').');
+      btn.disabled = false;
+      return;
+    }
+    // Success — every session was invalidated including ours. The next
+    // request will 401 and the browser will land on the login page.
+    // Reload rather than wait for the next click.
+    location.href = BASE_PATH + '/';
+  } catch (e) {
+    errEl.textContent = 'Network error.';
+    btn.disabled = false;
+  }
+}
+
+// Custom confirm modal (no native confirm() per landmine
+// feedback_no_native_confirm — auto-cancels under pop-up blockers /
+// iframe / kiosk). Renders inline, focuses the OK button, wires Escape.
+function confirmDisableAuth() {
+  var errEl = document.getElementById('webuiDisableError');
+  errEl.textContent = '';
+  var curEl = document.getElementById('webuiDisableCurPw');
+  if (!curEl || !curEl.value) { errEl.textContent = 'Enter your current password first.'; return; }
+  // Reuse the disable-modal pattern from the disable-auth flow.
+  var backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop';
+  backdrop.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9999;display:flex;align-items:center;justify-content:center';
+  var box = document.createElement('div');
+  box.style.cssText = 'background:#16213e;border:1px solid #0f3460;border-radius:12px;padding:24px;max-width:460px;color:#e0e0e0;font-size:14px';
+  box.innerHTML =
+    '<h3 style="margin:0 0 12px 0;color:#e94560;font-size:18px">Disable Web UI authentication?</h3>' +
+    '<p style="margin:0 0 16px 0;line-height:1.5">This removes the login requirement for the panel and noVNC. Anyone on the network will be able to reach the panel, view your live gaming-account sessions in noVNC, and trigger claim runs.</p>' +
+    '<p style="margin:0 0 16px 0;line-height:1.5">Continue?</p>' +
+    '<div style="display:flex;gap:10px;justify-content:flex-end">' +
+      '<button class="btn btn-cancel" id="_modalCancel">Keep enabled</button>' +
+      '<button class="btn btn-run" id="_modalOk" style="background:#e94560">Disable auth</button>' +
+    '</div>';
+  backdrop.appendChild(box);
+  document.body.appendChild(backdrop);
+  function cleanup() { try { document.body.removeChild(backdrop); } catch(e){} document.removeEventListener('keydown', escHandler); }
+  function escHandler(e) { if (e.key === 'Escape') { cleanup(); } }
+  document.addEventListener('keydown', escHandler);
+  document.getElementById('_modalCancel').onclick = cleanup;
+  document.getElementById('_modalOk').onclick = async function() {
+    cleanup();
+    await submitDisableAuth();
+  };
+  setTimeout(function(){ var b = document.getElementById('_modalCancel'); if (b) b.focus(); }, 0);
+}
+
+async function submitDisableAuth() {
+  var curEl = document.getElementById('webuiDisableCurPw');
+  var errEl = document.getElementById('webuiDisableError');
+  var btn   = document.getElementById('btnDisableAuth');
+  errEl.textContent = '';
+  var current = curEl ? curEl.value : '';
+  btn.disabled = true;
+  try {
+    var r = await fetch(BASE_PATH + '/api/auth/disable-auth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ current: current }),
+    });
+    var j = await r.json().catch(function(){ return {}; });
+    if (!r.ok || !j.success) {
+      errEl.textContent = j.error || ('Request failed (' + r.status + ').');
+      btn.disabled = false;
+      return;
+    }
+    if (j.envStillActive) {
+      // env is still forcing auth on — the user needs to know they still
+      // have to unset PANEL_PASSWORD in compose. Reload the panel; they
+      // will be sent back to the login screen.
+      alert('Config-layer password cleared, but auth is still active via the PANEL_PASSWORD env var. Unset it in your compose and restart the container to fully disable auth. You will now be logged out.');
+      location.href = BASE_PATH + '/';
+    } else {
+      // Fully disabled. Everyone was logged out; land back on the panel
+      // (no login screen this time).
+      location.href = BASE_PATH + '/';
+    }
+  } catch (e) {
+    errEl.textContent = 'Network error.';
+    btn.disabled = false;
+  }
+}
+
+// Convenience client-side logout — invalidates the token server-side then
+// bounces the tab back to the login page.
+async function panelLogout() {
+  try { await fetch(BASE_PATH + '/api/logout', { method: 'POST' }); } catch(e) {}
+  location.href = BASE_PATH + '/';
+}
+
 // Inline "Error reporting" group inside Notifications. The toggle isn't a
 // cfg field — it lives in diagnostics-state.json and is driven by the same
 // /enable + /disable endpoints the Never Share banner button uses. Keeps
@@ -6325,6 +6770,8 @@ function paintSettings() {
       '<div class="svc-list">' +
         svcInner +
       '</div>';
+  } else if (currentSettingsSection === 'webui') {
+    html = renderWebUiAuthSection();
   } else if (currentSettingsSection === 'advanced') {
     // Order reflects what someone opening Advanced is usually there for:
     // first timeouts (most common debug tweak), then dry-run / recording,
@@ -8086,9 +8533,14 @@ function buildNovncUrl() {
   if (NOVNC_URL) {
     return NOVNC_URL.replace(/\\/+$/, '') + '/vnc.html?autoconnect=true&resize=scale';
   }
-  if (BASE_PATH) {
-    const wsPath = BASE_PATH.replace(/^\\//, '') + '/novnc/websockify';
-    return BASE_PATH + '/novnc/vnc.html?autoconnect=true&resize=scale&path=' + encodeURIComponent(wsPath);
+  // v2.11.12: when Web-UI auth is active, always route through the panel's
+  // same-origin /novnc/* proxy so the session cookie gates both HTTP and
+  // the WebSocket upgrade. Same code path as BASE_PATH — the two just
+  // happen to compose (BASE_PATH may be '' or '/foo').
+  if (AUTH_ENABLED || BASE_PATH) {
+    const prefix = BASE_PATH || '';
+    const wsPath = (prefix ? prefix.replace(/^\\//, '') + '/' : '') + 'novnc/websockify';
+    return prefix + '/novnc/vnc.html?autoconnect=true&resize=scale&path=' + encodeURIComponent(wsPath);
   }
   return location.protocol + '//' + location.hostname + ':' + NOVNC_PORT + '/vnc.html?autoconnect=true&resize=scale';
 }
@@ -8246,6 +8698,9 @@ async function refreshState() {
     // (Sessions tab batch-redeem badge, etc.) don't need to change.
     if (typeof state.pendingGogCount === 'number') pendingGogCount = state.pendingGogCount;
     if (typeof state.pendingSteamCount === 'number') pendingSteamCount = state.pendingSteamCount;
+    // v2.11.12: hydrate AUTH_ENABLED from state so buildNovncUrl() picks
+    // the same-origin /novnc/* path when the panel is auth-gated.
+    if (state && state.authState) AUTH_ENABLED = !!state.authState.active;
     render();
     if (typeof updateBatchPolling === 'function') updateBatchPolling();
     applyUrlFocus();
@@ -8759,6 +9214,109 @@ if (document.visibilityState !== 'hidden') startPolling();
 </body>
 </html>`;
 
+// ─── noVNC HTTP + WebSocket proxy (v2.11.12, D#145) ────────────────────
+// When Web-UI auth is active, the panel exposes noVNC under its own
+// same-origin `/novnc/*` prefix so a single session cookie gates BOTH the
+// static UI assets (HTTP) AND the raw VNC framebuffer (WebSocket upgrade
+// at /novnc/websockify). Users can then close the direct :6080 publish in
+// their compose and keep the noVNC viewer available through their
+// authenticated reverse-proxy front-end.
+//
+// Implementation: bare http.request() (no external proxy lib) for the
+// HTTP hops, then piggy-back on http.request's 'upgrade' event for the
+// WebSocket handshake — that is what Node's server.on('upgrade') listener
+// receives from the client, and websockify accepts a standard RFC-6455
+// Upgrade. Hop-by-hop headers are filtered per RFC 7230 §6.1.
+
+// Hop-by-hop header names that MUST NOT be forwarded by a proxy per
+// RFC 7230. `Trailer` is also included since we don't stream trailers.
+const HOP_BY_HOP_HEADERS = new Set([
+  'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization',
+  'te', 'trailer', 'transfer-encoding', 'upgrade',
+]);
+function filterHopByHop(src) {
+  const out = {};
+  for (const [k, v] of Object.entries(src || {})) {
+    if (!HOP_BY_HOP_HEADERS.has(k.toLowerCase())) out[k] = v;
+  }
+  return out;
+}
+
+// Proxy an HTTP request to noVNC (websockify with --web /usr/share/novnc).
+// Only GET / HEAD accepted — everything else 405. Auth check happens at
+// the call site (before this is invoked).
+function proxyNovncHttp(req, res, upstreamPath) {
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    res.writeHead(405, { 'Content-Type': 'application/json', 'Allow': 'GET, HEAD' });
+    res.end(JSON.stringify({ error: 'method not allowed' }));
+    return;
+  }
+  const upstreamReq = http.request({
+    host: 'localhost',
+    port: NOVNC_PORT,
+    method: req.method,
+    path: upstreamPath,
+    headers: {
+      ...filterHopByHop(req.headers),
+      host: `localhost:${NOVNC_PORT}`,
+    },
+  }, (upstreamRes) => {
+    res.writeHead(upstreamRes.statusCode || 502, filterHopByHop(upstreamRes.headers));
+    upstreamRes.pipe(res);
+  });
+  upstreamReq.on('error', (err) => {
+    if (!res.headersSent) {
+      res.writeHead(502, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'noVNC upstream unavailable', detail: err.message }));
+    } else {
+      try { res.end(); } catch {}
+    }
+  });
+  req.on('close', () => { try { upstreamReq.destroy(); } catch {} });
+  upstreamReq.end();
+}
+
+// Proxy a WebSocket upgrade to noVNC. Called from the server 'upgrade'
+// handler. Auth check is the caller's job. Uses net.connect + writes the
+// raw HTTP Upgrade line so the response Sec-WebSocket-Accept comes back
+// verbatim from websockify (no framing/parsing on our side — we are a
+// pipe).
+function proxyNovncWs(req, clientSocket, head, upstreamPath) {
+  const upstream = net.connect({ host: 'localhost', port: NOVNC_PORT }, () => {
+    // Build the upgrade request line + headers. Preserve every
+    // Sec-WebSocket-* header the client sent so websockify can complete
+    // the RFC-6455 handshake.
+    const outHeaders = { ...filterHopByHop(req.headers) };
+    // Re-add the two hop-by-hop headers we actually DO need to convey.
+    outHeaders['connection'] = req.headers['connection'] || 'Upgrade';
+    outHeaders['upgrade']    = req.headers['upgrade']    || 'websocket';
+    outHeaders['host']       = `localhost:${NOVNC_PORT}`;
+    const lines = [`GET ${upstreamPath} HTTP/1.1`];
+    for (const [k, v] of Object.entries(outHeaders)) {
+      lines.push(`${k}: ${Array.isArray(v) ? v.join(', ') : v}`);
+    }
+    lines.push('', '');
+    upstream.write(lines.join('\r\n'));
+    if (head && head.length) upstream.write(head);
+  });
+  // Once websockify sends 101 Switching Protocols the two sockets become
+  // a raw TCP pipe. We don't need to see the 101 line ourselves — the
+  // upstream socket writes it directly through to the client.
+  clientSocket.on('error', () => { try { upstream.destroy(); } catch {} });
+  upstream.on('error', () => {
+    try {
+      // 502 on upstream connect fail — must be raw HTTP since we haven't
+      // handed the socket off to a wrapper yet.
+      clientSocket.write('HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');
+      clientSocket.destroy();
+    } catch {}
+  });
+  clientSocket.on('close', () => { try { upstream.destroy(); } catch {} });
+  upstream.on('close',      () => { try { clientSocket.destroy(); } catch {} });
+  upstream.pipe(clientSocket);
+  clientSocket.pipe(upstream);
+}
+
 const server = http.createServer(async (req, res) => {
   try {
     // Strip BASE_PATH prefix if present so existing route matchers keep working for both
@@ -8886,14 +9444,79 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'POST' && req.url === '/api/auth') {
-      const { password } = await parseBody(req);
-      if (password === PANEL_PASSWORD) {
-        const token = generateToken();
-        res.writeHead(200, { 'Content-Type': 'application/json', 'Set-Cookie': `fgc_token=${token}; Path=/; HttpOnly; SameSite=Strict` });
-        res.end(JSON.stringify({ success: true }));
-      } else {
-        sendJson(res, { success: false }, 401);
+      const ip = clientIp(req);
+      const lockRemain = authLockoutRemainingMs(ip);
+      if (lockRemain > 0) {
+        const mins = Math.ceil(lockRemain / 60000);
+        sendJson(res, { success: false, error: `Too many failed attempts — try again in ${mins} min.` }, 429);
+        return;
       }
+      let submitted = '';
+      try {
+        const body = await parseBody(req);
+        submitted = String(body?.password ?? '');
+      } catch (e) {
+        sendJson(res, { success: false, error: 'Invalid request.' }, e?.statusCode || 400);
+        return;
+      }
+      const hash = activeHash();
+      if (!hash) {
+        // Auth disabled entirely — no reason to accept /api/auth. Signal it
+        // was rejected without pretending to be a rate-limit issue.
+        sendJson(res, { success: false, error: 'Web-UI authentication is disabled.' }, 400);
+        return;
+      }
+      let ok = false;
+      try { ok = await bcrypt.compare(submitted, hash); } catch { ok = false; }
+      if (!ok) {
+        recordAuthFail(ip);
+        sendJson(res, { success: false }, 401);
+        return;
+      }
+      recordAuthSuccess(ip);
+      const token = generateToken();
+      res.writeHead(200, {
+        'Content-Type': 'application/json',
+        'X-Content-Type-Options': 'nosniff',
+        'Set-Cookie': sessionCookie(token, req),
+      });
+      res.end(JSON.stringify({ success: true }));
+      return;
+    }
+
+    // Logout invalidates the current token server-side and clears the
+    // browser cookie. Public route — an already-expired token still lets
+    // the client clear its own cookie without a 401 round-trip.
+    if (req.method === 'POST' && req.url === '/api/logout') {
+      const token = extractToken(req);
+      if (token) invalidateToken(token);
+      res.writeHead(200, {
+        'Content-Type': 'application/json',
+        'X-Content-Type-Options': 'nosniff',
+        'Set-Cookie': sessionCookie('', req, { clear: true }),
+      });
+      res.end(JSON.stringify({ success: true }));
+      return;
+    }
+
+    // v2.11.12: noVNC HTTP proxy. When Web-UI auth is active this is the
+    // ONLY way the noVNC UI + assets are reachable (direct :6080 is
+    // outside the panel's control, but this proxy gives users a
+    // same-origin path that shares the session cookie). Auth-checked
+    // explicitly — we don't fall through to the login-page redirect
+    // because iframes loading assets shouldn't get HTML; JSON 401 is
+    // more diagnosable in devtools.
+    if (req.url && req.url.startsWith('/novnc/')) {
+      if (!isAuthenticated(req)) {
+        sendJson(res, { error: 'Unauthorized' }, 401);
+        return;
+      }
+      // Strip the /novnc prefix — noVNC's static assets are served from
+      // websockify's --web /usr/share/novnc/ at the root. Strip only the
+      // leading /novnc so /novnc/vnc.html → /vnc.html, /novnc/websockify
+      // handled separately by the WS 'upgrade' listener.
+      const upstreamPath = req.url.slice('/novnc'.length) || '/';
+      proxyNovncHttp(req, res, upstreamPath);
       return;
     }
 
@@ -8906,7 +9529,15 @@ const server = http.createServer(async (req, res) => {
     const reqPath = req.url ? req.url.split('?')[0] : '';
     if (!isAuthenticated(req)) {
       if (req.method === 'GET' && (reqPath === '/' || reqPath === '/index.html')) {
-        res.writeHead(200, { 'Content-Type': 'text/html', 'Cache-Control': 'no-store' });
+        // Login page always refuses iframe embedding — clickjacking a
+        // login form is credential capture, and there is no legitimate
+        // reason to iframe the login screen.
+        res.writeHead(200, {
+          'Content-Type': 'text/html',
+          'Cache-Control': 'no-store',
+          'X-Frame-Options': 'DENY',
+          'X-Content-Type-Options': 'nosniff',
+        });
         res.end(LOGIN_HTML);
         return;
       }
@@ -8914,8 +9545,27 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    // Sliding session renewal — re-issue Set-Cookie only when lastUsed has
+    // drifted more than SESSION_SLIDE_MS. Avoids Set-Cookie on every hit.
+    if (authIsActive()) {
+      const token = extractToken(req);
+      if (token && touchToken(token)) {
+        res.setHeader('Set-Cookie', sessionCookie(token, req));
+      }
+    }
+
     if (req.method === 'GET' && (reqPath === '/' || reqPath === '/index.html')) {
-      res.writeHead(200, { 'Content-Type': 'text/html', 'Cache-Control': 'no-store' });
+      // v2.11.12: SAMEORIGIN (not DENY) so users embedding the panel in a
+      // same-origin dashboard iframe (SWAG subfolder / Organizr /
+      // Homepage / Heimdall) still work. Third-party origins can't
+      // iframe the panel — that's the clickjacking gate we care about.
+      // The panel's own noVNC iframe is same-origin so it's unaffected.
+      res.writeHead(200, {
+        'Content-Type': 'text/html',
+        'Cache-Control': 'no-store',
+        'X-Frame-Options': 'SAMEORIGIN',
+        'X-Content-Type-Options': 'nosniff',
+      });
       res.end(PANEL_HTML);
       return;
     }
@@ -9095,7 +9745,94 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'GET' && req.url === '/api/config') {
-      sendJson(res, describeConfig());
+      // Enrich with runtime authState so the Settings tab knows the active
+      // source (config-hash / env-plaintext / none) even when both are set.
+      // describeConfig alone can't tell env from none since PANEL_PASSWORD
+      // lives outside the schema.
+      sendJson(res, { ...describeConfig(), authState: { active: authIsActive(), source: authSource() } });
+      return;
+    }
+
+    // ─── Web-UI auth management (v2.11.12) ────────────────────────────
+    // Set (or change) the panel password. Requires an authenticated
+    // session; if auth is currently active, ALSO requires the current
+    // password. Writes bcrypt hash + panel.authEnabled=true to
+    // data/config.json in one atomic file rewrite. Invalidates every
+    // existing session (including the caller's) — the caller re-logs
+    // with the new password on the next request.
+    if (req.method === 'POST' && req.url === '/api/auth/set-password') {
+      let body;
+      try { body = await parseBody(req); }
+      catch (e) { sendJson(res, { error: e.message || 'invalid request' }, e?.statusCode || 400); return; }
+      const current = String(body?.current ?? '');
+      const next    = String(body?.next ?? '');
+      if (next.length < 6) { sendJson(res, { error: 'Password must be at least 6 characters.' }, 400); return; }
+      if (next.length > 200) { sendJson(res, { error: 'Password must be at most 200 characters.' }, 400); return; }
+      const wasActive = authIsActive();
+      if (wasActive) {
+        const hash = activeHash();
+        let ok = false;
+        try { ok = await bcrypt.compare(current, hash); } catch { ok = false; }
+        if (!ok) {
+          // Reuse the login rate-limit map — repeated bad current-passwords
+          // from the set-password path count against the same IP quota.
+          recordAuthFail(clientIp(req));
+          sendJson(res, { error: 'Current password is incorrect.' }, 401);
+          return;
+        }
+      }
+      let newHash;
+      try { newHash = await bcrypt.hash(next, 10); }
+      catch (e) { sendJson(res, { error: 'Failed to hash password: ' + e.message }, 500); return; }
+      try {
+        const app = readConfigFile();
+        cfgSetByPath(app, 'panel.passwordHash', newHash);
+        cfgSetByPath(app, 'panel.authEnabled', true);
+        writeConfigFile(app);
+      } catch (e) { sendJson(res, { error: 'Failed to persist password: ' + e.message }, 500); return; }
+      // Invalidate every session (including the caller's — they get a
+      // fresh cookie via /api/auth on their next login). Belt-and-braces
+      // for the "change password from a shared machine" scenario.
+      invalidateAllSessions();
+      recordAuthSuccess(clientIp(req));
+      sendJson(res, { success: true, active: authIsActive(), source: authSource() });
+      return;
+    }
+
+    // Turn Web-UI auth off. Requires the current password. Clears both
+    // panel.passwordHash and panel.authEnabled. If PANEL_PASSWORD env is
+    // still set, auth stays on via that path — the response reports
+    // authState.active in that case so the UI can flag it.
+    if (req.method === 'POST' && req.url === '/api/auth/disable-auth') {
+      let body;
+      try { body = await parseBody(req); }
+      catch (e) { sendJson(res, { error: e.message || 'invalid request' }, e?.statusCode || 400); return; }
+      const current = String(body?.current ?? '');
+      if (!authIsActive()) { sendJson(res, { error: 'Auth is already disabled.' }, 400); return; }
+      const hash = activeHash();
+      let ok = false;
+      try { ok = await bcrypt.compare(current, hash); } catch { ok = false; }
+      if (!ok) {
+        recordAuthFail(clientIp(req));
+        sendJson(res, { error: 'Current password is incorrect.' }, 401);
+        return;
+      }
+      try {
+        const app = readConfigFile();
+        cfgDeleteByPath(app, 'panel.passwordHash');
+        cfgDeleteByPath(app, 'panel.authEnabled');
+        writeConfigFile(app);
+      } catch (e) { sendJson(res, { error: 'Failed to update config: ' + e.message }, 500); return; }
+      invalidateAllSessions();
+      recordAuthSuccess(clientIp(req));
+      sendJson(res, {
+        success: true,
+        active: authIsActive(),
+        source: authSource(),
+        // Flag the "config-cleared but env-still-active" case so the UI can
+        // tell the user why the panel still shows a login screen.
+        envStillActive: authSource() === 'env',
+      });
       return;
     }
     if (req.method === 'GET' && req.url.startsWith('/api/env')) {
@@ -10214,6 +10951,43 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
+// v2.11.12: WebSocket upgrade handler for noVNC's /novnc/websockify path.
+// The panel HTTP server never handled any Upgrade requests before this.
+// We accept ONLY /novnc/websockify (with or without BASE_PATH prefix);
+// anything else gets a bare 404 line and the socket destroyed. Auth is
+// checked against the same session cookie flow the HTTP requests use,
+// then proxyNovncWs pipes the client socket to websockify.
+server.on('upgrade', (req, socket, head) => {
+  try {
+    // Strip BASE_PATH the same way the HTTP handler does so the branch
+    // conditions below are identical between direct and proxied deploys.
+    let url = req.url || '/';
+    if (BASE_PATH && (url === BASE_PATH || url.startsWith(BASE_PATH + '/') || url.startsWith(BASE_PATH + '?'))) {
+      url = url.slice(BASE_PATH.length) || '/';
+    }
+    const path = url.split('?')[0];
+    if (path !== '/novnc/websockify') {
+      socket.write('HTTP/1.1 404 Not Found\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+    if (!isAuthenticated(req)) {
+      socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+    // Renew the session's lastUsed on WS handshake — the WS connection
+    // stays open for a long time and a user with an active noVNC session
+    // shouldn't have their session expire underneath them.
+    const token = extractToken(req);
+    if (token) touchToken(token);
+    proxyNovncWs(req, socket, head, '/websockify');
+  } catch (e) {
+    console.error(`[${datetime()}] upgrade handler error:`, e);
+    try { socket.destroy(); } catch {}
+  }
+});
+
 async function gracefulShutdown(sig) {
   console.log(`[${datetime()}] Received ${sig}, shutting down...`);
   if (runProcess) {
@@ -10281,6 +11055,12 @@ server.listen(PANEL_PORT, async () => {
   catch (e) { console.error(`[${datetime()}] failed to load diagnostics-state.json: ${e.message}`); }
 
   console.log(`[${datetime()}] Free Games Claimer ${APP_VERSION ? 'v' + APP_VERSION + ' ' : ''}— panel + scheduler`);
+  // Auth-mode banner (v2.11.12) — makes it obvious at boot which path is
+  // active. env plaintext is hashed at boot; config hash overrides.
+  const _authSrc = authSource();
+  if (_authSrc === 'config')      console.log(`[${datetime()}] Web-UI auth: enabled via config (data/config.json panel.passwordHash).`);
+  else if (_authSrc === 'env')    console.log(`[${datetime()}] Web-UI auth: enabled via PANEL_PASSWORD env (config-hash overrides if set later).`);
+  else                            console.log(`[${datetime()}] Web-UI auth: disabled — panel and noVNC exposed on LAN.`);
 
   // Stale Chromium profile-lock sweep. Container restarts get a fresh
   // hostname assigned by Docker; any persistent profile dir written by
@@ -10312,7 +11092,9 @@ server.listen(PANEL_PORT, async () => {
   console.log(`[${datetime()}] Control panel: http://localhost:${PANEL_PORT}${BASE_PATH}`);
   if (cfg.public_url) console.log(`[${datetime()}] Public URL:    ${PUBLIC_URL}`);
   console.log(`[${datetime()}] noVNC viewer:  ${NOVNC_URL || `http://localhost:${NOVNC_PORT}${BASE_PATH ? ` (proxied at ${BASE_PATH}/novnc/)` : ''}`}`);
-  console.log(`[${datetime()}] Password protection: ${PANEL_PASSWORD ? 'ENABLED' : 'DISABLED (set PANEL_PASSWORD or VNC_PASSWORD to enable)'}`);
+  // v2.11.12: legacy plaintext-env line replaced by the earlier Web-UI
+  // auth-mode banner right after the version line — keeps a single
+  // source of truth for auth state. This line intentionally removed.
   const startTime = cfg.daily_start_time;
   const legacyMode = !startTime && !LOOP_SECONDS && MS_SCHEDULE_HOURS > 0;
   if (legacyMode) {
