@@ -1,4 +1,5 @@
 import http from 'node:http';
+import net from 'node:net';
 import { spawn, execFile } from 'node:child_process';
 import { watch, readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
@@ -3050,6 +3051,11 @@ async function getState() {
   const msState = msScheduled ? (msTodayState || readMsScheduleToday()) : null;
 
   return {
+    // v2.11.12: Web-UI auth state — the client refreshes AUTH_ENABLED
+    // from this on every /api/state poll so buildNovncUrl() routes through
+    // /novnc/* when auth is active. envStillActive helps the Settings UI
+    // explain the "cleared config but env keeps it on" case.
+    authState: { active: authIsActive(), source: authSource() },
     sites: Object.entries(SITES).map(([id, site]) => ({
       id,
       name: site.name,
@@ -4629,6 +4635,12 @@ const PANEL_HTML = `<!DOCTYPE html>
 const NOVNC_PORT = ${NOVNC_PORT};
 const NOVNC_URL = '${NOVNC_URL}';
 const BASE_PATH = '${BASE_PATH}';
+// v2.11.12: whether the panel is running with Web-UI auth active. Drives
+// buildNovncUrl() to route through the same-origin /novnc/* proxy so the
+// session cookie gates both HTTP and the WebSocket upgrade. Refreshed on
+// every /api/state fetch (see refreshState) — buildNovncUrl is called
+// from user-initiated buttons well after the first state fetch resolves.
+let AUTH_ENABLED = false;
 let state = { sites: [], activeBrowser: null, allLoggedIn: false, runStatus: 'idle' };
 let busy = false;
 let showingLog = false;
@@ -8521,9 +8533,14 @@ function buildNovncUrl() {
   if (NOVNC_URL) {
     return NOVNC_URL.replace(/\\/+$/, '') + '/vnc.html?autoconnect=true&resize=scale';
   }
-  if (BASE_PATH) {
-    const wsPath = BASE_PATH.replace(/^\\//, '') + '/novnc/websockify';
-    return BASE_PATH + '/novnc/vnc.html?autoconnect=true&resize=scale&path=' + encodeURIComponent(wsPath);
+  // v2.11.12: when Web-UI auth is active, always route through the panel's
+  // same-origin /novnc/* proxy so the session cookie gates both HTTP and
+  // the WebSocket upgrade. Same code path as BASE_PATH — the two just
+  // happen to compose (BASE_PATH may be '' or '/foo').
+  if (AUTH_ENABLED || BASE_PATH) {
+    const prefix = BASE_PATH || '';
+    const wsPath = (prefix ? prefix.replace(/^\\//, '') + '/' : '') + 'novnc/websockify';
+    return prefix + '/novnc/vnc.html?autoconnect=true&resize=scale&path=' + encodeURIComponent(wsPath);
   }
   return location.protocol + '//' + location.hostname + ':' + NOVNC_PORT + '/vnc.html?autoconnect=true&resize=scale';
 }
@@ -8681,6 +8698,9 @@ async function refreshState() {
     // (Sessions tab batch-redeem badge, etc.) don't need to change.
     if (typeof state.pendingGogCount === 'number') pendingGogCount = state.pendingGogCount;
     if (typeof state.pendingSteamCount === 'number') pendingSteamCount = state.pendingSteamCount;
+    // v2.11.12: hydrate AUTH_ENABLED from state so buildNovncUrl() picks
+    // the same-origin /novnc/* path when the panel is auth-gated.
+    if (state && state.authState) AUTH_ENABLED = !!state.authState.active;
     render();
     if (typeof updateBatchPolling === 'function') updateBatchPolling();
     applyUrlFocus();
@@ -9194,6 +9214,109 @@ if (document.visibilityState !== 'hidden') startPolling();
 </body>
 </html>`;
 
+// ─── noVNC HTTP + WebSocket proxy (v2.11.12, D#145) ────────────────────
+// When Web-UI auth is active, the panel exposes noVNC under its own
+// same-origin `/novnc/*` prefix so a single session cookie gates BOTH the
+// static UI assets (HTTP) AND the raw VNC framebuffer (WebSocket upgrade
+// at /novnc/websockify). Users can then close the direct :6080 publish in
+// their compose and keep the noVNC viewer available through their
+// authenticated reverse-proxy front-end.
+//
+// Implementation: bare http.request() (no external proxy lib) for the
+// HTTP hops, then piggy-back on http.request's 'upgrade' event for the
+// WebSocket handshake — that is what Node's server.on('upgrade') listener
+// receives from the client, and websockify accepts a standard RFC-6455
+// Upgrade. Hop-by-hop headers are filtered per RFC 7230 §6.1.
+
+// Hop-by-hop header names that MUST NOT be forwarded by a proxy per
+// RFC 7230. `Trailer` is also included since we don't stream trailers.
+const HOP_BY_HOP_HEADERS = new Set([
+  'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization',
+  'te', 'trailer', 'transfer-encoding', 'upgrade',
+]);
+function filterHopByHop(src) {
+  const out = {};
+  for (const [k, v] of Object.entries(src || {})) {
+    if (!HOP_BY_HOP_HEADERS.has(k.toLowerCase())) out[k] = v;
+  }
+  return out;
+}
+
+// Proxy an HTTP request to noVNC (websockify with --web /usr/share/novnc).
+// Only GET / HEAD accepted — everything else 405. Auth check happens at
+// the call site (before this is invoked).
+function proxyNovncHttp(req, res, upstreamPath) {
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    res.writeHead(405, { 'Content-Type': 'application/json', 'Allow': 'GET, HEAD' });
+    res.end(JSON.stringify({ error: 'method not allowed' }));
+    return;
+  }
+  const upstreamReq = http.request({
+    host: 'localhost',
+    port: NOVNC_PORT,
+    method: req.method,
+    path: upstreamPath,
+    headers: {
+      ...filterHopByHop(req.headers),
+      host: `localhost:${NOVNC_PORT}`,
+    },
+  }, (upstreamRes) => {
+    res.writeHead(upstreamRes.statusCode || 502, filterHopByHop(upstreamRes.headers));
+    upstreamRes.pipe(res);
+  });
+  upstreamReq.on('error', (err) => {
+    if (!res.headersSent) {
+      res.writeHead(502, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'noVNC upstream unavailable', detail: err.message }));
+    } else {
+      try { res.end(); } catch {}
+    }
+  });
+  req.on('close', () => { try { upstreamReq.destroy(); } catch {} });
+  upstreamReq.end();
+}
+
+// Proxy a WebSocket upgrade to noVNC. Called from the server 'upgrade'
+// handler. Auth check is the caller's job. Uses net.connect + writes the
+// raw HTTP Upgrade line so the response Sec-WebSocket-Accept comes back
+// verbatim from websockify (no framing/parsing on our side — we are a
+// pipe).
+function proxyNovncWs(req, clientSocket, head, upstreamPath) {
+  const upstream = net.connect({ host: 'localhost', port: NOVNC_PORT }, () => {
+    // Build the upgrade request line + headers. Preserve every
+    // Sec-WebSocket-* header the client sent so websockify can complete
+    // the RFC-6455 handshake.
+    const outHeaders = { ...filterHopByHop(req.headers) };
+    // Re-add the two hop-by-hop headers we actually DO need to convey.
+    outHeaders['connection'] = req.headers['connection'] || 'Upgrade';
+    outHeaders['upgrade']    = req.headers['upgrade']    || 'websocket';
+    outHeaders['host']       = `localhost:${NOVNC_PORT}`;
+    const lines = [`GET ${upstreamPath} HTTP/1.1`];
+    for (const [k, v] of Object.entries(outHeaders)) {
+      lines.push(`${k}: ${Array.isArray(v) ? v.join(', ') : v}`);
+    }
+    lines.push('', '');
+    upstream.write(lines.join('\r\n'));
+    if (head && head.length) upstream.write(head);
+  });
+  // Once websockify sends 101 Switching Protocols the two sockets become
+  // a raw TCP pipe. We don't need to see the 101 line ourselves — the
+  // upstream socket writes it directly through to the client.
+  clientSocket.on('error', () => { try { upstream.destroy(); } catch {} });
+  upstream.on('error', () => {
+    try {
+      // 502 on upstream connect fail — must be raw HTTP since we haven't
+      // handed the socket off to a wrapper yet.
+      clientSocket.write('HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');
+      clientSocket.destroy();
+    } catch {}
+  });
+  clientSocket.on('close', () => { try { upstream.destroy(); } catch {} });
+  upstream.on('close',      () => { try { clientSocket.destroy(); } catch {} });
+  upstream.pipe(clientSocket);
+  clientSocket.pipe(upstream);
+}
+
 const server = http.createServer(async (req, res) => {
   try {
     // Strip BASE_PATH prefix if present so existing route matchers keep working for both
@@ -9373,6 +9496,27 @@ const server = http.createServer(async (req, res) => {
         'Set-Cookie': sessionCookie('', req, { clear: true }),
       });
       res.end(JSON.stringify({ success: true }));
+      return;
+    }
+
+    // v2.11.12: noVNC HTTP proxy. When Web-UI auth is active this is the
+    // ONLY way the noVNC UI + assets are reachable (direct :6080 is
+    // outside the panel's control, but this proxy gives users a
+    // same-origin path that shares the session cookie). Auth-checked
+    // explicitly — we don't fall through to the login-page redirect
+    // because iframes loading assets shouldn't get HTML; JSON 401 is
+    // more diagnosable in devtools.
+    if (req.url && req.url.startsWith('/novnc/')) {
+      if (!isAuthenticated(req)) {
+        sendJson(res, { error: 'Unauthorized' }, 401);
+        return;
+      }
+      // Strip the /novnc prefix — noVNC's static assets are served from
+      // websockify's --web /usr/share/novnc/ at the root. Strip only the
+      // leading /novnc so /novnc/vnc.html → /vnc.html, /novnc/websockify
+      // handled separately by the WS 'upgrade' listener.
+      const upstreamPath = req.url.slice('/novnc'.length) || '/';
+      proxyNovncHttp(req, res, upstreamPath);
       return;
     }
 
@@ -10796,6 +10940,43 @@ const server = http.createServer(async (req, res) => {
   } catch (e) {
     console.error(`[${datetime()}] Server error:`, e);
     sendJson(res, { error: e.message }, 500);
+  }
+});
+
+// v2.11.12: WebSocket upgrade handler for noVNC's /novnc/websockify path.
+// The panel HTTP server never handled any Upgrade requests before this.
+// We accept ONLY /novnc/websockify (with or without BASE_PATH prefix);
+// anything else gets a bare 404 line and the socket destroyed. Auth is
+// checked against the same session cookie flow the HTTP requests use,
+// then proxyNovncWs pipes the client socket to websockify.
+server.on('upgrade', (req, socket, head) => {
+  try {
+    // Strip BASE_PATH the same way the HTTP handler does so the branch
+    // conditions below are identical between direct and proxied deploys.
+    let url = req.url || '/';
+    if (BASE_PATH && (url === BASE_PATH || url.startsWith(BASE_PATH + '/') || url.startsWith(BASE_PATH + '?'))) {
+      url = url.slice(BASE_PATH.length) || '/';
+    }
+    const path = url.split('?')[0];
+    if (path !== '/novnc/websockify') {
+      socket.write('HTTP/1.1 404 Not Found\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+    if (!isAuthenticated(req)) {
+      socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+    // Renew the session's lastUsed on WS handshake — the WS connection
+    // stays open for a long time and a user with an active noVNC session
+    // shouldn't have their session expire underneath them.
+    const token = extractToken(req);
+    if (token) touchToken(token);
+    proxyNovncWs(req, socket, head, '/websockify');
+  } catch (e) {
+    console.error(`[${datetime()}] upgrade handler error:`, e);
+    try { socket.destroy(); } catch {}
   }
 });
 
