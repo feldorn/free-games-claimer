@@ -21,7 +21,11 @@ const NOVNC_PORT = process.env.NOVNC_PORT || 6080;
 // can't reach it). When set, buildNovncUrl() returns this verbatim and
 // skips host/port assembly. Issue #20.
 const NOVNC_URL = (process.env.NOVNC_URL || '').replace(/\/+$/, '');
-const PANEL_PASSWORD = process.env.PANEL_PASSWORD || process.env.VNC_PASSWORD || '';
+// v2.11.12: legacy env-plaintext still supported. The panel bcrypt-hashes
+// it at boot into a memory-only variable; Settings-configured hash in
+// config.json takes precedence when both are set. `VNC_PASSWORD` fallback
+// preserved for the historical composed-together deployment.
+const ENV_PANEL_PASSWORD = process.env.PANEL_PASSWORD || process.env.VNC_PASSWORD || '';
 const BASE_PATH = cfg.base_path; // e.g. "/free-games" when behind a subfolder proxy, or ""
 const PUBLIC_URL = cfg.public_url || `http://localhost:${PANEL_PORT}${BASE_PATH}`;
 const APP_VERSION = (() => {
@@ -30,22 +34,181 @@ const APP_VERSION = (() => {
 })();
 
 import crypto from 'node:crypto';
-const sessionTokens = new Set();
+import bcrypt from 'bcryptjs';
+
+// ─── Web-UI auth (v2.11.12) ────────────────────────────────────────────
+// Precedence: config.json panel.passwordHash > env PANEL_PASSWORD > off.
+// Env plaintext is hashed at boot into `runtimeEnvHash` — never stored on
+// disk. Live `activeHash` is a getter that re-reads config each call so
+// the panel picks up Settings-tab changes without a restart (per landmine
+// `feedback_stale_cfg_use_describeconfig`).
+const SESSIONS_FILE = dataDir('panel-sessions.json');
+const SESSION_TTL_MS = 24 * 60 * 60 * 1000;      // 24h
+const SESSION_SLIDE_MS = 60 * 60 * 1000;          // renew if lastUsed > 1h ago
+const AUTH_MAX_FAILS = 5;
+const AUTH_LOCKOUT_MS = 15 * 60 * 1000;
+
+let runtimeEnvHash = '';
+if (ENV_PANEL_PASSWORD) {
+  try { runtimeEnvHash = bcrypt.hashSync(ENV_PANEL_PASSWORD, 10); }
+  catch (e) { console.error(`[${datetime()}] Failed to hash env PANEL_PASSWORD: ${e.message}`); }
+}
+
+// Read the config-layer hash live. Returns '' when unset.
+function configHash() {
+  try { return describeConfig().effective?.panel?.passwordHash ? _readConfigHashRaw() : ''; }
+  catch { return ''; }
+}
+// describeConfig redacts panel.passwordHash to a boolean; go to disk for
+// the real hash. Cache is lightweight — bcrypt.compare dominates.
+function _readConfigHashRaw() {
+  try {
+    const raw = JSON.parse(readFileSync(CONFIG_FILE_PATH, 'utf8'));
+    return String(raw?.panel?.passwordHash || '');
+  } catch { return ''; }
+}
+
+// The hash actually used to gate the panel this instant. config > env > ''.
+function activeHash() {
+  const c = _readConfigHashRaw();
+  if (c) return c;
+  return runtimeEnvHash;
+}
+function authIsActive() { return !!activeHash(); }
+function authSource() {
+  if (_readConfigHashRaw()) return 'config';
+  if (runtimeEnvHash) return 'env';
+  return 'none';
+}
+
+// Session store — persisted so container restarts don't invalidate
+// browser cookies. Shape: { <token>: {createdAt, lastUsed} }.
+let sessions = {};
+try {
+  if (existsSync(SESSIONS_FILE)) {
+    const parsed = JSON.parse(readFileSync(SESSIONS_FILE, 'utf8'));
+    if (parsed && typeof parsed === 'object') {
+      const now = Date.now();
+      for (const [tok, meta] of Object.entries(parsed)) {
+        if (meta && typeof meta === 'object' && (now - (meta.lastUsed || 0)) < SESSION_TTL_MS) {
+          sessions[tok] = { createdAt: meta.createdAt || now, lastUsed: meta.lastUsed || now };
+        }
+      }
+    }
+  }
+} catch (e) { console.error(`[${datetime()}] Sessions load failed: ${e.message}`); }
+
+let sessionsDirty = false;
+function persistSessionsSoon() { sessionsDirty = true; }
+setInterval(() => {
+  if (!sessionsDirty) return;
+  sessionsDirty = false;
+  try {
+    const dir = path.dirname(SESSIONS_FILE);
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    writeFileSync(SESSIONS_FILE, JSON.stringify(sessions), { mode: 0o600 });
+  } catch (e) { console.error(`[${datetime()}] Sessions flush failed: ${e.message}`); }
+}, 5 * 60 * 1000).unref();
 
 function generateToken() {
   const token = crypto.randomBytes(32).toString('hex');
-  sessionTokens.add(token);
+  const now = Date.now();
+  sessions[token] = { createdAt: now, lastUsed: now };
+  persistSessionsSoon();
   return token;
 }
 
-function isAuthenticated(req) {
-  if (!PANEL_PASSWORD) return true;
+function invalidateAllSessions() {
+  sessions = {};
+  persistSessionsSoon();
+}
+
+function invalidateToken(token) {
+  if (sessions[token]) { delete sessions[token]; persistSessionsSoon(); }
+}
+
+function tokenValid(token) {
+  const meta = sessions[token];
+  if (!meta) return false;
+  if (Date.now() - meta.lastUsed > SESSION_TTL_MS) { invalidateToken(token); return false; }
+  return true;
+}
+
+// Called from every authenticated request path. Returns whether the token
+// should be re-issued (Set-Cookie again) with a fresh Max-Age, i.e. sliding
+// renewal — we only rewrite the cookie when the last-used stamp has drifted
+// past SESSION_SLIDE_MS to avoid Set-Cookie on every request.
+function touchToken(token) {
+  const meta = sessions[token];
+  if (!meta) return false;
+  const now = Date.now();
+  if (now - meta.lastUsed < SESSION_SLIDE_MS) { meta.lastUsed = now; return false; }
+  meta.lastUsed = now;
+  persistSessionsSoon();
+  return true;
+}
+
+// Rate limit on /api/auth by client IP. Simple in-memory Map, hour-purged.
+const authFailMap = new Map(); // ip → { fails, blockedUntil }
+function clientIp(req) {
+  const xff = req.headers['x-forwarded-for'];
+  if (xff) return String(xff).split(',')[0].trim();
+  return req.socket?.remoteAddress || 'unknown';
+}
+function authLockoutRemainingMs(ip) {
+  const rec = authFailMap.get(ip);
+  if (!rec) return 0;
+  const remain = rec.blockedUntil - Date.now();
+  return remain > 0 ? remain : 0;
+}
+function recordAuthFail(ip) {
+  const rec = authFailMap.get(ip) || { fails: 0, blockedUntil: 0 };
+  rec.fails += 1;
+  if (rec.fails >= AUTH_MAX_FAILS) rec.blockedUntil = Date.now() + AUTH_LOCKOUT_MS;
+  authFailMap.set(ip, rec);
+}
+function recordAuthSuccess(ip) { authFailMap.delete(ip); }
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, rec] of authFailMap.entries()) {
+    if (rec.blockedUntil && rec.blockedUntil < now) authFailMap.delete(ip);
+  }
+}, 60 * 60 * 1000).unref();
+
+// Should the Secure cookie flag be set? True when the request or the
+// configured PUBLIC_URL says HTTPS. Best-effort — reverse proxies must set
+// X-Forwarded-Proto (documented in docs/PANEL.md).
+function shouldMarkSecure(req) {
+  const xfp = req?.headers?.['x-forwarded-proto'];
+  if (xfp && String(xfp).toLowerCase().includes('https')) return true;
+  if (typeof PUBLIC_URL === 'string' && PUBLIC_URL.toLowerCase().startsWith('https://')) return true;
+  return false;
+}
+function sessionCookie(token, req, { clear = false } = {}) {
+  const parts = [`fgc_token=${clear ? '' : token}`, `Path=/`, `HttpOnly`, `SameSite=Strict`];
+  parts.push(clear ? 'Max-Age=0' : `Max-Age=${Math.floor(SESSION_TTL_MS / 1000)}`);
+  if (shouldMarkSecure(req)) parts.push('Secure');
+  return parts.join('; ');
+}
+
+// Extract token from cookie or Authorization: Bearer header.
+function extractToken(req) {
   const cookie = req.headers.cookie || '';
   const match = cookie.match(/fgc_token=([a-f0-9]+)/);
-  if (match && sessionTokens.has(match[1])) return true;
+  if (match) return match[1];
   const auth = req.headers.authorization;
-  if (auth && auth.startsWith('Bearer ') && sessionTokens.has(auth.slice(7))) return true;
-  return false;
+  if (auth && auth.startsWith('Bearer ')) return auth.slice(7);
+  return '';
+}
+
+// NOTE on CSRF: cookie is `SameSite=Strict`, which fully blocks
+// cross-site POST/GET from third-party origins. That covers the CSRF
+// threat model for this single-user tool. Explicit CSRF tokens deferred.
+function isAuthenticated(req) {
+  if (!authIsActive()) return true;
+  const token = extractToken(req);
+  if (!token) return false;
+  return tokenValid(token);
 }
 
 const LOGIN_HTML = `<!DOCTYPE html>
@@ -60,25 +223,56 @@ const LOGIN_HTML = `<!DOCTYPE html>
   .login-box h1 { color: #e94560; margin-bottom: 8px; font-size: 22px; }
   .login-box p { color: #888; margin-bottom: 24px; font-size: 14px; }
   .login-box input { width: 100%; padding: 10px 14px; border-radius: 6px; border: 1px solid #0f3460; background: #1a1a2e; color: #e0e0e0; font-size: 14px; margin-bottom: 16px; }
+  .login-box input:disabled { opacity: 0.6; }
   .login-box button { width: 100%; padding: 10px; border-radius: 6px; border: none; background: #e94560; color: white; font-size: 14px; font-weight: 600; cursor: pointer; }
-  .login-box button:hover { background: #d63851; }
-  .error { color: #e94560; font-size: 13px; margin-bottom: 12px; display: none; }
+  .login-box button:hover:not(:disabled) { background: #d63851; }
+  .login-box button:disabled { opacity: 0.6; cursor: not-allowed; }
+  .error { color: #e94560; font-size: 13px; margin-bottom: 12px; min-height: 18px; }
 </style></head><body>
 <div class="login-box">
   <h1>Free Games Claimer</h1>
   <p>Enter the panel password to continue.</p>
-  <div class="error" id="error">Incorrect password.</div>
+  <div class="error" id="error"></div>
   <input type="password" id="pw" placeholder="Password" autofocus>
-  <button onclick="login()">Login</button>
+  <button id="btn" onclick="login()">Login</button>
 </div>
 <script>
-document.getElementById('pw').addEventListener('keydown', e => { if (e.key === 'Enter') login(); });
+var basePath = ${JSON.stringify(BASE_PATH || '')};
+var errEl = document.getElementById('error');
+var pwEl  = document.getElementById('pw');
+var btn   = document.getElementById('btn');
+pwEl.addEventListener('keydown', function(e){ if (e.key === 'Enter') login(); });
+function nextTarget() {
+  var m = location.search.match(/[?&]next=([^&]*)/);
+  if (!m) return basePath + '/';
+  var raw = decodeURIComponent(m[1]);
+  // Only allow same-origin, absolute paths starting with basePath so a
+  // crafted ?next=https://evil/ or ?next=//evil.com can't bounce a user
+  // there after login.
+  if (raw.startsWith(basePath + '/') && !raw.startsWith('//')) return raw;
+  return basePath + '/';
+}
 async function login() {
-  const pw = document.getElementById('pw').value;
-  const r = await fetch('${BASE_PATH}/api/auth', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: pw }) });
-  const j = await r.json();
-  if (j.success) { location.reload(); }
-  else { document.getElementById('error').style.display = 'block'; }
+  var pw = pwEl.value;
+  btn.disabled = true; pwEl.disabled = true; errEl.textContent = '';
+  try {
+    var r = await fetch(basePath + '/api/auth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: pw }),
+    });
+    var j = await r.json().catch(function(){ return {}; });
+    if (r.ok && j.success) { location.href = nextTarget(); return; }
+    if (r.status === 429) {
+      errEl.textContent = j.error || 'Too many attempts — try again later.';
+    } else {
+      errEl.textContent = 'Incorrect password.';
+    }
+  } catch (e) {
+    errEl.textContent = 'Network error — try again.';
+  } finally {
+    btn.disabled = false; pwEl.disabled = false; pwEl.focus(); pwEl.select();
+  }
 }
 </script></body></html>`;
 
@@ -3317,19 +3511,43 @@ async function getActivity(limit = 10) {
   }));
 }
 
+// v2.11.12: cap body size at 100 KB. No panel endpoint legitimately posts
+// larger than this — cookie imports run into the tens of KB, everything
+// else is small JSON. Above the cap we abort the connection with 413
+// rather than accepting the payload and rejecting it after parse.
+const PARSE_BODY_LIMIT = 100 * 1024;
 function parseBody(req) {
   return new Promise((resolve, reject) => {
     let body = '';
-    req.on('data', chunk => body += chunk);
+    let size = 0;
+    let aborted = false;
+    req.on('data', chunk => {
+      if (aborted) return;
+      size += chunk.length;
+      if (size > PARSE_BODY_LIMIT) {
+        aborted = true;
+        const err = new Error('request body exceeds 100 KB limit');
+        err.statusCode = 413;
+        reject(err);
+        req.destroy();
+        return;
+      }
+      body += chunk;
+    });
     req.on('end', () => {
+      if (aborted) return;
       try { resolve(body ? JSON.parse(body) : {}); }
       catch (e) { reject(e); }
     });
+    req.on('error', reject);
   });
 }
 
 function sendJson(res, data, status = 200) {
-  res.writeHead(status, { 'Content-Type': 'application/json' });
+  res.writeHead(status, {
+    'Content-Type': 'application/json',
+    'X-Content-Type-Options': 'nosniff',
+  });
   res.end(JSON.stringify(data));
 }
 
@@ -8886,14 +9104,58 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'POST' && req.url === '/api/auth') {
-      const { password } = await parseBody(req);
-      if (password === PANEL_PASSWORD) {
-        const token = generateToken();
-        res.writeHead(200, { 'Content-Type': 'application/json', 'Set-Cookie': `fgc_token=${token}; Path=/; HttpOnly; SameSite=Strict` });
-        res.end(JSON.stringify({ success: true }));
-      } else {
-        sendJson(res, { success: false }, 401);
+      const ip = clientIp(req);
+      const lockRemain = authLockoutRemainingMs(ip);
+      if (lockRemain > 0) {
+        const mins = Math.ceil(lockRemain / 60000);
+        sendJson(res, { success: false, error: `Too many failed attempts — try again in ${mins} min.` }, 429);
+        return;
       }
+      let submitted = '';
+      try {
+        const body = await parseBody(req);
+        submitted = String(body?.password ?? '');
+      } catch (e) {
+        sendJson(res, { success: false, error: 'Invalid request.' }, e?.statusCode || 400);
+        return;
+      }
+      const hash = activeHash();
+      if (!hash) {
+        // Auth disabled entirely — no reason to accept /api/auth. Signal it
+        // was rejected without pretending to be a rate-limit issue.
+        sendJson(res, { success: false, error: 'Web-UI authentication is disabled.' }, 400);
+        return;
+      }
+      let ok = false;
+      try { ok = await bcrypt.compare(submitted, hash); } catch { ok = false; }
+      if (!ok) {
+        recordAuthFail(ip);
+        sendJson(res, { success: false }, 401);
+        return;
+      }
+      recordAuthSuccess(ip);
+      const token = generateToken();
+      res.writeHead(200, {
+        'Content-Type': 'application/json',
+        'X-Content-Type-Options': 'nosniff',
+        'Set-Cookie': sessionCookie(token, req),
+      });
+      res.end(JSON.stringify({ success: true }));
+      return;
+    }
+
+    // Logout invalidates the current token server-side and clears the
+    // browser cookie. Public route — an already-expired token still lets
+    // the client clear its own cookie without a 401 round-trip.
+    if (req.method === 'POST' && req.url === '/api/logout') {
+      const token = extractToken(req);
+      if (token) invalidateToken(token);
+      res.writeHead(200, {
+        'Content-Type': 'application/json',
+        'X-Content-Type-Options': 'nosniff',
+        'Set-Cookie': sessionCookie('', req, { clear: true }),
+      });
+      res.end(JSON.stringify({ success: true }));
       return;
     }
 
@@ -8906,7 +9168,12 @@ const server = http.createServer(async (req, res) => {
     const reqPath = req.url ? req.url.split('?')[0] : '';
     if (!isAuthenticated(req)) {
       if (req.method === 'GET' && (reqPath === '/' || reqPath === '/index.html')) {
-        res.writeHead(200, { 'Content-Type': 'text/html', 'Cache-Control': 'no-store' });
+        res.writeHead(200, {
+          'Content-Type': 'text/html',
+          'Cache-Control': 'no-store',
+          'X-Frame-Options': 'DENY',
+          'X-Content-Type-Options': 'nosniff',
+        });
         res.end(LOGIN_HTML);
         return;
       }
@@ -8914,8 +9181,22 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    // Sliding session renewal — re-issue Set-Cookie only when lastUsed has
+    // drifted more than SESSION_SLIDE_MS. Avoids Set-Cookie on every hit.
+    if (authIsActive()) {
+      const token = extractToken(req);
+      if (token && touchToken(token)) {
+        res.setHeader('Set-Cookie', sessionCookie(token, req));
+      }
+    }
+
     if (req.method === 'GET' && (reqPath === '/' || reqPath === '/index.html')) {
-      res.writeHead(200, { 'Content-Type': 'text/html', 'Cache-Control': 'no-store' });
+      res.writeHead(200, {
+        'Content-Type': 'text/html',
+        'Cache-Control': 'no-store',
+        'X-Frame-Options': 'DENY',
+        'X-Content-Type-Options': 'nosniff',
+      });
       res.end(PANEL_HTML);
       return;
     }
@@ -10281,6 +10562,12 @@ server.listen(PANEL_PORT, async () => {
   catch (e) { console.error(`[${datetime()}] failed to load diagnostics-state.json: ${e.message}`); }
 
   console.log(`[${datetime()}] Free Games Claimer ${APP_VERSION ? 'v' + APP_VERSION + ' ' : ''}— panel + scheduler`);
+  // Auth-mode banner (v2.11.12) — makes it obvious at boot which path is
+  // active. env plaintext is hashed at boot; config hash overrides.
+  const _authSrc = authSource();
+  if (_authSrc === 'config')      console.log(`[${datetime()}] Web-UI auth: enabled via config (data/config.json panel.passwordHash).`);
+  else if (_authSrc === 'env')    console.log(`[${datetime()}] Web-UI auth: enabled via PANEL_PASSWORD env (config-hash overrides if set later).`);
+  else                            console.log(`[${datetime()}] Web-UI auth: disabled — panel and noVNC exposed on LAN.`);
 
   // Stale Chromium profile-lock sweep. Container restarts get a fresh
   // hostname assigned by Docker; any persistent profile dir written by

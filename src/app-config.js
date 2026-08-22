@@ -167,6 +167,19 @@ export const CONFIG_SCHEMA = [
     },
     validate: v => (typeof v === 'number' && v >= 0 && v < 24) ? null : 'expected 0-23' },
   { path: 'panel.publicUrl',                 env: 'PUBLIC_URL',                 type: 'string',  default: '' },
+  // Web-UI authentication (D#145, v2.11.12). Two-layer:
+  //   • `panel.authEnabled` + `panel.passwordHash` — Settings-tab managed,
+  //     persistent (bcrypt hash in data/config.json). Preferred.
+  //   • `PANEL_PASSWORD` env — legacy plaintext, still supported; the panel
+  //     hashes it at boot in memory. If both are set, config-hash wins.
+  // Auth is "active" iff a hash resolves (either source). When active, the
+  // panel also proxies noVNC on /novnc/* under the same session cookie.
+  // `passwordHash` is `redactEffective: true` — never emitted verbatim in
+  // /api/state or /api/config responses; the UI receives a boolean set/unset.
+  // `env: null` on both — no direct env override for the config-layer
+  // path; the env-plaintext path lives in panel.js (PANEL_PASSWORD).
+  { path: 'panel.authEnabled',               env: null,                         type: 'boolean', default: false, coerce: toBool },
+  { path: 'panel.passwordHash',              env: null,                         type: 'string',  default: '', sensitive: true, redactEffective: true },
   // GitHub username for the in-panel reply-alert feature. When set, the
   // panel polls this user's issues in feldorn/free-games-claimer once a
   // day (anonymous REST — no token) and surfaces new comment activity
@@ -320,6 +333,27 @@ export function describeConfig() {
   const effective = {};
   const fields = CONFIG_SCHEMA.map(f => {
     const r = resolveField(f, appConfig);
+    // Fields marked `redactEffective: true` (e.g. panel.passwordHash) MUST
+    // NOT leak the stored value to any API response. Substitute a boolean
+    // "is-set" hint everywhere the value would otherwise reach the client.
+    if (f.redactEffective) {
+      const isSet = !!r.effective;
+      setByPath(effective, f.path, isSet);
+      return {
+        path: f.path,
+        envVar: f.env,
+        type: f.type,
+        default: f.default,
+        nullable: !!f.nullable,
+        sensitive: !!f.sensitive,
+        redactedEffective: true,
+        appValue: r.appValue !== null ? true : null,
+        envValue: r.envValue !== null ? true : null,
+        effective: isSet,
+        source: r.source,
+        overridden: r.source === 'app',
+      };
+    }
     setByPath(effective, f.path, r.effective);
     return {
       path: f.path,

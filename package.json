@@ -28,6 +28,7 @@
     "node": ">=20.6.0"
   },
   "dependencies": {
+    "bcryptjs": "^2.4.3",
     "chalk": "^5.4.1",
     "dotenv": "^17.2.0",
     "enquirer": "^2.4.1",
