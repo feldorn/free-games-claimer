@@ -9529,6 +9529,9 @@ const server = http.createServer(async (req, res) => {
     const reqPath = req.url ? req.url.split('?')[0] : '';
     if (!isAuthenticated(req)) {
       if (req.method === 'GET' && (reqPath === '/' || reqPath === '/index.html')) {
+        // Login page always refuses iframe embedding — clickjacking a
+        // login form is credential capture, and there is no legitimate
+        // reason to iframe the login screen.
         res.writeHead(200, {
           'Content-Type': 'text/html',
           'Cache-Control': 'no-store',
@@ -9552,10 +9555,15 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'GET' && (reqPath === '/' || reqPath === '/index.html')) {
+      // v2.11.12: SAMEORIGIN (not DENY) so users embedding the panel in a
+      // same-origin dashboard iframe (SWAG subfolder / Organizr /
+      // Homepage / Heimdall) still work. Third-party origins can't
+      // iframe the panel — that's the clickjacking gate we care about.
+      // The panel's own noVNC iframe is same-origin so it's unaffected.
       res.writeHead(200, {
         'Content-Type': 'text/html',
         'Cache-Control': 'no-store',
-        'X-Frame-Options': 'DENY',
+        'X-Frame-Options': 'SAMEORIGIN',
         'X-Content-Type-Options': 'nosniff',
       });
       res.end(PANEL_HTML);
@@ -11084,7 +11092,9 @@ server.listen(PANEL_PORT, async () => {
   console.log(`[${datetime()}] Control panel: http://localhost:${PANEL_PORT}${BASE_PATH}`);
   if (cfg.public_url) console.log(`[${datetime()}] Public URL:    ${PUBLIC_URL}`);
   console.log(`[${datetime()}] noVNC viewer:  ${NOVNC_URL || `http://localhost:${NOVNC_PORT}${BASE_PATH ? ` (proxied at ${BASE_PATH}/novnc/)` : ''}`}`);
-  console.log(`[${datetime()}] Password protection: ${PANEL_PASSWORD ? 'ENABLED' : 'DISABLED (set PANEL_PASSWORD or VNC_PASSWORD to enable)'}`);
+  // v2.11.12: legacy plaintext-env line replaced by the earlier Web-UI
+  // auth-mode banner right after the version line — keeps a single
+  // source of truth for auth state. This line intentionally removed.
   const startTime = cfg.daily_start_time;
   const legacyMode = !startTime && !LOOP_SECONDS && MS_SCHEDULE_HOURS > 0;
   if (legacyMode) {

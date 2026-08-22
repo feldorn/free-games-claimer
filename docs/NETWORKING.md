@@ -23,6 +23,23 @@ how your proxy routes traffic — the others stay unset.
 wins; otherwise `BASE_PATH` (when set) builds the noVNC URL on the same host
 under that prefix; otherwise the panel embeds noVNC at `<panel-host>:6080`.
 
+### Auth changes the shape
+
+**Since v2.11.12**, when [Web-UI authentication](PANEL.md#authentication) is
+enabled the panel proxies noVNC under its own `/novnc/*` prefix on the panel
+origin — the same session cookie gates the panel and noVNC together. In that
+mode you no longer need to expose `:6080` at all:
+
+- Remove or comment out `- "6080:6080"` in your `docker-compose.yml`.
+- Recreate the container. noVNC keeps working through the panel proxy.
+- No separate proxy vhost or `/websockify` location block needed — the panel's
+  own `/novnc/websockify` upgrade handler pipes to the internal websockify.
+
+If you keep `:6080` published while auth is on, direct hits to it are still
+open to anyone who can reach that port — they do NOT ask for the panel
+password. Close it at your firewall (or in compose) if fgc is exposed to the
+internet.
+
 ### Subdomain (simplest)
 
 No special configuration needed on the app side. Point your reverse proxy at

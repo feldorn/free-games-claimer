@@ -4,6 +4,38 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.11.12
+
+**Feature: full Web-UI authentication with noVNC-through-panel proxy ([D#145](https://github.com/feldorn/free-games-claimer/discussions/145) — @Steggl asked for a login screen so the panel can be exposed to the internet via reverse proxy).**
+
+Enabling authentication now protects **both** the panel on `:7080` **and** the noVNC browser view. When you turn auth on, the panel starts proxying noVNC under its own same-origin `/novnc/*` prefix — one session cookie gates the panel HTTP endpoints, the noVNC static assets, and the raw VNC framebuffer over WebSocket. Users can then close the direct `:6080` publish in their compose entirely and keep noVNC available through their authenticated reverse proxy.
+
+**What ships:**
+
+- **Settings → Web UI Auth** — new section shows the current auth state, its source (config-hash / env / none), and offers an enable/change-password form. Passwords are bcrypt-hashed server-side (never stored plaintext, never emitted in `/api/config` or `/api/state`). Changing the password logs out every session including your own — you're bounced back to the login page.
+- **noVNC proxy** — `/novnc/*` on the panel origin serves the noVNC UI + `/novnc/websockify` upgrades to the raw VNC framebuffer, all through the panel process, all gated by the same session cookie. When auth is off, direct `:6080` still works exactly as it did before.
+- **Session hardening** — sessions persist to `data/panel-sessions.json` (mode 0600) so container restarts don't invalidate browser cookies. 24-hour TTL with sliding renewal at 1 hour idle. Cookie carries `Max-Age=86400` and the `Secure` flag when `X-Forwarded-Proto: https` is present or `PUBLIC_URL` starts `https://`. `SameSite=Strict` preserved for CSRF coverage.
+- **Rate limit** — `/api/auth` locks out an IP after 5 failed attempts / 15 min with a clear "Try again in Nm" message. Success resets the counter. Applies to the set-password current-password check too, so brute-force can't sneak in through that route either.
+- **Logout endpoint** — `POST /api/logout` invalidates the server-side token and clears the cookie.
+- **Security headers** — `X-Content-Type-Options: nosniff` on every JSON response, `X-Frame-Options: DENY` on the login page (clickjacking protection for the credential form), `X-Frame-Options: SAMEORIGIN` on the panel body (still iframe-able from same-origin dashboards — Organizr / Homepage / Heimdall / SWAG subfolders — but not from third-party sites).
+- **Body-size cap** — `parseBody()` now caps at 100 KB → 413 on overflow. Unrelated hardening, low-cost in the same file.
+
+**Backward compatibility:**
+
+- **`PANEL_PASSWORD` env plaintext still works.** The panel bcrypt-hashes it at boot into a memory-only variable — never stored. If both env plaintext and a Settings-configured hash are set, the config-hash wins.
+- **Auth off (existing default) is byte-identical behavior.** Every gate short-circuits when no hash resolves. Users on `:6080` direct-access setups don't need to change anything.
+- **CSRF:** cookie is `SameSite=Strict` which fully blocks cross-site request abuse. Explicit CSRF tokens deferred — SameSite covers the single-user threat model.
+
+**Load-bearing caveat you should know about:** if you keep `:6080` published in your compose file **AND** enable panel auth, direct hits to `http://host:6080` still work and are NOT gated by the panel password. If you're exposing fgc to the internet, close that port at your firewall or in your `docker-compose.yml` (comment out `- "6080:6080"` — noVNC still works via the panel proxy). Left publish alone if you use LAN-only.
+
+**Reverse-proxy note:** ensure your proxy sets `X-Forwarded-Proto: https` when the client connection is HTTPS — that signal drives the `Secure` cookie flag. SWAG, Traefik, and Caddy do this by default; some NPM configs need it added explicitly.
+
+Docs: `docs/PANEL.md` gains an Authentication section, `docs/NETWORKING.md` gains a note about closing `:6080` once you've verified the proxied noVNC works.
+
+Answers D#145 (@Steggl).
+
+---
+
 ## What's new in 2.11.11
 
 **Fix: FAB checkout CTA race now searches child iframes, not just the main page ([#127](https://github.com/feldorn/free-games-claimer/issues/127) — Duwaynef on v2.11.10).**

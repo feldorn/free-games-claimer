@@ -341,6 +341,103 @@ relevant action:
 
 ---
 
+## Authentication
+
+Web-UI authentication is opt-in and off by default. Enabling it protects
+**both** the panel on `:7080` **and** the noVNC browser view — when auth
+is on the panel proxies noVNC under its own same-origin `/novnc/*`
+prefix, so one session cookie gates the panel HTTP endpoints, the noVNC
+UI, and the raw VNC framebuffer WebSocket.
+
+### Enabling auth
+
+Two paths:
+
+- **Recommended: Settings → Web UI Auth.** Log into the panel, open the
+  Settings tab, pick the new **Web UI Auth** rail. Enter a password
+  (min 6 chars), confirm, click **Enable authentication**. The password
+  is bcrypt-hashed server-side and stored at `panel.passwordHash` in
+  `data/config.json`. All existing sessions are invalidated — you'll be
+  bounced to the login page and log back in with the new password.
+
+- **Env-var: `PANEL_PASSWORD`.** Set `PANEL_PASSWORD=<plaintext>` in your
+  compose. The panel bcrypt-hashes it at boot into a memory-only
+  variable (never stored). Legacy shape, kept working for existing
+  deployments. Falls back to `VNC_PASSWORD` if set.
+
+If both are set, the config-hash wins. The Settings tab's Status row
+shows which source is active.
+
+### What auth changes
+
+- Every panel endpoint except `/api/health` and `/api/hass/sensors` now
+  requires a valid session cookie (or a `Bearer` token in the
+  `Authorization` header). Unauth requests get HTTP 401 (JSON) or the
+  login page (on `GET /`).
+- `/novnc/*` on the panel origin serves the noVNC UI + `/novnc/websockify`
+  proxies the WebSocket to the container's internal `:6080`. `buildNovncUrl()`
+  automatically routes the "Show browser" iframe and pop-out button
+  through this path when auth is active.
+- Sessions live in `data/panel-sessions.json` (mode 0600) so restarts
+  don't kick you out. TTL is 24h with sliding renewal — if you use the
+  panel at least once every 24h, you stay logged in.
+
+### `:6080` and firewall considerations
+
+**Turning panel auth on does NOT gate the direct `:6080` port.** noVNC
+runs as a separate `websockify` process inside the container that the
+panel does not (and cannot) intercept when accessed on its own port.
+If you expose fgc to the internet:
+
+- **Recommended:** stop publishing `:6080` in your `docker-compose.yml`
+  once you've verified the proxied `/novnc/*` works. Comment out the
+  `- "6080:6080"` line and recreate the container. noVNC keeps working
+  through the panel proxy; the direct port is closed.
+- **LAN-only setups:** keep `:6080` published if you prefer direct
+  access for local debugging. It stays open on your network.
+
+The Settings-tab section shows the same warning inline.
+
+### Reverse-proxy headers
+
+If your reverse proxy terminates TLS in front of fgc, make sure it sets
+`X-Forwarded-Proto: https` on the forwarded request. That signal drives
+the `Secure` flag on the session cookie:
+
+- **SWAG / Nginx** — default configs set this. No action needed.
+- **Traefik** — default. No action needed.
+- **Caddy** — default. No action needed.
+- **NPM (Nginx Proxy Manager)** — sometimes needs a custom Advanced
+  block: `proxy_set_header X-Forwarded-Proto $scheme;`
+
+Also set `Host` and `X-Real-IP` per your proxy's normal pattern — the
+rate limiter reads `X-Forwarded-For` when present so failed logins are
+counted per real client IP, not per proxy IP.
+
+### Adding reverse-proxy auth in front (Authelia / Authentik / basic-auth)
+
+Panel auth doesn't replace reverse-proxy auth if you want MFA, OIDC
+federation, per-user accounts, or IP allowlists — put your usual
+Authelia/Authentik/basic-auth in front of the reverse-proxy vhost. The
+panel's own session cookie coexists with those layers (unrelated cookie
+names, unrelated cookie stores).
+
+### Logout
+
+Log out from **Settings → Web UI Auth → Log out** in the top-right of
+the Status row. That invalidates the server-side token and clears the
+cookie. `POST /api/logout` is also public if you're driving the panel
+from a script.
+
+### Disabling auth
+
+**Settings → Web UI Auth → Disable authentication.** Requires your
+current password. Confirms via a modal warning. If `PANEL_PASSWORD` env
+is still set the response flags `envStillActive:true` and the UI tells
+you to unset the env var and restart the container for full removal.
+
+---
+
 ## Settings (in-app configuration)
 
 The Settings tab ships a single **sticky save footer** (`N unsaved changes ·
