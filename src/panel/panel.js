@@ -9349,10 +9349,17 @@ const server = http.createServer(async (req, res) => {
     // Consumer pattern documented in docs/HOMEASSISTANT.md.
     if (req.method === 'GET' && req.url === '/api/hass/sensors') {
       try {
+        // v2.11.14: fetch up to 10 recent claims so this endpoint returns
+        // a full recent-claims array for HA + other unauth polling
+        // consumers (D#145 @Steggl follow-up). The v2.11.12 auth changes
+        // moved /api/activity behind the session-cookie gate, which broke
+        // HA's rest platform integration; keeping this endpoint the
+        // single-call HA surface is the cleaner fix than teaching HA to
+        // use bearer tokens.
         const [summary, byService, activity] = await Promise.all([
           getStatsSummary().catch(() => ({})),
           getStatsByService().catch(() => []),
-          getActivity(1).catch(() => []),
+          getActivity(10).catch(() => []),
         ]);
         // Pending Prime Gaming manual redeems (MS Store / Xbox / etc.
         // codes that need user action). Mirrors the shape prime-gaming.js
@@ -9416,6 +9423,20 @@ const server = http.createServer(async (req, res) => {
           active_services: Array.from(activeSet).sort(),
           app_version: APP_VERSION || null,
           panel_url: cfg.public_url || null,
+          // v2.11.14: recent-claims list for HA rest-platform consumers
+          // (D#145 @Steggl). Same shape as /api/activity but flat + the
+          // key names HA templates naturally reach for. Truncated to 10
+          // rows to keep the payload compact — HA users who want more
+          // typically break out per-service sensors via the `services`
+          // sub-object below.
+          recent_claims: activity.map(c => ({
+            title: c.title,
+            service: c.service,
+            service_name: c.serviceName,
+            claimed_at: c.at,
+            store_url: c.url,
+            status: c.status,
+          })),
         };
         // Optional per-service detail for users who want to break out
         // individual sensors — e.g. sensor.fgc_epic_lastclaim reading

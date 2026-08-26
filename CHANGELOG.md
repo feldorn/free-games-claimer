@@ -4,6 +4,18 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.11.14
+
+**Feature: `/api/hass/sensors` now returns a `recent_claims` array (D#145 @Steggl follow-up).**
+
+The v2.11.12 auth work moved `/api/activity` behind the session-cookie gate. Home Assistant's rest platform doesn't easily do cookie-based auth, so Steggl's HA integration lost the recent-claims list even though the counter fields on the unauth `/api/hass/sensors` endpoint kept working.
+
+**Fix:** the sensors endpoint now includes `recent_claims: [{title, service, service_name, claimed_at, store_url, status}, ...]` — up to 10 rows, same shape as `/api/activity` but with HA-template-friendly key names (`claimed_at` / `store_url`). Same payload, one call, no auth. HA `rest` platform reads via `value_template: "{{ value_json.recent_claims }}"` and rest_sensor children can pull `.[0].title`, `.[0].store_url`, etc.
+
+Nothing else changes on the endpoint — the counter/status/active_services surface is unchanged. Users on 2.11.12/2.11.13 with an HA integration only need to pull `:latest` and their template can start referencing the new key.
+
+---
+
 ## What's new in 2.11.13
 
 **Hotfix: v2.11.12 client JS syntax error — panel got stuck at "Loading…".**
