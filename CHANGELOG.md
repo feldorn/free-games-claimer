@@ -4,6 +4,24 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.11.15
+
+**Fix: Epic post-claim "FINAL STEP — Is Epic Games Launcher installed?" modal hung the next-game navigation for 60s → whole Epic run erroring out.**
+
+Reported live 2026-08-28: today's Epic run successfully claimed *Rival Stars Horse Racing: Desktop Edition*, then Epic popped up a launcher-install upsell modal that we didn't dismiss. On the next iteration `page.goto(nextGame)` waited on the default `load` event, which never fired because the previous page's modal iframes/scripts held it open. Playwright timed out after 60s, Epic errored, run marker never updated. Steam/Ubisoft/etc. downstream in the chain kept going fine.
+
+**Two mitigations, both shipped:**
+
+1. **Restore `waitUntil: 'domcontentloaded'`** on the claim-loop `page.goto`. That event fires as soon as DOM parse finishes, well before trailing modal assets load. Was commented out at some point in history (unclear when) — the DOM state Epic delivers by domcontentloaded is more than enough for our next step (finding the purchase CTA).
+
+2. **New `dismissLauncherModal(page)` helper** called after every successful claim (main success path, recovery-via-CTA path, and retry-loop success path). Best-effort race across localised heading + a few dismiss button variants (`Yes, it's installed`, close button, Escape). Zero cost when the modal isn't present (locator short-circuits). No error path — the domcontentloaded change already makes the next goto robust to the modal existing; the dismiss is belt-and-suspenders.
+
+**Impact on the failing run:** Rival Stars was still successfully claimed (already in the library). Games 3-5 in today's queue (post-Rival-Stars) will be picked up on tomorrow's scheduled run.
+
+Filed the modal-selectors under `epic-games.js` at module scope so the pattern is discoverable next time Epic invents a new post-claim surface.
+
+---
+
 ## What's new in 2.11.14
 
 **Feature: `/api/hass/sensors` now returns a `recent_claims` array (D#145 @Steggl follow-up).**

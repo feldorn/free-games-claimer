@@ -45,6 +45,53 @@ const OWNED_TEXTS_GLOBAL = [
 // only — code-review flagged the drift. Now all callers get it uniformly.
 const isOwnedText = (t) => t && t !== 'loading' && OWNED_TEXTS_GLOBAL.some(w => t === w || t.startsWith(w));
 
+// v2.11.15 (2026-08-28 feldorn11906 run): Epic's post-successful-claim
+// modal "FINAL STEP — Is Epic Games Launcher installed?" (labels "No, get
+// launcher" / "Yes, it's installed") stays open when the next iteration's
+// page.goto fires, and its embedded assets keep the page's `load` event
+// from firing. Result: page.goto times out at 60s and the whole Epic
+// pass errors out — Rival Stars Horse Racing claimed fine, then Together
+// After Dark's page.goto to https://store.epicgames.com/p/breathedge
+// hung on `waiting until "load"` because Rival Stars' modal was still up.
+// Fix: probe for the modal after every successful claim and dismiss it.
+// Best-effort — race a few known labels + a fallback aria-label close.
+// Zero cost when the modal isn't there (all locators short-circuit at
+// count() === 0). No error path — dismiss failure is silent by design;
+// the next goto's domcontentloaded wait will still succeed.
+const RX_LAUNCHER_MODAL_HEADING = /final\s*step|is\s*epic\s*games\s*launcher\s*installed|Letzter\s*Schritt|Ist\s*der\s*Epic\s*Games\s*Launcher/i;
+async function dismissLauncherModal(page) {
+  if (page.isClosed()) return;
+  try {
+    // Heading probe first — cheap check, avoids spurious close-button
+    // clicks on any modal that happens to have an X in the top-right.
+    const heading = page.getByText(RX_LAUNCHER_MODAL_HEADING).first();
+    if (!(await heading.count().catch(() => 0))) return;
+    if (!(await heading.isVisible().catch(() => false))) return;
+    // Try in order of specificity — "Yes, it's installed" is the correct
+    // click semantically (dismisses without offering the launcher install
+    // flow), falls back to the close X, then to Escape.
+    const candidates = [
+      page.getByRole('button', { name: /^yes,?\s*it/i }),
+      page.getByRole('button', { name: /it.?s\s*installed/i }),
+      page.getByRole('button', { name: /^close$|schließen/i }),
+      page.locator('button[aria-label*="Close" i], button[aria-label*="Schließen" i]').first(),
+    ];
+    for (const c of candidates) {
+      const n = await c.count().catch(() => 0);
+      if (!n) continue;
+      if (!(await c.isVisible().catch(() => false))) continue;
+      await c.click({ timeout: 2000 }).catch(() => {});
+      await page.waitForTimeout(300);
+      // If the heading is gone, we won.
+      if (!(await heading.isVisible().catch(() => false))) return;
+    }
+    // Last-resort Escape — some Epic modal variants close on Escape too.
+    await page.keyboard.press('Escape').catch(() => {});
+  } catch {
+    // best-effort: never fail the run because of the launcher upsell
+  }
+}
+
 log.section(`Epic Games (v${siteVersion('epic-games')})`);
 
 const offerIdMap = {};
@@ -400,7 +447,15 @@ try {
       break;
     }
     try {
-      await page.goto(url); // , { waitUntil: 'domcontentloaded' });
+      // v2.11.15: restore `domcontentloaded` (was commented out). Epic
+      // sometimes leaves modal iframes/scripts loading long past the DOM
+      // being ready — most obviously the post-claim "FINAL STEP" launcher
+      // upsell, which pinned `load` on the *previous* page and hung the
+      // *next* goto for 60s until timeout. `domcontentloaded` fires as
+      // soon as DOM parse is complete, well before those trailing
+      // resources, and is more than enough for what we do next (find the
+      // purchase CTA — a top-level element rendered synchronously).
+      await page.goto(url, { waitUntil: 'domcontentloaded' });
     } catch (e) {
       // Recoverable navigation-transport failure: log with the URL that
       // was in flight (so the next diagnostics submission tells us
@@ -690,6 +745,11 @@ try {
         db.data[user][game_id].status = 'claimed';
         db.data[user][game_id].time = datetime(); // claimed time overwrites failed/dryrun time
         log.ok(`${title} — claimed!`);
+        // v2.11.15: dismiss the post-claim "FINAL STEP — Is Epic Games
+        // Launcher installed?" upsell modal, if it appears. Left up, it
+        // pins the *previous* page's `load` event and hangs the next
+        // iteration's goto for 60s. Best-effort; see helper for details.
+        await dismissLauncherModal(page);
         // context.setDefaultTimeout(cfg.timeout);
       } catch (e) {
         if (cfg.debug) console.error(e);
@@ -726,6 +786,11 @@ try {
           log.ok(`${title} — claim succeeded (confirmed via post-click CTA)`);
           db.data[user][game_id].status = 'claimed';
           db.data[user][game_id].time = datetime();
+          // v2.11.15: same dismiss as the main success path — the launcher
+          // upsell fires here too when the race timed out but the CTA
+          // flipped owned, so the modal is on-screen even though we took
+          // the recovery branch.
+          await dismissLauncherModal(page);
         } else {
           log.fail(`${title} — failed to claim`);
           const p = screenshot('failed', `${game_id}_${filenamify(datetime())}.png`);
@@ -855,6 +920,8 @@ try {
         retry.status = 'claimed';
         retry.details = '';
         retry.captcha = false;
+        // v2.11.15: same launcher-modal dismiss as the main success path.
+        await dismissLauncherModal(page);
       } catch (e) {
         log.fail(`${retry.title} — retry failed`);
         if (cfg.debug) console.error(e);
