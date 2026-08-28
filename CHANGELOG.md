@@ -4,6 +4,30 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.11.16
+
+Two independent fixes reported the same day.
+
+**Fix: FAB now handles the EU "Right of Withdrawal Information" modal ([#149](https://github.com/feldorn/free-games-claimer/issues/149) 4n4n4s, [#127](https://github.com/feldorn/free-games-claimer/issues/127) @Steggl followup).**
+
+FAB's Epic-hosted checkout iframe now shows an EU consumer-protection modal *after* the "Add to library" click but *before* the checkout completes. Buttons are `Cancel` / `I accept`. Text: *"By selecting 'I accept', you agree to the immediate delivery of or provisional access to the digital content or subscription service you are purchasing. By doing so, you will lose your 14-day cancellation right granted by law."*
+
+Only fires for EU accounts, which is why 4n4n4s and @Steggl (both EU) hit it and non-EU testing missed it. Confirmed against Steggl's `2.11.14` failure log (3 games × ~3m22s per failure = full 60s CTA timeout budget × retries) — his "Add to library" clicks were succeeding thanks to v2.11.11's iframe-scan fix, but the modal blocked the ownership-flip that our success race waits on.
+
+**Fix:** after the "Add to library" click, run a second 15s race for an "I accept" button across the same page + child-frames scopes. Clicks it if found; silent no-op for non-EU users (button never appears, race exits without spam). Uses same all-frames-scan pattern as the place-order race so the modal-in-iframe case Just Works.
+
+Localised label variants (German etc.) will be added when the first live report from a non-English EU account arrives.
+
+**Fix: Steam Family Sharing claim path ([#147](https://github.com/feldorn/free-games-claimer/issues/147) QuasiForEver, @Steggl diagnosis).**
+
+When another member of the user's Steam Family already owns a game, Steam shows an **"IN STEAM FAMILY LIBRARY"** banner with **"A member of your Steam Family already owns this game"** copy, and replaces the standard "Add to Account" green button with a **"Get {game_name}"** button. The game is free-to-add for the family member — but our detection only looks for the paid-purchase `.discount_final_price` block (which says `$X.XX`, not "Free") and the standard `Add to Account` button (which isn't there). Result: fgc skipped it as "not currently free on store page" while the user was in fact eligible to claim it.
+
+**Fix:** detect the Family Sharing banner (locale-portable regex). When present, override `isFree=true`, look for a `Get {…}` button inside the purchase-area container (bounded so an unrelated `Get X` elsewhere on the page can't false-positive), and route the click through that button instead of the standard green one. New `familySharing` flag surfaces on the details object so the log line reads `Family Sharing claim path (family member owns; adding to account for free)` at click time — differentiates the two flows in the audit trail.
+
+Credit to @Steggl for the "family-library banner" observation — without that specific string, the "Get X vs Add to Account" branch would have been much slower to isolate.
+
+---
+
 ## What's new in 2.11.15
 
 **Fix: Epic post-claim "FINAL STEP — Is Epic Games Launcher installed?" modal hung the next-game navigation for 60s → whole Epic run erroring out.**

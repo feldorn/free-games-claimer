@@ -207,6 +207,30 @@ async function getGameDetails(p, url) {
     }
   }
 
+  // v2.11.16 (2026-08-28 QuasiForEver #147, Steggl diagnosis): Family
+  // Sharing path. When another member of the user's Steam Family already
+  // owns the app, Steam shows an "IN STEAM FAMILY LIBRARY" banner and a
+  // "Get {game_name}" button INSTEAD OF the paid purchase blocks — the
+  // game is free-to-add for the family member, but our discount_final_price
+  // scrape sees the paid variant (or nothing) and isFree stays false. Look
+  // for the family-library indicator explicitly; if present, override to
+  // free + set a family-specific claim button pattern that the click-site
+  // will detect and use.
+  try {
+    const familyBanner = p.locator('text=/in\\s*steam\\s*family\\s*library|a\\s*member\\s*of\\s*your\\s*steam\\s*family\\s*already\\s*owns/i').first();
+    if (await familyBanner.count() > 0 && await familyBanner.isVisible().catch(() => false)) {
+      // "Get {game_name}" text varies by title — match the pattern rather
+      // than the exact string. Look inside the purchase-area container so
+      // an unrelated "Get X" elsewhere on the page can't false-positive.
+      const familyGetBtn = p.locator('.game_purchase_action a:has-text("Get "), .game_area_purchase a:has-text("Get "), a.btn_addtocart:has-text("Get ")').first();
+      if (await familyGetBtn.count() > 0) {
+        details.isFree = true;
+        details.canClaim = true;
+        details.familySharing = true;
+      }
+    }
+  } catch {}
+
   return details;
 }
 
@@ -743,7 +767,13 @@ try {
     }
 
     try {
-      const addBtn = page.locator('a.btn_green_steamui:has-text("Add to Account"), .game_purchase_action .btn_addtocart a:has-text("Add to Account")').first();
+      // v2.11.16: Family Sharing takes a different click target — a
+      // "Get {game_name}" button in the purchase area instead of the
+      // standard "Add to Account" green button. #147.
+      const addBtn = details.familySharing
+        ? page.locator('.game_purchase_action a:has-text("Get "), .game_area_purchase a:has-text("Get "), a.btn_addtocart:has-text("Get ")').first()
+        : page.locator('a.btn_green_steamui:has-text("Add to Account"), .game_purchase_action .btn_addtocart a:has-text("Add to Account")').first();
+      if (details.familySharing) log.info(`${title} — Family Sharing claim path (family member owns; adding to account for free)`);
       await addBtn.click();
       await page.waitForTimeout(3000);
 

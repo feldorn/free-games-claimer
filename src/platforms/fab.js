@@ -352,6 +352,44 @@ try {
           console.log('  no place-order CTA matched any known label — capturing full URL:', page.url());
           if (frameUrls.length) console.log('  child frames present:', frameUrls);
         }
+
+        // v2.11.16 (2026-08-28 4n4n4s #149, Steggl #127 followup): FAB's
+        // Epic-hosted checkout iframe now shows an EU-consumer-protection
+        // "Right of Withdrawal Information" modal AFTER the Add-to-library
+        // click. Buttons: "Cancel" / "I accept". Text: "By selecting 'I
+        // accept', you agree to the immediate delivery of or provisional
+        // access to the digital content ... you will lose your 14-day
+        // cancellation right granted by law". Only fires for EU accounts;
+        // non-EU users never see it, so the wait budget below is short
+        // (~2s per iteration × 15s cap = negligible overhead for them).
+        // Same iframe-scan pattern as the place-order race: FAB serves
+        // the modal from the same Epic-hosted checkout iframe.
+        {
+          const acceptRaceStart = Date.now();
+          let accepted = false;
+          while (Date.now() - acceptRaceStart < 15000) {
+            for (const scope of scopesFn()) {
+              // Multiple label variants for locale-portability. English
+              // "I accept" seen live 2026-08-28. German (Steggl EU deploy)
+              // would be "Ich stimme zu" or similar — add localised
+              // variants when the first live report comes in.
+              const acceptBtn = scope.getByRole('button', { name: /^i\s*accept$|^accept$/i }).first();
+              const n = await acceptBtn.count().catch(() => 0);
+              if (n > 0 && await acceptBtn.isVisible().catch(() => false)) {
+                if (cfg.debug) {
+                  const scopeLabel = scope === page ? 'page' : `frame(${scope.url() || '<detached>'})`;
+                  console.log(`  Right-of-Withdrawal modal: "I accept" @ ${scopeLabel} — clicking`);
+                }
+                await acceptBtn.click({ delay: 11 }).catch(() => {});
+                accepted = true;
+                break;
+              }
+            }
+            if (accepted) break;
+            await page.waitForTimeout(400);
+          }
+          // No log line on non-match — non-EU users would spam every run.
+        }
       }
 
       // Success: the listing flips to an owned state ("Saved in My Library" /
