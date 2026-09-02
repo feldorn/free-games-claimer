@@ -171,6 +171,18 @@ const isRecoverableEpicPageError = (err) => {
   return /Target (page, context or browser|page|context|browser) has been closed/i.test(msg)
       || /Target crashed/i.test(msg)
       || /interrupted by another navigation/i.test(msg)
+      // v2.11.17 (hyperactive68 #151): treat page.goto Timeout as
+      // recoverable so one stuck goto skips the game rather than
+      // exceptioning out the whole Epic run. Concrete case: a previous
+      // game's Epic checkout modal stayed open, pinning the next goto's
+      // ready event past the 60s timeout — losing everything downstream
+      // in the queue too. With this shift, the outer catch at line 465
+      // treats the timeout the same as a browser tear-down: log + skip +
+      // continue. The `waitUntil: 'commit'` change on the goto itself
+      // (see line 458) should prevent the timeout from firing at all in
+      // most cases, but this stays as belt-and-braces for weirder shapes.
+      || /page\.goto:? Timeout \d+ms exceeded/i.test(msg)
+      || /Timeout \d+ms exceeded.*navigating to/i.test(msg)
       || /ERR_ADDRESS_UNREACHABLE|ERR_INTERNET_DISCONNECTED|ERR_NAME_NOT_RESOLVED|ERR_NETWORK_CHANGED|ERR_CONNECTION_RESET|ERR_TIMED_OUT/i.test(msg);
 };
 
@@ -447,15 +459,26 @@ try {
       break;
     }
     try {
-      // v2.11.15: restore `domcontentloaded` (was commented out). Epic
-      // sometimes leaves modal iframes/scripts loading long past the DOM
-      // being ready — most obviously the post-claim "FINAL STEP" launcher
-      // upsell, which pinned `load` on the *previous* page and hung the
-      // *next* goto for 60s until timeout. `domcontentloaded` fires as
-      // soon as DOM parse is complete, well before those trailing
-      // resources, and is more than enough for what we do next (find the
-      // purchase CTA — a top-level element rendered synchronously).
-      await page.goto(url, { waitUntil: 'domcontentloaded' });
+      // v2.11.17 (hyperactive68 #151): stronger than v2.11.15's
+      // `domcontentloaded` — use `commit` so navigation completes the
+      // instant Playwright receives the response headers, BEFORE any DOM
+      // parse (including sub-frames) has to finish. Concrete case: a
+      // previous game's Epic Checkout modal (the new iframe pattern
+      // showing "Add to library" on-page rather than through the
+      // #webPurchaseContainer purchase iframe) stayed on-screen through
+      // the next iteration's goto and pinned the top-level document's
+      // DOMContentLoaded event, hanging the whole 60s timeout budget.
+      //
+      // 'commit' is safe here because the very next thing we do is
+      // waitForFunction() on the purchase CTA button — that's our real
+      // "wait for content" gate. The comment on v2.11.15's fix already
+      // noted the CTA is a top-level element rendered synchronously; the
+      // waitForFunction has always been the ground truth for readiness.
+      //
+      // waitUntil taxonomy: 'commit' < 'domcontentloaded' < 'load'.
+      // Higher levels wait longer; going higher gains nothing here and
+      // exposes us to modal-iframe hangs.
+      await page.goto(url, { waitUntil: 'commit' });
     } catch (e) {
       // Recoverable navigation-transport failure: log with the URL that
       // was in flight (so the next diagnostics submission tells us

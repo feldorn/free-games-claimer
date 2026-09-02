@@ -4,6 +4,22 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.11.17
+
+**Fix: Epic goto hang when a previous game's checkout modal is still open ([#151](https://github.com/feldorn/free-games-claimer/issues/151) hyperactive68 on v2.11.16).**
+
+Similar failure shape to [#104](https://github.com/feldorn/free-games-claimer/issues/104) / v2.11.15's launcher-modal fix, but a different modal. Concrete case from hyperactive68: Rival Stars Horse Racing claimed successfully (via post-click CTA recovery), then Down in Bermuda's primary success race timed out because Epic now surfaces a **"Checkout — Add to library"** iframe modal on-page (same shape as FAB's checkout — it's Epic-Games-hosted checkout code). Our success race never sees the ownership CTA flip, marks Down in Bermuda failed, and the next iteration's `page.goto` (for Down in Bermuda's iOS variant — the game was in the queue twice via different platform URLs) hits `Timeout 60000ms exceeded` because the still-open modal's iframe pins the top-level `domcontentloaded` event. The exception then unwinds the whole Epic pass, losing every downstream game in the queue.
+
+**Two mitigations, both shipped:**
+
+1. **`waitUntil: 'commit'`** on the claim-loop `page.goto` (was `'domcontentloaded'` in v2.11.15). Playwright's `'commit'` returns the instant Playwright receives response headers, before any DOM parse — including sub-frame parsing — has to complete. Safe here because the very next line is a `waitForFunction` on the purchase CTA button, which is the real "wait for content" gate.
+
+2. **Treat `page.goto: Timeout Xms exceeded` as recoverable** in `isRecoverableEpicPageError`. If a goto still times out despite (1), the existing recoverable-error path logs the failure, skips that one game, and continues the queue instead of exceptioning out the whole Epic run.
+
+**Not fixed here:** the *primary* reason Down in Bermuda's success race timed out — Epic's new on-page checkout iframe isn't recognised by the current `#webPurchaseContainer iframe` selector, so the `RX_ADD_LIBRARY` click never fires against it. Rival Stars only survived via the CTA-recovery probe. Follow-up work: teach the modal-click path to fall through to an all-frames "Add to library" scan when the primary iframe doesn't materialise, parallel to what v2.11.11 did for FAB (#127). Landing in a subsequent release — v2.11.17 keeps the existing behaviour working and stops the whole-run-crash, which is the acute bug.
+
+---
+
 ## What's new in 2.11.16
 
 Two independent fixes reported the same day.
