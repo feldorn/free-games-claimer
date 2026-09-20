@@ -426,34 +426,69 @@ try {
               log.warn(`${title} — login required on ${store}, redeem manually`);
               await page2.waitForTimeout(60 * 1000); // give user chance to log in
             } else {
-              const iframe = page2.frameLocator('#redeem-iframe');
-              const input = iframe.locator('[name=tokenString]');
-              await input.waitFor();
-              await input.fill(code);
-              const r = page2.waitForResponse(r => r.url().startsWith('https://cart.production.store-web.dynamics.com/v1.0/Redeem/PrepareRedeem'));
-              const rt = await (await r).text();
-              const j = JSON.parse(rt);
-              const reason = j?.events?.cart.length && j.events.cart[0]?.data?.reason;
-              if (reason == 'TokenNotFound') {
-                redeem_action = 'redeem (not found)';
-                log.warn(`${title} — code not found on ${store}`);
-              } else if (j?.productInfos?.length && j.productInfos[0]?.redeemable) {
-                await iframe.locator('button:has-text("Next")').click();
-                await iframe.locator('button:has-text("Confirm")').click();
-                const r = page2.waitForResponse(r => r.url().startsWith('https://cart.production.store-web.dynamics.com/v1.0/Redeem/RedeemToken'));
-                const j = JSON.parse(await (await r).text());
-                if (j?.events?.cart.length && j.events.cart[0]?.data?.reason == 'UserAlreadyOwnsContent') {
-                  redeem_action = 'already redeemed';
-                  log.ok(`${title} — already owned on ${store}`);
+              // v2.11.19 (feldorn 2026-09-18 DOOM Eternal): the two
+              // waitForResponse calls below used to throw unhandled on
+              // timeout, killing the whole Prime run and surfacing a
+              // diagnostic banner that required manual dismissal. Wrap
+              // both in try/catch so a stuck MS-Store handoff logs
+              // cleanly, leaves redeem_action at its default 'redeem'
+              // (which the needsManual tally at line ~505 already
+              // handles as "user must redeem manually"), and lets
+              // control fall through to page2.close() + summary
+              // as normal. Concrete case: DOOM Eternal 2026-09-18 —
+              // PrepareRedeem endpoint didn't fire in 60s. Could be
+              // transient MS backend, or MS quietly shifting away from
+              // store-web.dynamics.com toward redeem.microsoft.com /
+              // xbox.com/redeem. Either way, one stuck code should not
+              // torpedo the batch.
+              try {
+                const iframe = page2.frameLocator('#redeem-iframe');
+                const input = iframe.locator('[name=tokenString]');
+                await input.waitFor();
+                await input.fill(code);
+                const r = page2.waitForResponse(r => r.url().startsWith('https://cart.production.store-web.dynamics.com/v1.0/Redeem/PrepareRedeem'));
+                const rt = await (await r).text();
+                const j = JSON.parse(rt);
+                const reason = j?.events?.cart.length && j.events.cart[0]?.data?.reason;
+                if (reason == 'TokenNotFound') {
+                  redeem_action = 'redeem (not found)';
+                  log.warn(`${title} — code not found on ${store}`);
+                } else if (j?.productInfos?.length && j.productInfos[0]?.redeemable) {
+                  await iframe.locator('button:has-text("Next")').click();
+                  await iframe.locator('button:has-text("Confirm")').click();
+                  try {
+                    const r = page2.waitForResponse(r => r.url().startsWith('https://cart.production.store-web.dynamics.com/v1.0/Redeem/RedeemToken'));
+                    const j = JSON.parse(await (await r).text());
+                    if (j?.events?.cart.length && j.events.cart[0]?.data?.reason == 'UserAlreadyOwnsContent') {
+                      redeem_action = 'already redeemed';
+                      log.ok(`${title} — already owned on ${store}`);
+                    } else {
+                      redeem_action = 'redeemed';
+                      db.data[user][title].status = 'claimed and redeemed?';
+                      log.ok(`${title} — claimed and redeemed on ${store} (unconfirmed)`);
+                    }
+                  } catch (e) {
+                    // RedeemToken timed out AFTER Next+Confirm were
+                    // clicked — the redemption may or may not have
+                    // gone through. Mark unconfirmed and surface for
+                    // manual verification.
+                    log.warn(`${title} — MS Store RedeemToken didn't respond in 60s after Confirm click — verify manually at ${redeem_url}`);
+                    if (cfg.debug) console.debug(`  Exception: ${String(e.message || e).split('\n')[0]}`);
+                    // Leave redeem_action = 'redeem' (default) so the
+                    // manual-action tally + notify fires.
+                  }
                 } else {
-                  redeem_action = 'redeemed';
-                  db.data[user][title].status = 'claimed and redeemed?';
-                  log.ok(`${title} — claimed and redeemed on ${store} (unconfirmed)`);
+                  redeem_action = 'unknown';
+                  if (cfg.debug) console.debug(`  Response: ${rt}`);
+                  log.warn(`${title} — unknown redeem response on ${store} (please report: issues/5)`);
                 }
-              } else {
-                redeem_action = 'unknown';
-                if (cfg.debug) console.debug(`  Response: ${rt}`);
-                log.warn(`${title} — unknown redeem response on ${store} (please report: issues/5)`);
+              } catch (e) {
+                // PrepareRedeem timed out (or one of the earlier iframe
+                // steps threw). Nothing was submitted — clean fall-through
+                // with default redeem_action = 'redeem' so the tally
+                // treats it as "user must redeem manually".
+                log.warn(`${title} — MS Store PrepareRedeem endpoint didn't respond in 60s — redeem manually at ${redeem_url}`);
+                if (cfg.debug) console.debug(`  Exception: ${String(e.message || e).split('\n')[0]}`);
               }
             }
           } else if (store == 'legacy games') {

@@ -4,6 +4,25 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.11.19
+
+**Fix: MS Store Prime→Store redemption timeout no longer crashes the entire Prime run.**
+
+Live report from @feldorn 2026-09-18: DOOM Eternal Prime→MS Store handoff — `page.waitForResponse: Timeout 60000ms exceeded while waiting for event "response"` — bubbled up as an unhandled exception, killed the whole Prime run mid-way, and posted a diagnostic banner requiring manual dismissal. The prior game in the same batch (Wall World 2) had already claimed successfully, so Prime itself was fine — only the MS-Store handoff choked.
+
+**Root cause:** the two `page.waitForResponse` calls in `prime-gaming.js` for `store-web.dynamics.com/v1.0/Redeem/PrepareRedeem` and `.../RedeemToken` had no try/catch. Any 60s timeout — whether from a transient MS backend hiccup, a Cloudflare / bot-check intercept, or MS quietly deprecating `store-web.dynamics.com` in favor of the newer `redeem.microsoft.com` / `xbox.com/redeem` hosts — threw straight up out of the Prime pass.
+
+**Fix:** wrap both `waitForResponse` calls in try/catch. On timeout the code logs cleanly (`MS Store PrepareRedeem endpoint didn't respond in 60s — redeem manually at <url>`), leaves `redeem_action` at its default `'redeem'` value — which the existing needsManual tally at line ~505 already handles as "surface the redeem URL + code so the user can redeem manually" — and falls through to the standard `page2.close()` + notification path. Same defensive pattern the login-required branch (line 424) has always used.
+
+**Behavior change:**
+- **Happy path:** unchanged (still auto-redeems successfully when MS responds).
+- **Old timeout behavior:** whole Prime run dies + diagnostic banner + entire batch's downstream games (if any) skipped.
+- **New timeout behavior:** the one stuck game gets marked "redeem manually" with a Pushover push containing the code + redeem URL, and every other game in the batch continues processing normally.
+
+Not extending the same guard to the GOG paths (lines 381 + 404) in this ship — no reports there, staying scope-tight. Will iterate if GOG's endpoints start timing out too.
+
+---
+
 ## What's new in 2.11.18
 
 **Fix: GamerPower manual-action pushes no longer fire daily for the same giveaway ([#119](https://github.com/feldorn/free-games-claimer/issues/119) xh43k follow-up).**
