@@ -4,6 +4,43 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.12.0
+
+**Feature: cross-service Steam-lookup quality filter ([#148](https://github.com/feldorn/free-games-claimer/issues/148) @DoSpamu).**
+
+Opt-in pre-claim gate that consults Steam as a single quality-signal source across every enabled claim script. Skips games whose Steam review-% and/or Metacritic score falls below your threshold, whose base price is at or below your price floor, or (further opt-in) that don't have a Steam page at all. Solves the "free game with 12 negative reviews still takes a library slot" problem — filters shovelware before it fills your library.
+
+**Design (per the #148 thread, agreed with @DoSpamu):**
+
+- **Single lookup source = Steam.** >95% of anything worth filtering also has a Steam SKU. Metacritic/OpenCritic/IGDB as primary sources have the wrong failure mode: the exact shovelware you want to filter is the stuff nobody reviewed, so those come back empty *precisely when you need them*. Steam has the broadest coverage.
+- **Two independent gates, both opt-in:**
+  - **Score gate:** normalise Steam review-% + Metacritic /100 to 0-10, take the LOWER of the two if both present. Skip if lowest < `quality.minScore` (default 5). Reasoning: 5 = skip clearly-bad, 8 = strict / DoSpamu-style.
+  - **Price gate:** skip if base price ≤ `quality.minBasePrice` (default $2), OR game is permanently-free-to-play. Catches the "no reviews at all" shovelware category that no score filter would ever touch.
+- **Third opt-in:** `quality.skipUnmatched` (default off) — skip when no Steam page found. Default off = safer (some good non-Steam-exclusive titles just aren't listed on Steam).
+- **Per-service opt-in via `quality.appliesTo`** — comma-separated list of `epic-games, gog, steam, prime-gaming, fab`. Empty default = gate OFF everywhere even if `enabled=true`. Safety belt so users who enable then forget to pick services don't accidentally filter.
+- **RAWG fallback deferred** per the thread — Steam-only in v1; add second lookup if the "no Steam page" gap actually bites users.
+
+**Implementation:**
+
+- New `src/quality-lookup.js` — three anonymous Steam API calls per uncached title (storesearch → appdetails → appreviews), results cached in `data/quality-lookup-cache.json` with a 30-day TTL. `checkQualityGate(service, title)` helper is called from all 5 claim scripts (epic-games, gog, steam, prime-gaming, fab) right at the decision point before the claim click. Silent no-op when the gate is disabled or the service isn't in `appliesTo`.
+- Skipped items get a terminal DB status of `filtered:quality:<badge>` (`price`, `score`, `no-steam-page`, `free-to-play`) plus a `qualityInfo` object recording the exact scores/price that triggered the skip. Terminal marking prevents re-lookup on subsequent runs — DB fastpath short-circuits.
+- One aggregate log line per run (per `feedback_aggregate_log_verbosity`): `Quality filter: checked=N passed=M skipped=K (price=X, score=Y, no-steam-page=Z)`. Silent when no games consulted the gate.
+- New Settings → Advanced → **Quality filter (Steam-lookup)** group with 5 fields: enable toggle, applies-to services list, min score, min price, skip-unmatched. Env-var equivalents: `QUALITY_ENABLED`, `QUALITY_MIN_SCORE`, `QUALITY_MIN_BASE_PRICE`, `QUALITY_SKIP_UNMATCHED`, `QUALITY_APPLIES_TO` (comma-separated).
+
+**Backward compatible:**
+
+- All defaults OFF/EMPTY — no existing deploy silently starts filtering on upgrade.
+- New DB fields (`filtered:quality:*` status, `qualityInfo` object) are additive; existing DB rows unaffected.
+- Cache file created on first lookup only; nothing to migrate.
+
+**Not shipped in v1 (follow-up ideas welcome):**
+
+- Discoveries-tab `QUALITY` badge with per-item hover-tooltip showing the score/price that triggered the skip. Rendering works today (`filtered:quality:*` status is a valid DB state) but a proper badge with reason exposure is deferred to v2.12.1.
+- Per-service score overrides (some users may want minScore=7 for Prime but minScore=4 for GOG). One global threshold in v1.
+- RAWG fallback for the "no Steam page" case.
+
+---
+
 ## What's new in 2.11.19
 
 **Fix: MS Store Prime→Store redemption timeout no longer crashes the entire Prime run.**

@@ -167,6 +167,51 @@ export const CONFIG_SCHEMA = [
     },
     validate: v => (typeof v === 'number' && v >= 0 && v < 24) ? null : 'expected 0-23' },
   { path: 'panel.publicUrl',                 env: 'PUBLIC_URL',                 type: 'string',  default: '' },
+  // ─── Quality filter (v2.12.0, #148 @DoSpamu) ────────────────────────
+  // Cross-service pre-claim gate that consults Steam as a single quality
+  // signal source. Skips games whose Steam review-% AND/OR Metacritic
+  // score falls below the user's threshold, or whose base price is at/
+  // below the price floor, or (opt-in) that don't have a Steam page at
+  // all. All fields default OFF/EMPTY so no existing deploy silently
+  // starts filtering on upgrade. See src/quality-lookup.js for the
+  // lookup logic + cache; hooked into per-service claim scripts through
+  // checkQualityGate(service, title).
+  { path: 'quality.enabled',                 env: 'QUALITY_ENABLED',            type: 'boolean', default: false, coerce: toBool },
+  { path: 'quality.minScore',                env: 'QUALITY_MIN_SCORE',          type: 'number',  default: 5,
+    coerce: v => {
+      const n = Number(v);
+      return Number.isFinite(n) && n >= 0 && n <= 10 ? n : 5;
+    },
+    validate: v => (typeof v === 'number' && v >= 0 && v <= 10) ? null : 'expected 0-10' },
+  { path: 'quality.minBasePrice',            env: 'QUALITY_MIN_BASE_PRICE',     type: 'number',  default: 2,
+    coerce: v => {
+      const n = Number(v);
+      return Number.isFinite(n) && n >= 0 ? n : 2;
+    },
+    validate: v => (typeof v === 'number' && v >= 0) ? null : 'expected 0 or greater (USD)' },
+  { path: 'quality.skipUnmatched',           env: 'QUALITY_SKIP_UNMATCHED',     type: 'boolean', default: false, coerce: toBool },
+  // Which claim scripts consult the quality gate. Empty array = gate
+  // OFF everywhere even when enabled=true (extra safety belt so users
+  // who enable then forget to pick services don't accidentally filter).
+  // Env format: comma-separated (QUALITY_APPLIES_TO=epic-games,gog,steam).
+  // Only auto-claim services are eligible; watch-only + MS Rewards +
+  // AliExpress excluded (they don't call the gate).
+  { path: 'quality.appliesTo',               env: 'QUALITY_APPLIES_TO',         type: 'array',
+    default: [],
+    coerce: v => {
+      const valid = new Set(['epic-games', 'gog', 'steam', 'prime-gaming', 'fab']);
+      if (Array.isArray(v)) {
+        return [...new Set(v.map(String).map(s => s.trim()).filter(s => valid.has(s)))].sort();
+      }
+      const parts = String(v || '').split(/[,\s]+/).map(s => s.trim()).filter(Boolean);
+      return [...new Set(parts.filter(s => valid.has(s)))].sort();
+    },
+    validate: v => {
+      if (!Array.isArray(v)) return 'expected array of service ids';
+      const valid = new Set(['epic-games', 'gog', 'steam', 'prime-gaming', 'fab']);
+      for (const s of v) if (!valid.has(s)) return `unknown service '${s}' (allowed: ${[...valid].join(', ')})`;
+      return null;
+    } },
   // Web-UI authentication (D#145, v2.11.12). Two-layer:
   //   • `panel.authEnabled` + `panel.passwordHash` — Settings-tab managed,
   //     persistent (bcrypt hash in data/config.json). Preferred.

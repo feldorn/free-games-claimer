@@ -3,6 +3,7 @@ import { authenticator } from 'otplib';
 import { existsSync } from 'fs';
 import { resolve, jsonDb, datetime, filenamify, prompt, confirm, notify, html_game_list, closeContextSafely, log } from '#src/util.js';
 import { launchContext, gotoWithRetry } from '#src/browser.js';
+import { checkQualityGate, newQualityTally, recordQualityResult, formatQualityTally } from '#src/quality-lookup.js';
 import { cfg } from '#src/config.js';
 import { siteVersion } from '#src/sites.js';
 
@@ -45,6 +46,7 @@ if (cfg.debug) console.log(chromium.executablePath());
 if (!cfg.debug) context.setDefaultTimeout(cfg.timeout);
 
 const notify_assets = [];
+const qualityTally = newQualityTally(); // v2.12.0 (#148)
 let user;
 
 // Resolve the signed-in FAB user. The whole site (page + /i/ API) sits
@@ -272,6 +274,23 @@ try {
         continue;
       }
 
+      // v2.12.0 (#148 @DoSpamu): FAB assets (Unreal packs, sound
+      // libraries, etc.) mostly won't have Steam pages so the gate is
+      // mostly a no-op here unless skipUnmatched is on. When Steam
+      // does have the asset (game assets by known devs, e.g. Studio
+      // Fjuna's Nordic Fishing Hut is on Steam too), the gate applies
+      // normally.
+      {
+        const qResult = await checkQualityGate('fab', title);
+        recordQualityResult(qualityTally, qResult);
+        if (!qResult.pass) {
+          log.skip(title, `quality gate — ${qResult.reason}`);
+          db.data[user][id] = { ...(db.data[user][id] || {}), title, time: datetime(), url, status: `filtered:quality:${qResult.badge?.split(':')[1] || 'other'}`, qualityInfo: qResult.info };
+          notify_asset.status = 'filtered:quality';
+          if (cfg.time) console.timeEnd('claim asset');
+          continue;
+        }
+      }
       log.game(title, viaCheckout ? 'claiming (Buy now → €0 checkout)' : 'claiming');
       await acquire.scrollIntoViewIfNeeded().catch(() => {});
       await acquire.click({ delay: 11 });
@@ -445,6 +464,8 @@ try {
     alreadyOwned: notify_assets.filter(g => g.status === 'existed').length,
     failed: notify_assets.filter(g => g.status.startsWith('failed')).length,
   });
+  // v2.12.0 (#148): quality gate aggregate — silent no-op when disabled.
+  { const qLine = formatQualityTally(qualityTally); if (qLine) log.info(qLine); }
 } catch (error) {
   process.exitCode ||= 1;
   log.exception(error);

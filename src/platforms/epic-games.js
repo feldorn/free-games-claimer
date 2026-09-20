@@ -4,6 +4,7 @@ import path from 'path';
 import { existsSync, writeFileSync } from 'fs';
 import { resolve, jsonDb, datetime, filenamify, prompt, confirm, notify, html_game_list, closeContextSafely, log } from '#src/util.js';
 import { launchContext, gotoWithRetry } from '#src/browser.js';
+import { checkQualityGate, newQualityTally, recordQualityResult, formatQualityTally } from '#src/quality-lookup.js';
 import { cfg } from '#src/config.js';
 import { siteVersion } from '#src/sites.js';
 import { getMobileGames } from '#src/epic-games-mobile.js';
@@ -143,6 +144,7 @@ if (cfg.debug_network) {
 }
 
 const notify_games = [];
+const qualityTally = newQualityTally(); // v2.12.0 (#148)
 // Epic returns each free game twice — once for PC, once for Mobile (or
 // both PC variants for a single title). We process each entry to capture
 // per-variant state in the DB, but the human-readable "already in library"
@@ -629,6 +631,23 @@ try {
         if (cfg.time) console.timeEnd('claim game');
         continue;
       }
+      // v2.12.0 (#148 @DoSpamu): opt-in cross-service quality gate.
+      // No-op when disabled or 'epic-games' not in quality.appliesTo.
+      // Marks the DB row with a terminal filtered:quality status so
+      // subsequent runs short-circuit at the fastpath rather than
+      // re-querying Steam every run.
+      {
+        const qResult = await checkQualityGate('epic-games', title);
+        recordQualityResult(qualityTally, qResult);
+        if (!qResult.pass) {
+          log.skip(title, `quality gate — ${qResult.reason}`);
+          db.data[user][game_id].status = `filtered:quality:${qResult.badge?.split(':')[1] || 'other'}`;
+          db.data[user][game_id].qualityInfo = qResult.info;
+          notify_game.status = 'filtered:quality';
+          if (cfg.time) console.timeEnd('claim game');
+          continue;
+        }
+      }
       log.game(title, `claiming (${btnText})`);
       let captchaDetected = false;
       await purchaseBtn.click({ delay: 11 }); // got stuck here without delay (or mouse move), see #75, 1ms was also enough
@@ -993,6 +1012,8 @@ try {
     alreadyOwned: uniqueByTitle('existed'),
     failed: uniqueByTitle('failed'),
   });
+  // v2.12.0 (#148): quality gate aggregate — silent no-op when disabled.
+  { const qLine = formatQualityTally(qualityTally); if (qLine) log.info(qLine); }
 } catch (error) {
   process.exitCode ||= 1;
   log.exception(error);

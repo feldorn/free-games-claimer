@@ -4,6 +4,7 @@ import { resolve, jsonDb, datetime, filenamify, prompt, confirm, notify, html_ga
 import { cfg } from '#src/config.js';
 import { siteVersion } from '#src/sites.js';
 import { enqueueSteamKey } from '#src/pending-steam-keys.js';
+import { checkQualityGate, newQualityTally, recordQualityResult, formatQualityTally } from '#src/quality-lookup.js';
 
 const screenshot = (...a) => resolve(cfg.dir.screenshots, 'prime-gaming', ...a);
 
@@ -56,6 +57,7 @@ const PRIME_NAV = {
 };
 
 const notify_games = [];
+const qualityTally = newQualityTally(); // v2.12.0 (#148)
 const notify_pending = []; // separate list — sent in chunks to avoid Pushover body truncation
 let user;
 
@@ -262,6 +264,17 @@ try {
     const title = await (await card.locator('.item-card-details__body__primary')).innerText();
     const slug = await (await card.locator('a')).getAttribute('href');
     const url = BASE_URL + slug.split('?')[0];
+    // v2.12.0 (#148 @DoSpamu): quality gate for internal Prime games.
+    {
+      const qResult = await checkQualityGate('prime-gaming', title);
+      recordQualityResult(qualityTally, qResult);
+      if (!qResult.pass) {
+        log.skip(title, `quality gate — ${qResult.reason}`);
+        db.data[user][title] = { title, time: datetime(), url, store: 'Prime Gaming', status: `filtered:quality:${qResult.badge?.split(':')[1] || 'other'}`, qualityInfo: qResult.info };
+        skippedCount++;
+        continue;
+      }
+    }
     log.game(title, 'Prime Gaming');
     if (cfg.pg_timeLeft && await skipBasedOnTime(url)) { skippedCount++; continue; }
     if (cfg.dryrun) { skippedCount++; continue; }
@@ -294,6 +307,18 @@ try {
     const item_text = await page.innerText('[data-a-target="DescriptionItemDetails"]');
     const store = item_text.toLowerCase().replace(/.* on /, '').slice(0, -1);
     log.game(title, store);
+    // v2.12.0 (#148): quality gate for external Prime games (Epic/GOG/
+    // Steam/MS Store keys forwarded from Prime). Same shape as internal.
+    {
+      const qResult = await checkQualityGate('prime-gaming', title);
+      recordQualityResult(qualityTally, qResult);
+      if (!qResult.pass) {
+        log.skip(title, `quality gate — ${qResult.reason}`);
+        db.data[user][title] = { title, time: datetime(), url, store, status: `filtered:quality:${qResult.badge?.split(':')[1] || 'other'}`, qualityInfo: qResult.info };
+        skippedCount++;
+        continue;
+      }
+    }
     if (cfg.pg_timeLeft && await skipBasedOnTime(url)) { skippedCount++; continue; }
     if (cfg.dryrun) { skippedCount++; continue; }
     if (cfg.interactive && !await confirm()) { skippedCount++; continue; }
@@ -666,6 +691,8 @@ try {
     failed: failedCount,
     needsAction: needsActionCount,
   });
+  // v2.12.0 (#148): quality gate aggregate — silent no-op when disabled.
+  { const qLine = formatQualityTally(qualityTally); if (qLine) log.info(qLine); }
 } catch (error) {
   process.exitCode ||= 1;
   log.exception(error);

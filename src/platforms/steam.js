@@ -6,6 +6,7 @@ import { siteVersion } from '#src/sites.js';
 import { fetchGamerPowerGiveaways, filterFor as filterGpFor, resolveGamerPowerHref } from '#src/gamerpower.js';
 import { fetchFGFPosts, filterFor as filterFgfFor, cleanTitle as fgfClean } from '#src/freegamefindings.js';
 import { loadPendingKeys, dropKey, bumpKeyAttempt } from '#src/pending-steam-keys.js';
+import { checkQualityGate, newQualityTally, recordQualityResult, formatQualityTally } from '#src/quality-lookup.js';
 
 const screenshot = (...a) => resolve(cfg.dir.screenshots, 'steam', ...a);
 
@@ -83,6 +84,7 @@ if (!cfg.debug) context.setDefaultTimeout(cfg.timeout);
 await page.setViewportSize({ width: cfg.width, height: cfg.height });
 
 const notify_games = [];
+const qualityTally = newQualityTally(); // v2.12.0 (#148)
 let user;
 
 // Steam's public storesearch JSON API — anonymous, returns matches for
@@ -770,6 +772,20 @@ try {
       continue;
     }
 
+    // v2.12.0 (#148 @DoSpamu): opt-in cross-service quality gate. No-op
+    // when disabled or when 'steam' isn't in quality.appliesTo. Skips
+    // are terminal — DB status persists so subsequent runs short-circuit
+    // via the DB fastpath (existed/claimed check at loop top).
+    const qResult = await checkQualityGate('steam', title);
+    recordQualityResult(qualityTally, qResult);
+    if (!qResult.pass) {
+      log.skip(title, `quality gate — ${qResult.reason}`);
+      db.data[user][appId].status = `filtered:quality:${qResult.badge?.split(':')[1] || 'other'}`;
+      db.data[user][appId].qualityInfo = qResult.info;
+      skipped++;
+      continue;
+    }
+
     log.game(title, `free-to-keep${endStr}`);
 
     if (cfg.dryrun) {
@@ -849,6 +865,10 @@ try {
     display: 'alreadyOwned',
     alreadyOwned: existed,
   });
+  // v2.12.0 (#148): one aggregate line per run when the gate ran at all
+  // (per feedback_aggregate_log_verbosity). Silent no-op when disabled.
+  const qLine = formatQualityTally(qualityTally);
+  if (qLine) log.info(qLine);
 
   // Prime→Steam key drain (v2.11.0 / 2A). If Prime queued Steam keys
   // this run (or a previous run left transient failures), redeem them

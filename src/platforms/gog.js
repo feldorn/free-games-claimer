@@ -1,4 +1,5 @@
 import { launchContext, gotoWithRetry } from '#src/browser.js';
+import { checkQualityGate } from '#src/quality-lookup.js';
 import { existsSync, readFileSync, appendFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { resolve, jsonDb, datetime, filenamify, prompt, confirm, notify, html_game_list, log, normalizeTitle, awaitUserCaptchaSolve, matchKey, stripGpTail, getDiscoveryUserMarkedKeys, delay, dataDir } from '#src/util.js';
@@ -319,6 +320,19 @@ try {
     const match_all = text.match(/Claim (.*) and don't miss the|Success! (.*) was added to/);
     const title = match_all[1] ? match_all[1] : match_all[2];
     const url = await banner.locator('a').first().getAttribute('href');
+    // v2.12.0 (#148 @DoSpamu): opt-in cross-service quality gate. No-op
+    // when disabled or 'gog' not in quality.appliesTo. GOG runs one
+    // giveaway per pass; on skip we mark the DB row terminal so the
+    // homepage-banner check on future runs still notes we saw it but
+    // deliberately skipped it, avoiding re-notify.
+    const qResult = await checkQualityGate('gog', title);
+    if (!qResult.pass) {
+      log.skip(title, `quality gate — ${qResult.reason}`);
+      db.data[user][title] = { title, time: datetime(), url, status: `filtered:quality:${qResult.badge?.split(':')[1] || 'other'}`, qualityInfo: qResult.info };
+      // No notify_games push — deliberate: quality-filtered items are
+      // silent by design (the user asked to filter them; a notification
+      // per filter defeats the purpose).
+    } else {
     log.game(title, url);
     db.data[user][title] ||= { title, time: datetime(), url };
     if (cfg.dryrun) process.exit(1);
@@ -367,6 +381,7 @@ try {
       await page.locator('li:has-text("Marketing communications through Trusted Partners") label').uncheck();
       await page.locator('li:has-text("Promotions and hot deals") label').uncheck();
     }
+    } // v2.12.0 (#148) close of quality-gate else — see line 335
   }
 
   // Catalog watch — discover GOG games that are free outside the homepage

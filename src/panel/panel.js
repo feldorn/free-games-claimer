@@ -6409,6 +6409,13 @@ function fieldRow(path, label, extra) {
   } else if (extra.multiline) {
     const sensAttr = sensitive ? ' data-sensitive-state="' + sensState + '"' : '';
     inputHtml = '<textarea' + sensAttr + ' oninput="setSettingValue(\\'' + path + '\\', this.value)">' + escapeHtml(value || '') + '</textarea>';
+  } else if (f.type === 'array') {
+    // v2.12.0 (#148): text-input on the joined value; comma-or-whitespace
+    // split on change. Schema coerce filters invalid tokens, so a typo
+    // like "epicgames" (missing hyphen) drops silently rather than
+    // rejecting the whole save.
+    const asStr = Array.isArray(value) ? value.join(', ') : '';
+    inputHtml = '<input type="text" value="' + escapeHtml(asStr) + '" oninput="setSettingValue(\\'' + path + '\\', this.value.split(/[,\\s]+/).map(s => s.trim()).filter(Boolean))">';
   } else {
     const sensAttr = sensitive ? ' data-sensitive-state="' + sensState + '"' : '';
     inputHtml = '<input type="text"' + sensAttr + ' value="' + escapeHtml(value || '') + '" oninput="setSettingValue(\\'' + path + '\\', this.value)">';
@@ -6793,6 +6800,22 @@ function paintSettings() {
       settingGroup('Logs',
         fieldRow('advanced.runHistoryMax', 'Past runs to retain', { unit: 'runs', hint: 'How many completed runs to keep in data/runs.json for the Logs tab Past-runs picker. Older entries are trimmed when this limit is exceeded. Higher = longer history but bigger file (~50 KB per run on average).' }) +
         fieldRow('advanced.recentClaimsLimit', 'Recent claims to show on Stats tab', { unit: 'claims', hint: 'How many entries to load into the Stats tab\\'s Recent claims list. Underlying per-service claim DBs always retain everything — this only controls how many surface in the panel. Default 200 covers ~2-3 months of typical activity; raise to 500 (the hard ceiling) if you check the panel monthly or less.' })
+      ) +
+      // v2.12.0 (#148 @DoSpamu): Steam-lookup quality filter — opt-in
+      // pre-claim gate that skips games below a score threshold or price
+      // floor. Uses Steam as the single quality signal source across all
+      // enabled claim scripts. See src/quality-lookup.js + CHANGELOG.
+      settingGroup('Quality filter (Steam-lookup)',
+        fieldRow('quality.enabled', 'Enable quality filter',
+          { hint: 'When on, each claim script listed in "Applies to" below consults Steam for the game\\'s user-review score, Metacritic score, and base price before claiming. Skips games below your thresholds. Default OFF — existing deploys keep claiming everything as they always have.' }) +
+        fieldRow('quality.appliesTo', 'Applies to (comma-separated)',
+          { hint: 'Which claim scripts consult the gate. Comma-separated ids from: epic-games, gog, steam, prime-gaming, fab. Leave empty to disable the gate everywhere (extra safety belt even when enabled=true).' }) +
+        fieldRow('quality.minScore', 'Minimum score (0-10)',
+          { hint: 'Skip games whose LOWER of {review-%/10, Metacritic/10} falls below this. Default 5 = skip only the clearly-bad ones. 8 = strict (skips lots of decent indies too). If neither score is available, the score gate is skipped for that game.' }) +
+        fieldRow('quality.minBasePrice', 'Minimum base price (USD)',
+          { hint: 'Skip games whose base (non-sale) price is at or below this. Also skips permanently-free-to-play games (which fill your library without ever being games you\\'d otherwise buy). Default $2 = catches shovelware with no reviews.' }) +
+        fieldRow('quality.skipUnmatched', 'Skip games with no Steam page',
+          { hint: 'Off (default): games not found on Steam pass through. On: skip them. Non-Steam-exclusive titles that Steam simply doesn\\'t list are typically low-quality outliers, but the safe default is to not skip on absence.' })
       );
   }
 
@@ -6945,7 +6968,7 @@ function updateSettingsFooter() {
     if (path.startsWith('scheduler.')) sectionCounts.scheduler++;
     else if (path.startsWith('notifications.') || path.startsWith('panel.')) sectionCounts.notifications++;
     else if (path.startsWith('services.')) sectionCounts.services++;
-    else if (path.startsWith('advanced.')) sectionCounts.advanced++;
+    else if (path.startsWith('advanced.') || path.startsWith('quality.')) sectionCounts.advanced++;
   }
   document.querySelectorAll('.settings-rail .rail-btn').forEach(b => {
     const section = b.dataset.section;
