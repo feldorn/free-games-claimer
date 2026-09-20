@@ -4,6 +4,20 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.11.18
+
+**Fix: GamerPower manual-action pushes no longer fire daily for the same giveaway ([#119](https://github.com/feldorn/free-games-claimer/issues/119) xh43k follow-up).**
+
+@xh43k reported daily Pushover notifications for **"SWAPMEAT Steam Game Key Giveaway (via GamerPower)"** — an Alienware Arena promo that GamerPower labels "Steam" (the key is for a Steam game) but distributes via `alienwarearena.com/ucf/show/...` under an ARP-points redemption gate. fgc's Steam runner didn't have a Steam `/app/<id>/` URL to visit, so it fell through to the manual-action notify path — and that path had no dedup. Every daily run re-pushed the same "claim manually" alert for the same expired/locked giveaway.
+
+**Fix:** synthesise a `manual::<matchkey>` row in `data/steam.json` with `status: 'notified:manual-action'` on first surfacing. Subsequent runs short-circuit before the `notify_games.push` — one notification per giveaway per fgc install, then silence forever (or until the user deletes the row to re-notify, which is rare — by then the promo has usually ended anyway). Discoveries-tab visibility is unaffected: the tab renders manual-action items separately, so users can still see them if they want to try claiming through the aggregator's platform.
+
+Same terminal-marking pattern used for `skipped:requires-base-game` in v2.8.79 (also from #119) and `skipped:not-free` in the price-filter path. Reuses the existing Steam DB — no new file, no new schema.
+
+**Migration note for existing deploys:** entries that got re-notified before v2.11.18 will now stop after their next run (which writes the synthetic row). No manual cleanup needed.
+
+---
+
 ## What's new in 2.11.17
 
 **Fix: Epic goto hang when a previous game's checkout modal is still open ([#151](https://github.com/feldorn/free-games-claimer/issues/151) hyperactive68 on v2.11.16).**
