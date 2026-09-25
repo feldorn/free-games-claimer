@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, unlinkSync, lstatSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, unlinkSync, lstatSync, renameSync, statSync } from 'node:fs';
 // Defined in paths.js and re-exported here, which is where the rest of the tree
 // imports them from.
 import { dataDir, rootDir } from './paths.js';
@@ -44,7 +44,52 @@ function writeJournalEntry(entry) {
 
 // json database
 import { JSONFilePreset } from 'lowdb/node';
-export const jsonDb = (file, defaultData) => JSONFilePreset(dataDir(file), defaultData);
+// v2.12.1 (coolius #156, 2026-09-25): defensive wrapper around
+// JSONFilePreset. A corrupt JSON file (typical shape: filesystem crash
+// or power loss left the file zeroed out with null bytes) throws
+// SyntaxError at boot from lowdb's parse, killing the whole claim
+// script. Concrete case: coolius on v2.12.0 saw:
+//   SyntaxError: Unexpected token '\0', ""... is not valid JSON
+//       at JSONFile.parse
+//       at JSONFilePreset
+//       at file:///fgc/src/platforms/gog.js:52
+// Both gog.json and steam.json corrupted, script died at DB-load. Now:
+// try the normal load; on parse-family failure, rotate the bad file to
+// <name>.corrupt.<timestamp> (preserving forensic evidence + never
+// silently deleting user data), log at warn, then re-try with the
+// default. Empty files (size:0) also rotate — an empty JSON file is
+// technically invalid and hits the same throw. Non-parse errors (EACCES,
+// EIO) still throw — those are ops issues, not corruption we can fix
+// by starting fresh. Idempotent: a second corruption on the rotated
+// file would fail loudly.
+export const jsonDb = async (file, defaultData) => {
+  const fullPath = dataDir(file);
+  try {
+    return await JSONFilePreset(fullPath, defaultData);
+  } catch (e) {
+    const msg = String(e?.message || e);
+    const isParseFail = /SyntaxError|JSON|Unexpected (token|end)|parse/i.test(msg);
+    if (!isParseFail) throw e;
+    let size = null;
+    try { size = statSync(fullPath).size; } catch { /* file may not exist — re-throw original */ }
+    if (size === null) throw e;
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const backup = fullPath + '.corrupt.' + stamp;
+    try {
+      renameSync(fullPath, backup);
+      // Console-only log (log helper isn't loaded here — circular import).
+      console.warn(`[jsonDb] ${file} was corrupt (${size} bytes, ${msg.split('\n')[0]}); moved to ${backup} and starting with defaults.`);
+    } catch (renameErr) {
+      // Rename failed (rare — read-only mount, permissions). Try delete
+      // as a last resort so the run can continue with defaults; if
+      // delete also fails, re-throw the original parse error so the
+      // user sees the real problem.
+      try { unlinkSync(fullPath); console.warn(`[jsonDb] ${file} corrupt + rename failed, deleted instead. Original error: ${msg.split('\n')[0]}`); }
+      catch { throw e; }
+    }
+    return JSONFilePreset(fullPath, defaultData);
+  }
+};
 
 // Sleep that can be interrupted by SIGTERM/SIGINT. The previous plain
 // setTimeout-Promise made the script unresponsive to the panel's Stop

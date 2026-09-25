@@ -4,6 +4,29 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.12.1
+
+**Fix: corrupt `data/*.json` no longer crashes the whole claim script at boot ([#156](https://github.com/feldorn/free-games-claimer/issues/156) @coolius).**
+
+Reported live 2026-09-25: both `data/gog.json` and `data/steam.json` got zeroed out on @coolius's host (typical cause: filesystem crash / power loss / disk-full-mid-write), and every daily run for two+ weeks died at DB-load with:
+
+```
+SyntaxError: Unexpected token '', ""... is not valid JSON
+    at JSONFile.parse
+    at JSONFilePreset
+    at file:///fgc/src/platforms/gog.js:52
+```
+
+Epic + Prime worked fine because their DBs were intact — only GOG + Steam were bricked, but nothing in fgc knew to recover.
+
+**Fix:** wrapped the `jsonDb()` helper in `src/util.js` with a parse-error catch. On a SyntaxError-family failure, the bad file is rotated aside to `<name>.corrupt.<ISO-timestamp>` (preserving forensic evidence — never silently deleted), a warn is logged, and the DB is re-initialised with the module's default schema. Non-parse errors (EACCES, EIO, EROFS) still throw — those are ops issues that starting fresh wouldn't fix. If the rotate itself fails (rare — read-only mount, permissions), fgc falls back to deleting the bad file so the run can continue; if delete also fails, the original parse error re-throws so the user sees the real problem.
+
+Applies to every DB fgc reads through `jsonDb()` — per-service claim DBs (steam.json, gog.json, epic-games.json, prime-gaming.json, fab.json), state files (runs.json, scheduler-state.json, discoveries-state.json, github-watch.json, quality-lookup-cache.json, etc.). One helper, one wrap, universal coverage.
+
+**Migration:** existing corrupt files auto-recover on next run. New `<name>.corrupt.<timestamp>` files may appear alongside the fresh DBs — safe to delete once you've confirmed everything's working, or keep for debugging.
+
+---
+
 ## What's new in 2.12.0
 
 **Feature: cross-service Steam-lookup quality filter ([#148](https://github.com/feldorn/free-games-claimer/issues/148) @DoSpamu).**
