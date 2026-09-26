@@ -4,6 +4,25 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.12.2
+
+**Fix: Prime pending-redeem entries with status `'claimed'` now surface in the Alerts tab ([#155](https://github.com/feldorn/free-games-claimer/issues/155) @jcubby86).**
+
+Reported live 2026-09-25: DOOM Eternal MS-Store redeem code was firing daily Pushover notifications for 5+ days with no way to dismiss. jcubby86 opened the Alerts tab expecting to find Mark redeemed / Dismiss buttons (they exist and work) — but the entire "Pending Redemptions" section was empty. Their `#alertsRedeems` div rendered, just with no rows.
+
+**Root cause:** two-regex drift. `src/panel/panel.js` had `/claimed|redeemed|expired|invalid|dismissed|retries exhausted/i` as the terminal-status filter for pending-redeem lookups. `src/platforms/prime-gaming.js` had `/redeemed|expired|invalid/i` for the same purpose. When Prime successfully claims a code from Amazon but the external redemption (MS Store, GOG, Xbox etc.) still needs manual action, the entry's status is `'claimed'` — which prime-gaming.js correctly treats as pending (fires the daily notification), but panel.js wrongly treated as terminal (hidden from Alerts). Result: user gets nagged daily but has no UI to make it stop.
+
+**Fix:** two-part.
+
+1. Removed `claimed` from panel.js's terminal regex. Entries with status `'claimed'` now show in Alerts → Pending Redemptions with the same Mark redeemed / Dismiss buttons as other pending entries.
+2. Extracted the regex to a single module-scope constant (`PRIME_PENDING_TERMINAL_RX`) referenced by all three sites in panel.js that previously each had their own copy. Drift can't recur without changing the shared constant. Filed under `feedback_no_local_shadow_of_shared_helper` — one of three panel copies used to have subtly different tokens than the other two; even after the fix, keeping three separate copies would guarantee this recurs. One authoritative constant, three references.
+
+Affects the Alerts tab pending-redeem section, the notification-count badge (`/api/state.notifications`), and the HA `/api/hass/sensors` `pending_prime_redeems` count.
+
+@jcubby86: after pulling `:latest` on v2.12.2+, DOOM Eternal will appear in Alerts → Pending Redemptions. Click **Mark redeemed** (you already entered the code externally) or **Dismiss** (stop nagging without confirming) to clear the daily notification.
+
+---
+
 ## What's new in 2.12.1
 
 **Fix: corrupt `data/*.json` no longer crashes the whole claim script at boot ([#156](https://github.com/feldorn/free-games-claimer/issues/156) @coolius).**

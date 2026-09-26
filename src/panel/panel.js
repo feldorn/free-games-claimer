@@ -22,6 +22,20 @@ const NOVNC_PORT = process.env.NOVNC_PORT || 6080;
 // can't reach it). When set, buildNovncUrl() returns this verbatim and
 // skips host/port assembly. Issue #20.
 const NOVNC_URL = (process.env.NOVNC_URL || '').replace(/\/+$/, '');
+
+// v2.12.2 (jcubby86 #155): shared filter for Prime pending-redeem entries.
+// Extracted from three previously-duplicated copies in this file so drift
+// stops happening (v2.12.2 fixed a bug where all three copies included
+// `claimed`, hiding DOOM Eternal + similar from the Alerts tab / HA
+// sensors while the daily Prime run kept notifying about them). Must stay
+// in sync with prime-gaming.js:144 `/redeemed|expired|invalid/i` — this
+// superset adds `dismissed` (Alerts-tab Mark-dismissed action) and
+// `retries exhausted` (GOG retry-loop end state), both of which
+// prime-gaming.js filters via other mechanisms upstream.
+//
+// Filed under feedback_no_local_shadow_of_shared_helper — regex drift
+// across duplicated logic. Also see feedback_check_both_code_paths.
+const PRIME_PENDING_TERMINAL_RX = /redeemed|expired|invalid|dismissed|retries exhausted/i;
 // v2.11.12: legacy env-plaintext still supported. The panel bcrypt-hashes
 // it at boot into a memory-only variable; Settings-configured hash in
 // config.json takes precedence when both are set. `VNC_PASSWORD` fallback
@@ -2863,7 +2877,7 @@ async function flushDigest() {
     let alertBreakdown = '';
     try {
       const primeDb = await jsonDb('prime-gaming.json', {});
-      const terminalRx = /claimed|redeemed|expired|invalid|dismissed|retries exhausted/i;
+      const terminalRx = PRIME_PENDING_TERMINAL_RX;
       const manualStores = new Set(['microsoft store', 'xbox', 'microsoft', 'origin', 'ea app', 'gog.com']);
       let primePending = 0;
       for (const user of Object.values(primeDb.data || {})) {
@@ -9391,7 +9405,7 @@ const server = http.createServer(async (req, res) => {
         let pendingPrime = 0;
         try {
           const pgDb = await jsonDb('prime-gaming.json', {});
-          const terminalRx = /claimed|redeemed|expired|invalid|dismissed|retries exhausted/i;
+          const terminalRx = PRIME_PENDING_TERMINAL_RX;
           for (const user of Object.values(pgDb.data || {})) {
             if (!user || typeof user !== 'object') continue;
             for (const entry of Object.values(user)) {
@@ -10594,7 +10608,7 @@ const server = http.createServer(async (req, res) => {
           'ea app': 'https://www.origin.com/redeem',
           'gog.com': gogRedeemBase,
         };
-        const terminalRx = /claimed|redeemed|expired|invalid|dismissed|retries exhausted/i;
+        const terminalRx = PRIME_PENDING_TERMINAL_RX;
         const pendingPrime = [];
         try {
           const pgDb = await jsonDb('prime-gaming.json', {});
