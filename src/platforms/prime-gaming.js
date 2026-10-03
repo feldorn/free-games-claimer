@@ -287,7 +287,7 @@ try {
     'microsoft store': 'https://account.microsoft.com/billing/redeem',
     xbox: 'https://account.microsoft.com/billing/redeem',
   };
-  const terminalRx = /redeemed|expired|invalid/i;
+  const terminalRx = /redeemed|expired|invalid|dismissed/i;
   // GOG codes mid-retry-loop (gog.js cross-run redeem retry, 2.8.29+) are
   // skipped from the pending reminder — they're being handled automatically
   // and surfacing them in the notification every day creates noise. Only

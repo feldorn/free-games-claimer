@@ -571,7 +571,7 @@ try {
         if (!entry || typeof entry !== 'object') continue;
         if (entry.store !== 'gog.com') continue;
         if (!entry.code) continue;
-        if (/redeemed|expired|invalid/i.test(String(entry.status || ''))) continue;
+        if (/redeemed|expired|invalid|dismissed/i.test(String(entry.status || ''))) continue;
         candidates.push({ title, entry });
       }
     }
@@ -626,7 +626,7 @@ try {
       // surfaces in the Prime Gaming pending-redeem notification.
       const MAX_REDEEM_ATTEMPTS = Math.max(1, cfg.pg_redeem_max_attempts || 3);
       const RETRY_WAIT_MS = 90 * 1000;
-      const stillPending = candidates.filter(({ entry }) => !/redeemed|expired|invalid/i.test(String(entry.status || '')));
+      const stillPending = candidates.filter(({ entry }) => !/redeemed|expired|invalid|dismissed/i.test(String(entry.status || '')));
       if (stillPending.length) {
         // Skip codes that have already exhausted their retry budget.
         const overBudget = stillPending.filter(({ entry }) => (entry.redeemAttempts || 0) >= MAX_REDEEM_ATTEMPTS);

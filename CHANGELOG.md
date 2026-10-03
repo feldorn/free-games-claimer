@@ -4,6 +4,21 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.12.7
+
+**Fix: Alerts-tab Dismiss on a Prime pending code sticks across the next GOG / Prime run.**
+
+Dismissing a pending Prime redemption from the Alerts tab writes `status: "dismissed"` to the entry. The panel's `PRIME_PENDING_TERMINAL_RX` correctly treats that as terminal, so the Alerts tab + HA sensors drop it immediately — but the per-script filters in `prime-gaming.js` and `gog.js` still used the narrow `/redeemed|expired|invalid/i`, so:
+
+- `gog.js` would re-probe the dismissed GOG code on its next run. If GOG's probe captcha-gated it again, `redeemAttempts` incremented and the entry eventually overwrote `dismissed` with `claimed, redeem retries exhausted` — surfacing a Pushover notification the user had explicitly dismissed.
+- `prime-gaming.js` would surface a dismissed non-GOG code (MS Store, Xbox, Legacy Games) in the daily pending-redeem Pushover. GOG dismissed codes slipped through only because the `isAutoRetryingGogCode` upstream filter happened to hide them.
+
+**Fix:** add `|dismissed` to the two `gog.js` regexes (`gog.js:574` library reconcile, `gog.js:629` probe filter) and the one `prime-gaming.js:290` pending-notify filter. User-intent dismiss is now terminal everywhere, matching the panel's shared superset. Updated the panel-side comment that incorrectly asserted `prime-gaming.js` filtered `dismissed` upstream (true for GOG via the auto-retry gate; false for MS Store / Xbox / Legacy).
+
+Hit live during @feldorn's DOOM/GOG dismiss — Alerts dropped the entry, but tomorrow's GOG run would have ignored the dismiss and probed anyway. One of the regex-drift traps the shared `PRIME_PENDING_TERMINAL_RX` constant was supposed to prevent (see `feedback_no_local_shadow_of_shared_helper`).
+
+---
+
 ## What's new in 2.12.6
 
 **Fix: Prime Gaming claim locators are locale-proof ([#157](https://github.com/feldorn/free-games-claimer/issues/157) @h1nnak).**

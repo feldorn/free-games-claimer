@@ -28,10 +28,9 @@ const NOVNC_URL = (process.env.NOVNC_URL || '').replace(/\/+$/, '');
 // stops happening (v2.12.2 fixed a bug where all three copies included
 // `claimed`, hiding DOOM Eternal + similar from the Alerts tab / HA
 // sensors while the daily Prime run kept notifying about them). Must stay
-// in sync with prime-gaming.js:144 `/redeemed|expired|invalid/i` — this
-// superset adds `dismissed` (Alerts-tab Mark-dismissed action) and
-// `retries exhausted` (GOG retry-loop end state), both of which
-// prime-gaming.js filters via other mechanisms upstream.
+// in sync with prime-gaming.js + gog.js `/redeemed|expired|invalid|dismissed/i`
+// — this superset adds `retries exhausted` (GOG retry-loop end state),
+// which prime-gaming.js intentionally surfaces as a pending notification.
 //
 // Filed under feedback_no_local_shadow_of_shared_helper — regex drift
 // across duplicated logic. Also see feedback_check_both_code_paths.
