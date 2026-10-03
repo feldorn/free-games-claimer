@@ -481,7 +481,7 @@ try {
     if (cfg.pg_timeLeft && await skipBasedOnTime(url)) { skippedCount++; continue; }
     if (cfg.dryrun) { skippedCount++; continue; }
     if (cfg.interactive && !await confirm()) { skippedCount++; continue; }
-    await card.locator('.tw-button:has-text("Claim")').click();
+    await card.locator('button[data-a-target="FGWPOffer"]').click();
     db.data[user][title] ||= { title, time: datetime(), url, store: 'internal' };
     // External-store paths set status='claimed' (or '...and redeemed')
     // after their click; this internal path historically didn't, so
@@ -499,7 +499,7 @@ try {
   const external_info = [];
   for (const card of external) { // need to get data incl. URLs in this loop and then navigate in another, otherwise .all() would update after coming back and .elementHandles() like above would lead to error due to page navigation: elementHandle.$: Protocol error (Page.adoptNode)
     const title = await card.locator('.item-card-details__body__primary').innerText();
-    const slug = await card.locator('a:has-text("Claim")').first().getAttribute('href');
+    const slug = await card.locator('a[data-a-target="FGWPOffer"]').first().getAttribute('href');
     const url = BASE_URL + slug.split('?')[0];
     external_info.push({ title, url });
   }

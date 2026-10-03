@@ -4,6 +4,21 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.12.6
+
+**Fix: Prime Gaming claim locators are locale-proof ([#157](https://github.com/feldorn/free-games-claimer/issues/157) @h1nnak).**
+
+@h1nnak hit a 60s timeout on `a:has-text("Claim")` inside the FGWP (Free Games with Prime) external-offer card on a German Prime account. Amazon's Prime UI translates the "Claim" button label per locale (German sees "Anfordern" or similar), so the English-text locator never matched and the external redemption loop crashed before fetching the game slug.
+
+**Fix:** replace the English-only text match with the structural `data-a-target="FGWPOffer"` attribute that Amazon already uses to tag these elements for their own analytics — the parent card locator at `.item-card__action:has(…[data-a-target="FGWPOffer"])` was already relying on it, so swapping the inner selector is a strict improvement (same element, locale-independent). Applied to both the internal claim click and the external slug fetch:
+
+- `src/platforms/prime-gaming.js:484` — internal: `.tw-button:has-text("Claim")` → `button[data-a-target="FGWPOffer"]`
+- `src/platforms/prime-gaming.js:502` — external: `a:has-text("Claim")` → `a[data-a-target="FGWPOffer"]`
+
+**Scope note:** this clears the specific locator @h1nnak reported. Other English-only locators remain downstream (`"Collected"` already-claimed count, `"Get game"` / `"Complete Claim"` buy-box CTA, `"Success"` / `"You collected this"` success text, `"Get in-game content"` DLC path). Those haven't surfaced in a diagnostic report yet — happy to iterate if the next run on a non-English account hits one.
+
+---
+
 ## What's new in 2.12.5
 
 **Fix: Tier-2 auto-dismiss now actually clears one-off script errors.**
