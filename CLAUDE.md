@@ -17,7 +17,7 @@
 
 ## Current live state (update at end of each session)
 
-- **Version shipped:** v2.12.5 → HEAD may be past this; check `package.json` and latest git tag.
+- **Version shipped:** v2.12.7 → HEAD may be past this; check `package.json` and latest git tag.
 - **Container:** `ghcr.io/feldorn/free-games-claimer:latest`, running from `~/docker/docker-compose.yml`. Compose service name = `free-games-claimer`.
 - **Open PRs:** none.
 - **Open issues:** rolling. See `gh issue list --state open` and the 2-week close rule below.
@@ -188,5 +188,6 @@ These have all bitten the codebase. Read the memory file before touching the cor
 
 ## Session hygiene
 
-- Start of session: `git status`, check for uncommitted work; `gh pr list && gh issue list` for changes since last session.
-- End of session: if version changed, update this file's "Current live state" block. If a new landmine was hit, file it in memory AND add one bullet here.
+- **Start of session:** read `project_current_status` memory FIRST — it's the rolling handoff doc with shipped version, in-flight forks, open issue queue, and recent decisions. Then `git status` for uncommitted work; `gh pr list && gh issue list` for anything new since the status snapshot.
+- **Continuously during the session (not just at end):** update `project_current_status` on every ship, every issue close/open, every fork or background task spawned, every multi-turn decision. Also update this file's "Current live state" block when the shipped version, open-PR count, or landmine list changes. See `feedback_always_record_current_status`.
+- **New landmine hit:** file it in memory AND add one bullet to the Landmines section here.
