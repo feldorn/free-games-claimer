@@ -17,7 +17,7 @@
 
 ## Current live state (update at end of each session)
 
-- **Version shipped:** v2.12.7 → HEAD may be past this; check `package.json` and latest git tag.
+- **Version shipped:** v2.12.9 → HEAD may be past this; check `package.json` and latest git tag.
 - **Container:** `ghcr.io/feldorn/free-games-claimer:latest`, running from `~/docker/docker-compose.yml`. Compose service name = `free-games-claimer`.
 - **Open PRs:** none.
 - **Open issues:** rolling. See `gh issue list --state open` and the 2-week close rule below.
