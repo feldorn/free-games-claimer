@@ -77,19 +77,29 @@ try {
     const email = cfg.pg_email || await prompt({ message: 'Enter email' });
     const password = email && (cfg.pg_password || await prompt({ type: 'password', message: 'Enter password' }));
     if (email && password) {
-      await page.fill('[name=email]', email);
-      await page.click('input[type="submit"]');
+      // Amazon's account-chooser can skip the email step on a remembered
+      // account — don't fail the fill when the input isn't there.
+      const emailInput = page.locator('[name=email]');
+      if (await emailInput.isVisible()) {
+        await emailInput.fill(email);
+        await page.click('input[type="submit"]');
+      }
       await page.fill('[name=password]', password);
       // await page.check('[name=rememberMe]'); // no longer exists
       await page.click('input[type="submit"]');
-      page.waitForURL('**/ap/signin**').then(async () => { // check for wrong credentials
-        const error = await page.locator('.a-alert-content').first().innerText();
+      // Wait for the alert ELEMENT to be visible (vs. gating on
+      // waitForURL('**/ap/signin**') which fires on first nav too, when
+      // the alert isn't rendered yet — .first().innerText() then threw
+      // on an empty match set).
+      const loginError = page.locator('.a-alert-content').first();
+      loginError.waitFor({ state: 'visible' }).then(async () => {
+        const error = await loginError.innerText();
         if (!error.trim().length) return;
         log.fail(`Login error — ${error}`);
         await notify(`prime-gaming: login: ${error}`, { attachLatestScreenshot: true });
         await context.close(); // finishes potential recording
         process.exit(1);
-      });
+      }).catch(_ => { });
       // handle MFA, but don't await it
       page.waitForURL('**/ap/mfa**').then(async () => {
         log.info('Two-Step Verification — enter the OTP from your Authenticator App');

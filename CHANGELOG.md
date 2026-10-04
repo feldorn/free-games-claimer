@@ -4,6 +4,20 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.12.8
+
+**Fix: Prime Gaming login is now robust to Amazon's remembered-account chooser + empty login-error alerts.** Pulled from upstream [vogler/free-games-claimer#595](https://github.com/vogler/free-games-claimer/pull/595) by @davideasaf — just the Prime-side guards.
+
+Two latent crashes in the Prime login flow:
+
+1. **`src/platforms/prime-gaming.js:80`** did `page.fill('[name=email]', email)` unconditionally. Amazon's account chooser skips the email step entirely when the account is remembered — the `[name=email]` input isn't rendered, and the fill throws. Fix: wrap in `isVisible()` so the email step is skipped when Amazon already has it.
+
+2. **`src/platforms/prime-gaming.js:85-91`** gated the login-error check on `waitForURL('**/ap/signin**')`, which also matches the initial navigation to the signin page BEFORE any error is rendered. The subsequent `.first().innerText()` on `.a-alert-content` then threw on an empty match set. Fix: gate on `loginError.waitFor({ state: 'visible' })` (the actual alert element), then `.innerText()`. Also wraps the whole chain in `.catch(_ => {})` so a timeout on the successful-login path doesn't surface as an unhandled rejection.
+
+Credit to @davideasaf for the upstream patch. GOG-side changes from PR #595 were not pulled — Chris's fork's GOG login (multi-selector + API/cookie username fallback) is already more robust than the PR's addition.
+
+---
+
 ## What's new in 2.12.7
 
 **Fix: Alerts-tab Dismiss on a Prime pending code sticks across the next GOG / Prime run.**
