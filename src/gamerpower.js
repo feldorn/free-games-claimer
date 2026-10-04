@@ -16,6 +16,8 @@
 // is done inside each script using its existing browser context — see
 // resolveGamerPowerHref().
 
+import { urlHasAnyAllowedHost } from './url-security.js';
+
 const API_URL = 'https://www.gamerpower.com/api/giveaways?type=game';
 
 // Map our collector IDs (the canonical identifier each claim script
@@ -155,6 +157,12 @@ export function unhandledPlatforms(entries) {
 // The collector is expected to fall back gracefully on null — log the
 // GamerPower entry with its title + open_giveaway_url so the user can
 // claim manually.
+//
+// SECURITY: both the browser's current URL AND any candidate anchor
+// href on the rendered page are checked against COLLECTOR_DOMAINS via
+// strict hostname match (see `src/url-security.js`), not substring —
+// a malicious giveaway page can't lure the collector to
+// `https://evil.tld/store.epicgames.com` or similar lookalikes.
 export async function resolveGamerPowerHref(context, openUrl, collector, { timeoutMs = 30000 } = {}) {
   const domains = COLLECTOR_DOMAINS[collector];
   if (!domains || !domains.length) return null;
@@ -170,17 +178,22 @@ export async function resolveGamerPowerHref(context, openUrl, collector, { timeo
     while (Date.now() < deadline) {
       // (a) we navigated to a store domain directly
       const curUrl = tab.url();
-      if (domains.some(d => curUrl.includes(d))) return curUrl;
-      // (b) anchor on the rendered page points at the store domain
-      const href = await tab.evaluate((domainList) => {
+      if (urlHasAnyAllowedHost(curUrl, domains, { allowSubdomains: true })) return curUrl;
+      // (b) anchor on the rendered page points at the store domain. Resolve
+      // relative hrefs against the page's base URL before the host check so
+      // on-page relative anchors don't accidentally pass (they'd stay inside
+      // gamerpower.com anyway) and absolute hrefs are compared as-parsed.
+      const href = await tab.evaluate(() => {
         const anchors = Array.from(document.querySelectorAll('a[href]'));
-        for (const a of anchors) {
-          const h = a.getAttribute('href') || '';
-          if (domainList.some(d => h.includes(d))) return h;
-        }
-        return null;
-      }, domains).catch(() => null);
-      if (href) return href;
+        // Return every absolute candidate URL and let the host check run
+        // in Node — the strict matcher isn't available in the page context.
+        return anchors.map(a => {
+          try { return new URL(a.getAttribute('href') || '', document.baseURI).href; }
+          catch { return null; }
+        }).filter(Boolean);
+      }).catch(() => []);
+      const matched = (href || []).find(h => urlHasAnyAllowedHost(h, domains, { allowSubdomains: true }));
+      if (matched) return matched;
       await tab.waitForTimeout(1000);
     }
     return null;

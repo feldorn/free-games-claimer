@@ -73,6 +73,7 @@ export const COLLECTOR_TITLE_PATTERNS = {
 // Reusing the same collector→domain map keeps the URL-validation rule
 // consistent between this and the gamerpower helper.
 import { COLLECTOR_DOMAINS } from './gamerpower.js';
+import { urlHasAnyAllowedHost } from './url-security.js';
 
 // Other-script domains we exclude from FGF results because the post is
 // already cross-posting a giveaway one of our watchers handles directly.
@@ -131,8 +132,10 @@ export async function fetchFGFPosts({ maxAgeHours = 72 } = {}) {
       // the comments thread on reddit.com). Skip those — without an external
       // URL there's nothing to claim.
       if (/^https?:\/\/(www\.)?reddit\.com\//i.test(p.url)) return false;
-      // Skip cross-posts of watchers we already cover natively.
-      if (COVERED_BY_OTHER_SCRIPTS.some(d => p.url.includes(d))) return false;
+      // Skip cross-posts of watchers we already cover natively. Strict
+      // hostname match (not substring) — a crafted URL like
+      // `https://evil.tld/?r=gaming.lenovo.com` must not bypass the filter.
+      if (urlHasAnyAllowedHost(p.url, COVERED_BY_OTHER_SCRIPTS, { allowSubdomains: true })) return false;
       return true;
     })
     .map(p => ({
@@ -154,7 +157,11 @@ export function filterFor(posts, collector) {
   const titlePat = COLLECTOR_TITLE_PATTERNS[collector];
   const domains = COLLECTOR_DOMAINS[collector];
   if (!titlePat || !domains) return [];
-  return posts.filter(p => titlePat.test(p.title) && domains.some(d => p.url.includes(d)));
+  // Strict hostname match (not substring) — otherwise a Reddit post with
+  // title `[Epic Games] (Game) ...` and url `https://evil.tld/?r=store.epicgames.com`
+  // would substring-match store.epicgames.com and route evil.tld into the
+  // Epic Games collector. See `src/url-security.js`.
+  return posts.filter(p => titlePat.test(p.title) && urlHasAnyAllowedHost(p.url, domains, { allowSubdomains: true }));
 }
 
 // Strip the `[Platform] (Kind) ` prefix from a title for cleaner log/

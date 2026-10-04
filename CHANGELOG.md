@@ -4,6 +4,38 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.12.9
+
+**Fix: strict hostname check for third-party discovery URLs — substring matches are gone.**
+
+The GamerPower + r/FreeGameFindings discovery pipeline previously routed third-party URLs by substring (`url.includes("gog.com")`). A crafted entry — a malicious Reddit post, or a compromised GamerPower `/open/` page — could have slipped a lookalike URL past three different filters:
+
+- `freegamefindings.js:135` already-covered-by-another-script exclude
+- `freegamefindings.js:157` per-collector include (title + domain)
+- `gamerpower.js resolveGamerPowerHref` tab-url + anchor-href check (used when the collector follows a GamerPower `/open/` redirect to capture the real claim URL)
+
+Attack shapes `url.includes("gog.com")` passes but the strict check rejects:
+- `https://gog.com.evil.tld/x` (eTLD attached to the "allowed" string)
+- `https://evil-gog.com/x` / `https://notgog.com/x` (lookalike)
+- `https://gog.com.co/x` (allowed string as a subdomain in a different TLD)
+- `https://evil.tld/?r=gog.com` (allowed string in the query, not the host)
+- `http://www.gog.com/x` (plain-HTTP downgrade)
+
+**Fix:** new `src/url-security.js` module with `urlHasAllowedHost` / `urlHasAnyAllowedHost`:
+
+- HTTPS-only (plain-HTTP rejected).
+- Strict `hostname === allowed` match, or (opt-in) `hostname.endsWith('.' + allowed)` for subdomain acceptance.
+- Case-insensitive; trailing hostname dots stripped.
+- Garbage input (non-string, unparseable, empty hostname) returns false.
+
+All three substring-match call sites switched to the strict helper with `allowSubdomains: true` (necessary because the collector-domain lists contain apex entries like `gog.com` + `amazon.com` that must still accept `www.gog.com` / `gaming.amazon.com`). `resolveGamerPowerHref` also resolves relative anchor hrefs against the page's base URL before the host check, so an on-page relative anchor can't accidentally pass.
+
+Twenty-one unit tests at `test/url-security.js` cover every attack shape above plus the legitimate paths. Run with `node test/url-security.js`.
+
+Ported from [P-Adamiec/Free-Games-Claimer-Remaster](https://github.com/P-Adamiec/Free-Games-Claimer-Remaster)'s `src/core/url_security.py` — credit to that project's author for the pattern. The P-Adamiec file carries a comment that this exact substring issue once triggered a CodeQL alert in the upstream repo; porting the fix here closes the same class of alert at our own call sites.
+
+---
+
 ## What's new in 2.12.8
 
 **Fix: Prime Gaming login is now robust to Amazon's remembered-account chooser + empty login-error alerts.** Pulled from upstream [vogler/free-games-claimer#595](https://github.com/vogler/free-games-claimer/pull/595) by @davideasaf — just the Prime-side guards.
