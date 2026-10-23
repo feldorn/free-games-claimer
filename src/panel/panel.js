@@ -887,6 +887,7 @@ function _captureErrorContext() {
         ms_redeem_threshold: cfg.ms_redeem_threshold,
         ms_run_with_main_chain: !!cfg.ms_run_with_main_chain,
         ae_credsSet: has('AE_EMAIL') && has('AE_PASSWORD'),
+        joybuy_credsSet: (has('JOYBUY_EMAIL') || has('EMAIL')) && (has('JOYBUY_PASSWORD') || has('PASSWORD')),
         pg_credsSet: has('PG_EMAIL') || has('EMAIL'),
         eg_credsSet: has('EG_EMAIL') || has('EMAIL'),
         steam_credsSet: has('STEAM_EMAIL') || has('EMAIL'),
@@ -1134,9 +1135,11 @@ function activeServices() {
 // If nothing matches, returns null so the caller can report it.
 function buildClaimCommand({ manual = false, sites = null } = {}) {
   const targetSet = sites ? new Set(sites) : activeServices();
+  const sched = getSchedulerConfig();
   const parts = [];
   for (const entry of CLAIM_SCRIPT_ORDER) {
     if (!sites && manual && entry.id === 'microsoft') continue;
+    if (!sites && entry.id === 'joybuy' && (sched.joybuyHours || 0) > 0) continue;
     // microsoft.js covers both desktop + mobile — invoke once if either ID
     // is in the target set.
     const ids = [entry.id].concat(entry.linkedWith ? [entry.linkedWith] : []);
@@ -2053,6 +2056,9 @@ function runAllScripts({ source = 'panel', sites = null, extraEnv = null } = {})
       if ((code === 0 || msReportedOk) && /\bmicrosoft\.js\b/.test(cmd)) {
         try { markMsRunFiredToday(); } catch {}
       }
+      if (code === 0 && /\bjoybuy\.js\b/.test(cmd)) {
+        try { markJoybuyRunFiredToday(); } catch {}
+      }
       // Persist the scheduler-main completion timestamp so a panel
       // restart doesn't reset the bare-LOOP wake clock (issue #32).
       // We persist regardless of exit code — the intent is "scheduler
@@ -2116,9 +2122,12 @@ const MS_SCHEDULE_START = cfg.ms_schedule_start;
 
 let nextMainRun = null;       // Date | null — main chain wake
 let nextMsRun = null;         // Date | null — MS-only wake (decoupled mode)
+let nextJoybuyRun = null;     // Date | null — Joybuy-only wake (window mode)
 let msTodayState = null;      // last-read MS schedule state, for getState()
+let joybuyTodayState = null;  // last-read Joybuy schedule state, for getState()
 
 const MS_SCHEDULE_FILE = dataDir('ms-schedule-today.json');
+const JOYBUY_SCHEDULE_FILE = dataDir('joybuy-schedule-today.json');
 
 function todayKey(d = new Date()) {
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
@@ -2168,6 +2177,43 @@ function pickMsTargetFor(dateKey, c) {
     // If the floor sits at or past the ceiling, leave it equal — the
     // boot-time recovery in computeMsWakeMs will still reschedule the
     // remaining-window pick (sub-case 2) or mark missed (sub-case 3).
+    if (minOffsetMin >= maxOffsetMin) minOffsetMin = maxOffsetMin - 1;
+  }
+  const span = Math.max(1, maxOffsetMin - minOffsetMin);
+  const offsetMinutes = minOffsetMin + Math.floor(Math.random() * span);
+  target.setHours(startHour, offsetMinutes, 0, 0);
+  return { date: dateKey, target: target.toISOString(), status: 'pending' };
+}
+
+function readJoybuyScheduleToday() {
+  try {
+    if (!existsSync(JOYBUY_SCHEDULE_FILE)) return null;
+    const raw = readFileSync(JOYBUY_SCHEDULE_FILE, 'utf8');
+    if (!raw.trim()) return null;
+    const p = JSON.parse(raw);
+    if (!p || !p.date || !p.target || !p.status) return null;
+    return p;
+  } catch { return null; }
+}
+function writeJoybuyScheduleToday(state) {
+  try {
+    mkdirSync(path.dirname(JOYBUY_SCHEDULE_FILE), { recursive: true });
+    writeFileSync(JOYBUY_SCHEDULE_FILE, JSON.stringify(state, null, 2) + '\n');
+  } catch (e) {
+    console.error(`[${datetime()}] Scheduler (Joybuy): failed to persist schedule: ${e.message}`);
+  }
+}
+function pickJoybuyTargetFor(dateKey, c) {
+  const [y, m, d] = dateKey.split('-').map(Number);
+  const target = new Date(y, m - 1, d);
+  const startHour = c.joybuyStart;
+  const now = Date.now();
+  const windowStart = new Date(y, m - 1, d, startHour, 0, 0, 0).getTime();
+  const windowEnd = windowStart + c.joybuyHours * 3600 * 1000;
+  let minOffsetMin = 0;
+  let maxOffsetMin = c.joybuyHours * 60;
+  if (dateKey === todayKey() && now > windowStart && now < windowEnd) {
+    minOffsetMin = Math.ceil((now - windowStart) / 60000) + 1;
     if (minOffsetMin >= maxOffsetMin) minOffsetMin = maxOffsetMin - 1;
   }
   const span = Math.max(1, maxOffsetMin - minOffsetMin);
@@ -2290,6 +2336,21 @@ function markMsRunFiredToday() {
   // No file or stale file — synthesize a fired record for today using "now"
   // as the target. Tomorrow's pick happens on the next computeMsWakeMs call.
   writeMsScheduleToday({ date: today, target: new Date().toISOString(), status: 'fired' });
+}
+
+// Called from runAllScripts close handler when any successful run included
+// joybuy.js. Flips today's Joybuy schedule to fired so joybuySchedulerLoop
+// won't re-fire the same day.
+function markJoybuyRunFiredToday() {
+  const today = todayKey();
+  const cur = readJoybuyScheduleToday();
+  if (cur && cur.date === today) {
+    if (cur.status === 'fired') return;
+    cur.status = 'fired';
+    writeJoybuyScheduleToday(cur);
+    return;
+  }
+  writeJoybuyScheduleToday({ date: today, target: new Date().toISOString(), status: 'fired' });
 }
 
 // True when the user has neither START_TIME nor LOOP set but does have an
@@ -2503,6 +2564,81 @@ function computeMsWakeMs() {
   return 0;
 }
 
+function joybuyTargetInWindow(st, c) {
+  if (!st || !st.target || !st.date) return false;
+  const target = new Date(st.target).getTime();
+  if (!Number.isFinite(target)) return false;
+  const [y, mo, d] = String(st.date).split('-').map(Number);
+  if (!y || !mo || !d) return false;
+  const windowStartMs = new Date(y, mo - 1, d, c.joybuyStart, 0, 0, 0).getTime();
+  const windowEndMs = windowStartMs + c.joybuyHours * 3600 * 1000;
+  return target >= windowStartMs && target < windowEndMs;
+}
+
+function computeJoybuyWakeMs() {
+  const c = getSchedulerConfig();
+  const active = activeServices();
+  const jbActive = active.has('joybuy');
+  if (!jbActive || c.joybuyHours <= 0) { joybuyTodayState = null; return 0; }
+
+  const now = Date.now();
+  for (let safety = 0; safety < 14; safety++) {
+    let st = readJoybuyScheduleToday();
+    const today = todayKey();
+    const outOfWindow = st && st.date === today && st.status === 'pending'
+      && !joybuyTargetInWindow(st, c);
+    if (outOfWindow) {
+      console.log(`[${datetime()}] Scheduler (Joybuy): persisted target ${st.target} is outside the current ${c.joybuyStart}:00 + ${c.joybuyHours}h window — repicking.`);
+    }
+    const needsFresh = !st
+      || st.date < today
+      || (st.date === today && (st.status === 'fired' || st.status === 'missed'))
+      || outOfWindow;
+    if (needsFresh) {
+      const day = (!st || st.date < today) ? today : nextDayKey(today);
+      st = pickJoybuyTargetFor(day, c);
+      writeJoybuyScheduleToday(st);
+    }
+    joybuyTodayState = st;
+    const target = new Date(st.target).getTime();
+    if (!Number.isFinite(target)) {
+      st = pickJoybuyTargetFor(todayKey(), c);
+      writeJoybuyScheduleToday(st);
+      joybuyTodayState = st;
+      continue;
+    }
+    if (st.status === 'pending' && target <= now) {
+      const [y, mo, d] = String(st.date).split('-').map(Number);
+      const windowStartMs = new Date(y, (mo || 1) - 1, d || 1, c.joybuyStart, 0, 0, 0).getTime();
+      const windowEndMs = windowStartMs + c.joybuyHours * 3600 * 1000;
+      const lastJbIso = lastRunSuccess && lastRunSuccess.joybuy;
+      if (lastJbIso) {
+        const lastJb = new Date(lastJbIso).getTime();
+        if (Number.isFinite(lastJb) && lastJb >= target && lastJb <= now) {
+          st.status = 'fired';
+          writeJoybuyScheduleToday(st);
+          continue;
+        }
+      }
+      const remainingMs = windowEndMs - now;
+      if (remainingMs >= 90 * 1000) {
+        const maxDelay = Math.max(60 * 1000, remainingMs - 30 * 1000);
+        const delayMs = 60 * 1000 + Math.floor(Math.random() * (maxDelay - 60 * 1000));
+        st.target = new Date(now + delayMs).toISOString();
+        writeJoybuyScheduleToday(st);
+        continue;
+      }
+      st.status = 'missed';
+      writeJoybuyScheduleToday(st);
+      continue;
+    }
+    return Math.max(target - now, 60 * 1000);
+  }
+  console.error(`[${datetime()}] Scheduler (Joybuy): pick loop exhausted, disabling.`);
+  joybuyTodayState = null;
+  return 0;
+}
+
 // Multi-subscriber wakeup set — both schedulerLoops park in sleepUntilWakeup,
 // and any of them must re-arm when config changes.
 const schedulerWakeups = new Set();
@@ -2632,6 +2768,10 @@ function nonMsActiveSiteIds() {
   const active = activeServices();
   active.delete('microsoft');
   active.delete('microsoft-mobile');
+  const sched = getSchedulerConfig();
+  if (sched.joybuyHours > 0) {
+    active.delete('joybuy');
+  }
   return Array.from(active);
 }
 
@@ -2657,7 +2797,10 @@ async function mainSchedulerLoop() {
     // apply (the same env-override path the original single-loop scheduler
     // used). Decoupled mode: explicit non-MS list, which intentionally
     // bypasses CLAIM_CMD because the override would re-include microsoft.
-    const sites = legacyCombinedMode(sched, active) ? null : nonMsActiveSiteIds();
+    const isLegacy = legacyCombinedMode(sched, active);
+    const sites = isLegacy
+      ? ((sched.joybuyHours || 0) > 0 ? Array.from(active).filter(id => id !== 'joybuy') : null)
+      : nonMsActiveSiteIds();
     let fired = await fireScheduledRun({
       label: 'main',
       sites,
@@ -2784,6 +2927,56 @@ async function msSchedulerLoop() {
           stNow.status = 'missed';
           writeMsScheduleToday(stNow);
           console.log(`[${datetime()}] Scheduler (MS): blocked attempt — backed-off retry would exceed today's window, marked missed.`);
+        }
+      }
+    }
+  }
+}
+
+// Joybuy loop — fires joybuy.js alone at today's persisted random pick within its configured window.
+async function joybuySchedulerLoop() {
+  while (true) {
+    const sleepMs = computeJoybuyWakeMs();
+    if (sleepMs <= 0) {
+      nextJoybuyRun = null;
+      console.log(`[${datetime()}] Scheduler (Joybuy): disabled — waiting for config change.`);
+      await sleepUntilWakeup(2 ** 31 - 1);
+      continue;
+    }
+    nextJoybuyRun = new Date(Date.now() + sleepMs);
+    console.log(`[${datetime()}] Scheduler (Joybuy): next run at ${datetime(nextJoybuyRun)}.`);
+    const how = await sleepUntilWakeup(sleepMs);
+    if (how === 'reload') continue;
+
+    const c = getSchedulerConfig();
+    const active = activeServices();
+    const jbActive = active.has('joybuy');
+    if (!jbActive || c.joybuyHours <= 0) continue;
+    const st = readJoybuyScheduleToday();
+    if (!st || st.status !== 'pending') continue;
+
+    const fired = await fireScheduledRun({
+      label: 'joybuy',
+      sites: ['joybuy'],
+    });
+
+    if (!fired) {
+      const BLOCKED_BACKOFF_MS = 10 * 60 * 1000;
+      const cNow = getSchedulerConfig();
+      const stNow = readJoybuyScheduleToday();
+      if (stNow && stNow.status === 'pending') {
+        const [y, mo, d] = String(stNow.date).split('-').map(Number);
+        const windowStartMs = new Date(y, (mo || 1) - 1, d || 1, cNow.joybuyStart, 0, 0, 0).getTime();
+        const windowEndMs = windowStartMs + cNow.joybuyHours * 3600 * 1000;
+        const proposed = Date.now() + BLOCKED_BACKOFF_MS;
+        if (proposed < windowEndMs) {
+          stNow.target = new Date(proposed).toISOString();
+          writeJoybuyScheduleToday(stNow);
+          console.log(`[${datetime()}] Scheduler (Joybuy): blocked attempt — backed off ${BLOCKED_BACKOFF_MS / 60000} min, next try at ${datetime(new Date(proposed))}.`);
+        } else {
+          stNow.status = 'missed';
+          writeJoybuyScheduleToday(stNow);
+          console.log(`[${datetime()}] Scheduler (Joybuy): blocked attempt — backed-off retry would exceed today's window, marked missed.`);
         }
       }
     }
@@ -3129,21 +3322,26 @@ async function getState() {
   // users who never touched it) kept MS running even when parent was
   // toggled off. Reported live 2026-08-08.
   const msActive = active.has('microsoft');
+  const joybuyActive = active.has('joybuy');
   const legacyMode = legacyCombinedMode(sched, active);
   const dailyAnchored = !!sched.dailyStartTime;
   const mainEnabled = legacyMode || dailyAnchored || sched.loop > 0;
   const msScheduled = !legacyMode && msActive && sched.msHours > 0;
-  const schedEnabled = mainEnabled || msScheduled;
+  const joybuyScheduled = joybuyActive && sched.joybuyHours > 0;
+  const schedEnabled = mainEnabled || msScheduled || joybuyScheduled;
 
   const computedMain = mainEnabled ? new Date(Date.now() + computeMainWakeMs()) : null;
   const computedMs = msScheduled ? new Date(Date.now() + computeMsWakeMs()) : null;
+  const computedJoybuy = joybuyScheduled ? new Date(Date.now() + computeJoybuyWakeMs()) : null;
   const effectiveMain = nextMainRun || computedMain;
   const effectiveMs = nextMsRun || computedMs;
-  const effectiveNext = [effectiveMain, effectiveMs]
+  const effectiveJoybuy = nextJoybuyRun || computedJoybuy;
+  const effectiveNext = [effectiveMain, effectiveMs, effectiveJoybuy]
     .filter(Boolean)
     .reduce((a, b) => (!a || b.getTime() < a.getTime() ? b : a), null);
 
   const msState = msScheduled ? (msTodayState || readMsScheduleToday()) : null;
+  const joybuyState = joybuyScheduled ? (joybuyTodayState || readJoybuyScheduleToday()) : null;
 
   return {
     // v2.11.12: Web-UI auth state — the client refreshes AUTH_ENABLED
@@ -3188,21 +3386,25 @@ async function getState() {
     nextScheduledRun: effectiveNext ? datetime(effectiveNext) : null,
     nextMainRun: effectiveMain ? datetime(effectiveMain) : null,
     nextMsRun: effectiveMs ? datetime(effectiveMs) : null,
+    nextJoybuyRun: effectiveJoybuy ? datetime(effectiveJoybuy) : null,
     // ISO timestamps (UTC with Z) — unambiguous across browser/server TZs.
     // Panel uses these for both display formatting and countdown math so a
     // browser in a different TZ from the server sees the right wall time.
     nextScheduledRunIso: effectiveNext ? effectiveNext.toISOString() : null,
     nextMainRunIso: effectiveMain ? effectiveMain.toISOString() : null,
     nextMsRunIso: effectiveMs ? effectiveMs.toISOString() : null,
+    nextJoybuyRunIso: effectiveJoybuy ? effectiveJoybuy.toISOString() : null,
     serverTimezone: (() => {
       try { return Intl.DateTimeFormat().resolvedOptions().timeZone; }
       catch { return null; }
     })(),
     serverTimeIso: new Date().toISOString(),
     msTodayStatus: msState ? msState.status : null,
+    joybuyTodayStatus: joybuyState ? joybuyState.status : null,
     legacyCombinedMode: legacyMode,
     mainEnabled,
     msScheduled,
+    joybuyScheduled,
     loopEnabled: schedEnabled,
     schedulerPaused: isSchedulerPaused(),
     schedulerPausedAt: schedulerPausedAt(),
@@ -3216,6 +3418,8 @@ async function getState() {
     githubUsername: (describeConfig().effective.github?.username || ''),
     msScheduleHours: sched.msHours,
     msScheduleStart: sched.msStart,
+    joybuyScheduleHours: sched.joybuyHours,
+    joybuyScheduleStart: sched.joybuyStart,
     msAnchored: legacyMode, // legacy alias — UI now reads legacyCombinedMode/msScheduled
     batchRedeem: batchRedeem ? {
       phase: batchRedeem.phase,
@@ -3497,6 +3701,34 @@ async function getAliexpressData() {
   return { latestBalance, latestAt, weekEarned, monthEarned, row };
 }
 
+// Joybuy tracks a daily point balance in data/joybuy.json (written by
+// joybuy.js). Similar shape to AliExpress — we surface the latest balance
+// and per-window "earned" totals in the Stats tab.
+async function getJoybuyData() {
+  let db;
+  try { db = await jsonDb('joybuy.json', { runs: [] }); }
+  catch { return { latestBalance: null, latestAt: null, weekEarned: 0, monthEarned: 0, row: null }; }
+  const runs = (db.data && Array.isArray(db.data.runs)) ? db.data.runs : [];
+  const now = Date.now();
+  const weekAgo = now - 7 * 24 * 60 * 60 * 1000;
+  const monthAgo = now - 30 * 24 * 60 * 60 * 1000;
+  const toMs = s => { const d = parseLocalDateTime(s); return d ? d.getTime() : 0; };
+  let latestBalance = null, latestAt = null, latestMs = 0;
+  let weekEarned = 0, monthEarned = 0, allTimeEarned = 0;
+  for (const r of runs) {
+    const tMs = toMs(r.at);
+    const earned = Number.isFinite(r.earned) ? Math.max(0, r.earned) : 0;
+    allTimeEarned += earned;
+    if (tMs >= weekAgo)  weekEarned  += earned;
+    if (tMs >= monthAgo) monthEarned += earned;
+    if (r.balance != null && tMs >= latestMs) { latestBalance = r.balance; latestAt = r.at; latestMs = tMs; }
+  }
+  const row = runs.length
+    ? { thisWeek: weekEarned, thisMonth: monthEarned, allTime: allTimeEarned, lastClaimAt: latestAt, unit: 'points' }
+    : null;
+  return { latestBalance, latestAt, weekEarned, monthEarned, row };
+}
+
 async function getStatsSummary() {
   const [claims, ms] = await Promise.all([readAllClaims(), getMsRewards()]);
   const now = Date.now();
@@ -3525,7 +3757,7 @@ async function getStatsSummary() {
 }
 
 async function getStatsByService() {
-  const [claims, ms, ae] = await Promise.all([readAllClaims(), getMsRewards(), getAliexpressData()]);
+  const [claims, ms, ae, jb] = await Promise.all([readAllClaims(), getMsRewards(), getAliexpressData(), getJoybuyData()]);
   const rows = {};
   for (const svc of Object.keys(CLAIM_DB_FILES)) {
     rows[svc] = { id: svc, unit: 'games', thisWeek: 0, thisMonth: 0, allTime: 0, lastClaimAt: null };
@@ -3535,6 +3767,9 @@ async function getStatsByService() {
   rows['microsoft-mobile'] = { id: 'microsoft-mobile', ...ms.bySession['microsoft-mobile'] };
   if (ae.row) {
     rows['aliexpress'] = { id: 'aliexpress', ...ae.row };
+  }
+  if (jb.row) {
+    rows['joybuy'] = { id: 'joybuy', ...jb.row };
   }
   const now = Date.now();
   const weekAgo = now - 7 * 24 * 60 * 60 * 1000;
@@ -5382,7 +5617,7 @@ function renderDiagnosticContext(ctx) {
     flagBits.push('ms_search_delay_max=' + (f.ms_search_delay_max ?? '?') + ', ms_redeem_threshold=' + (f.ms_redeem_threshold ?? '?') + ', ms_run_with_main_chain=' + !!f.ms_run_with_main_chain);
     const credsSet = [];
     const credsMiss = [];
-    const credKeys = [['prime-gaming', 'pg_credsSet'], ['epic-games', 'eg_credsSet'], ['steam', 'steam_credsSet'], ['gog', 'gog_credsSet'], ['microsoft', 'ms_credsSet'], ['aliexpress', 'ae_credsSet']];
+    const credKeys = [['prime-gaming', 'pg_credsSet'], ['epic-games', 'eg_credsSet'], ['steam', 'steam_credsSet'], ['gog', 'gog_credsSet'], ['microsoft', 'ms_credsSet'], ['aliexpress', 'ae_credsSet'], ['joybuy', 'joybuy_credsSet']];
     for (const [name, key] of credKeys) (f[key] ? credsSet : credsMiss).push(name);
     flagBits.push('credentials set: ' + (credsSet.join(', ') || '(none)') + (credsMiss.length ? ' — missing: ' + credsMiss.join(', ') : ''));
     flagBits.push('notify_level=' + (f.notify_level || '?') + ', base_path=' + (f.base_path_set ? 'set' : 'unset') + ', public_url=' + (f.public_url_set ? 'set' : 'unset') + ', novnc_url=' + (f.novnc_url_set ? 'set' : 'unset'));
@@ -6559,6 +6794,13 @@ function serviceSummary(id) {
     }
     case 'aliexpress':
       return 'Daily check-in coins · mobile site';
+    case 'joybuy': {
+      const w = draftValue('scheduler.joybuyScheduleHours') || 0;
+      const s = draftValue('scheduler.joybuyScheduleStart') || 0;
+      if (!w) return 'Daily check-in JoyPoints · inline with main chain';
+      const fmt = h => String(h).padStart(2, '0') + ':00';
+      return 'Window ' + fmt(s) + ' → ' + fmt((Number(s) + Number(w)) % 24) + ' · daily check-in';
+    }
     default:
       return '';
   }
@@ -7477,8 +7719,29 @@ function renderScheduleTab() {
       parts.push('<div class="sched-row"><div class="sched-label">Interval · MS Rewards</div><div class="sched-value muted">Random within ' + fmtH(s) + ' &rarr; ' + fmtH((Number(s) + Number(w)) % 24) + ' daily</div></div>');
     }
 
-    if (!state.mainEnabled && !state.msScheduled) {
-      parts.push('<div class="sched-row"><div class="sched-label">Status</div><div class="sched-value muted">Scheduler disabled — set START_TIME, LOOP, or MS_SCHEDULE_HOURS to enable.</div></div>');
+    if (state.joybuyScheduled) {
+      const statusBadge = state.joybuyTodayStatus === 'missed'
+        ? ' <span class="muted">(missed today — Run manually from the Joybuy card)</span>'
+        : state.joybuyTodayStatus === 'fired'
+          ? ' <span class="muted">(today already fired)</span>'
+          : '';
+      if (state.nextJoybuyRun) {
+        parts.push(
+          '<div class="sched-row"><div class="sched-label">Next run · Joybuy</div>' +
+          '<div><span class="sched-value big" title="' + state.nextJoybuyRun + '">' + formatScheduleWallTime(state.nextJoybuyRunIso, state.nextJoybuyRun) + '</span>' +
+          tzAnnotation(state.nextJoybuyRunIso) +
+          '<span class="sched-count" id="jbCountdown"></span>' + statusBadge + '</div></div>'
+        );
+      } else {
+        parts.push('<div class="sched-row"><div class="sched-label">Next run · Joybuy</div><div class="sched-value muted">Calculating…</div></div>');
+      }
+      const s = state.joybuyScheduleStart || 0;
+      const w = state.joybuyScheduleHours;
+      parts.push('<div class="sched-row"><div class="sched-label">Interval · Joybuy</div><div class="sched-value muted">Random within ' + fmtH(s) + ' &rarr; ' + fmtH((Number(s) + Number(w)) % 24) + ' daily</div></div>');
+    }
+
+    if (!state.mainEnabled && !state.msScheduled && !state.joybuyScheduled) {
+      parts.push('<div class="sched-row"><div class="sched-label">Status</div><div class="sched-value muted">Scheduler disabled — set START_TIME, LOOP, MS_SCHEDULE_HOURS, or JOYBUY_SCHEDULE_HOURS to enable.</div></div>');
     }
   }
 
@@ -7490,6 +7753,7 @@ function renderScheduleTab() {
   const sites = state.sites || [];
   const activeGames = sites.filter(s => s.active && GAME_IDS.has(s.id));
   const hasAE = sites.some(s => s.active && s.id === 'aliexpress');
+  const hasJB = sites.some(s => s.active && s.id === 'joybuy');
   const hasMS = sites.some(s => s.active && s.id === 'microsoft');
   // Watchers are in state.watchers (not state.sites). They run on each
   // main-chain fire as part of the bash command — listing them in the
@@ -7501,7 +7765,7 @@ function renderScheduleTab() {
   const lenovoWatcher = allWatchers.find(w => w.id === 'lenovo-gaming');
   const byName = (a, b) => (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' });
   standardWatchers.sort(byName);
-  const activeCount = activeGames.length + (hasAE ? 1 : 0) + (hasMS ? 1 : 0)
+  const activeCount = activeGames.length + (hasAE ? 1 : 0) + (hasJB ? 1 : 0) + (hasMS ? 1 : 0)
     + standardWatchers.length + (lenovoWatcher ? 1 : 0);
 
   const svcLines = [];
@@ -7510,6 +7774,13 @@ function renderScheduleTab() {
   }
   if (hasAE) {
     svcLines.push('<b>AliExpress</b> — collect daily check-in coins <span class="muted">(no specific window; runs on each scheduled fire)</span>');
+  }
+  if (hasJB) {
+    if ((state.joybuyScheduleHours || 0) > 0) {
+      svcLines.push('<b>Joybuy</b> — collect daily check-in JoyPoints inside Joybuy window');
+    } else {
+      svcLines.push('<b>Joybuy</b> — collect daily check-in JoyPoints <span class="muted">(no specific window; runs on each scheduled fire)</span>');
+    }
   }
   if (hasMS) {
     if ((state.msScheduleHours || 0) > 0) {
@@ -7585,6 +7856,7 @@ function updateScheduleCountdown() {
   apply('schedCountdown', state.nextScheduledRunIso, state.nextScheduledRun);
   apply('mainCountdown',  state.nextMainRunIso,      state.nextMainRun);
   apply('msCountdown',    state.nextMsRunIso,        state.nextMsRun);
+  apply('jbCountdown',    state.nextJoybuyRunIso,    state.nextJoybuyRun);
 }
 
 // Format an ISO timestamp into a server-local-tz wall clock for display.
@@ -7752,13 +8024,23 @@ function formatRunHistoryLabel(run) {
   const icon = run.status === 'success' ? '✓' : '✗';
   const dur = fmtRunDuration(run.durationSec);
   // One headline counter per row instead of all of them — pick the most
-  // informative based on what was non-zero. Order: claimed, pts (MS),
-  // coins (AE), owned (no-op runs).
+  // informative based on what was non-zero.
+  const isDedicatedPointsRun = run.source === 'panel:joybuy' ||
+                               run.source === 'scheduler-joybuy:joybuy' ||
+                               run.source === 'panel:microsoft' ||
+                               run.source === 'scheduler-ms:microsoft';
   let counter = '';
-  if (sum.claimed) counter = ' — ' + sum.claimed + ' claimed';
-  else if (sum.pointsEarned) counter = ' — ' + sum.pointsEarned + ' pts';
-  else if (sum.coins) counter = ' — ' + sum.coins + ' coins';
-  else if (sum.alreadyOwned) counter = ' — ' + sum.alreadyOwned + ' owned';
+  if (isDedicatedPointsRun && sum.pointsEarned != null) {
+    counter = ' — ' + sum.pointsEarned + ' pts';
+  } else if (sum.claimed) {
+    counter = ' — ' + sum.claimed + ' claimed';
+  } else if (sum.pointsEarned) {
+    counter = ' — ' + sum.pointsEarned + ' pts';
+  } else if (sum.coins) {
+    counter = ' — ' + sum.coins + ' coins';
+  } else if (sum.alreadyOwned) {
+    counter = ' — ' + sum.alreadyOwned + ' owned';
+  }
   return icon + ' ' + ts + ' (' + dur + ')' + counter;
 }
 
@@ -9080,7 +9362,7 @@ function openRunPicker() {
   const groups = { game: [], points: [], watch: [] };
   active.forEach(s => {
     const cat = s.scheduleKind === 'watch-only' ? 'watch'
-      : (s.id === 'aliexpress' || (s.id || '').indexOf('microsoft') === 0) ? 'points'
+      : (s.id === 'aliexpress' || s.id === 'joybuy' || (s.id || '').indexOf('microsoft') === 0) ? 'points'
       : 'game';
     groups[cat].push(s);
   });
@@ -9111,9 +9393,9 @@ function openRunPicker() {
   };
 
   let html = '';
-  html += renderGroup('Claimers', groups.game.filter(s => s.id !== 'aliexpress'));
-  // AliExpress is daily-chain but conceptually a points collector; show it with MS.
-  const pointsGroup = groups.points.concat(groups.game.filter(s => s.id === 'aliexpress'));
+  html += renderGroup('Claimers', groups.game.filter(s => s.id !== 'aliexpress' && s.id !== 'joybuy'));
+  // AliExpress and Joybuy are daily-chain but conceptually points collectors; show with MS.
+  const pointsGroup = groups.points.concat(groups.game.filter(s => s.id === 'aliexpress' || s.id === 'joybuy'));
   pointsGroup.sort(byName);
   html += renderGroup('Point / coin collectors', pointsGroup);
   html += renderGroup('Watchers', groups.watch);
@@ -11221,6 +11503,7 @@ server.listen(PANEL_PORT, async () => {
     const sweepDirs = [
       cfg.dir.browser,
       cfg.dir.browser + '-aliexpress',
+      cfg.dir.browser + '-joybuy',
       cfg.dir.browser + '-mobile',
       cfg.dir.browser + '-lenovo',
     ];
@@ -11314,6 +11597,9 @@ server.listen(PANEL_PORT, async () => {
   });
   msSchedulerLoop().catch(err => {
     console.error(`[${datetime()}] Scheduler (MS) crashed:`, err);
+  });
+  joybuySchedulerLoop().catch(err => {
+    console.error(`[${datetime()}] Scheduler (Joybuy) crashed:`, err);
   });
   lenovoSchedulerLoop().catch(err => {
     console.error(`[${datetime()}] Scheduler (Lenovo) crashed:`, err);
