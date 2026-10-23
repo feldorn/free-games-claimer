@@ -50,6 +50,7 @@
 // SERVICE_ROWS, …) that read these fields. Until then the new fields are
 // metadata-only and safe to ignore.
 
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { devices } from 'patchright';
 import { cfg } from './config.js';
@@ -534,6 +535,135 @@ export const SITES = [
         // path skips entries with .error set — without this, a goto
         // timeout right after a heavy claim run silently became a
         // false "session expired" notification (observed 2026-05-25).
+        return { loggedIn: false, error: (e && e.message ? e.message.split('\n')[0] : String(e)).slice(0, 200) };
+      }
+    },
+  },
+  {
+    id: 'joybuy',
+    name: 'Joybuy',
+    version: '1.0',
+    subtitle: 'Daily check-in for JoyPoints (loyalty points) on the mobile web portal.',
+    script: platformScript('joybuy'),
+    claimOrder: 5.5,
+    loginUrl: 'https://m.joybuy.fr/joypoints-h5?hideTitle=true&compatInput=true',
+    get browserDir() { return cfg.dir.browser + '-joybuy'; },
+    get contextOptions() {
+      try {
+        const fpFile = path.join(cfg.dir.browser + '-joybuy', '.fgc-fingerprint.json');
+        if (existsSync(fpFile)) {
+          const cached = JSON.parse(readFileSync(fpFile, 'utf8'));
+          const fp = cached?.fingerprint;
+          if (fp?.navigator?.userAgent) {
+            return {
+              userAgent: fp.navigator.userAgent,
+              viewport: {
+                width: fp.screen?.width || 412,
+                height: fp.screen?.height || 915,
+              },
+              deviceScaleFactor: 2.625,
+              isMobile: true,
+              hasTouch: true,
+            };
+          }
+        }
+      } catch {}
+      return devices['Pixel 7'];
+    },
+    defaultActive: false,
+    activeEnv: 'JOYBUY_ACTIVE',
+    linkedWith: null,
+    scheduleKind: 'daily-window',
+    features: ['joybuy-window-skip'],
+    configFields: [
+      { schedulerScope: true, path: 'scheduler.joybuyScheduleHours',
+        label: 'Schedule window width (hours)',
+        unit: 'hours',
+        hint: 'Width of the daily Joybuy window, anchored to the start time. 0 disables the dedicated Joybuy scheduler window — Joybuy will run inline with the main chain (if active).' },
+      { schedulerScope: true, path: 'scheduler.joybuyScheduleStart',
+        label: 'Schedule window start (local time)',
+        kind: 'hour-of-day',
+        hint: 'Hour of the day (0-23) when the daily Joybuy window begins.' },
+    ],
+    async checkLogin(page) {
+      try {
+        const url = page.url();
+        if (url.includes('/login') || url.includes('/signin')) {
+          return { loggedIn: false };
+        }
+
+        // Navigate to joypoints-h5 only if not already on the portal
+        if (!url.includes('joypoints')) {
+          await page.goto('https://m.joybuy.fr/joypoints-h5?hideTitle=true&compatInput=true', { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
+        }
+
+        if (page.url().includes('/login') || page.url().includes('/signin')) {
+          return { loggedIn: false };
+        }
+
+        const cookies = await page.context().cookies().catch(() => []);
+        const pinCookie = cookies.find(c => (c.name === 'pin' || c.name === 'pt_pin') && c.value && c.domain?.includes('joybuy'));
+        const username = pinCookie?.value ? decodeURIComponent(pinCookie.value) : 'member';
+
+        // Check DOM and SSR payload for genuine authenticated markers vs login pages
+        const pageState = await page.evaluate(() => {
+          const streamId = document.querySelector('meta[name="stream-page-id"]')?.getAttribute('content');
+          const title = document.title || '';
+          const hasPasswordInput = !!document.querySelector('input[type="password"]');
+          const hasLoginLink = !!document.querySelector('a[href*="/login"], a[href*="/signin"], button[data-exp*="login" i]');
+          const isLoginPage = /connectez-vous|sign[\s-]*in|log[\s-]*in/i.test(title) ||
+                              streamId === 'NewLogin' ||
+                              streamId === 'Login' ||
+                              hasPasswordInput;
+
+          // Check for authenticated elements on the points portal
+          const hasDailyBtn = !!document.querySelector('button[data-exp*="Daily_checkin_btn"], [class*="DailyCheckin_checkinBtn"], [class*="DailyCheckin"] button');
+          const hasCheckedContent = !!document.querySelector('[class*="DailyCheckin_checkedContent"], [class*="checkedContent"]');
+          const hasPointsValue = !!document.querySelector('[class*="pointsValue"], [class*="pointsUnit"]');
+
+          // Check SSR data for checkInState (1 = UNSIGNED/claimable, 5 = SIGNED/done)
+          let checkInState = null;
+          const scripts = Array.from(document.querySelectorAll('script'));
+          for (const s of scripts) {
+            const text = s.textContent || '';
+            if (text.includes('checkInState')) {
+              const m = text.match(/"checkInState":\s*(\d+)/);
+              if (m) { checkInState = Number(m[1]); break; }
+            }
+          }
+
+          return { isLoginPage, hasDailyBtn, hasCheckedContent, hasPointsValue, checkInState, hasLoginLink };
+        }).catch(() => null);
+
+        if (pageState?.isLoginPage) {
+          return { loggedIn: false };
+        }
+
+        if (
+          pageState?.checkInState === 1 ||
+          pageState?.checkInState === 5 ||
+          pageState?.hasDailyBtn ||
+          pageState?.hasCheckedContent ||
+          pageState?.hasPointsValue
+        ) {
+          return { loggedIn: true, user: username };
+        }
+
+        // Targeted element locators (scoped to real elements)
+        const loginLocator = page.locator('input[type="password"], a[href*="/login"], a[href*="/signin"], button:has-text("Se connecter"), button:has-text("Connectez-vous")');
+        const authLocator = page.locator('button[data-exp*="Daily_checkin_btn"], [class*="DailyCheckin_checkinBtn"], [class*="DailyCheckin_checkedContent"], [class*="pointsValue"], [class*="pointsUnit"]');
+
+        const QUICK_WAIT_MS = 6000;
+        const which = await Promise.any([
+          loginLocator.first().waitFor({ state: 'visible', timeout: QUICK_WAIT_MS }).then(() => 'login'),
+          authLocator.first().waitFor({ state: 'visible', timeout: QUICK_WAIT_MS }).then(() => 'auth'),
+        ]).catch(() => null);
+
+        if (which === 'auth') return { loggedIn: true, user: username };
+        if (which === 'login') return { loggedIn: false };
+
+        return { loggedIn: false };
+      } catch (e) {
         return { loggedIn: false, error: (e && e.message ? e.message.split('\n')[0] : String(e)).slice(0, 200) };
       }
     },

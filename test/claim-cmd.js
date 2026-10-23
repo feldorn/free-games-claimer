@@ -18,9 +18,12 @@ const cases = [
   // short forms
   ['gog.js; steam.js', `node ${P}/gog.js; node ${P}/steam.js`],
   ['gog; steam', `node ${P}/gog.js; node ${P}/steam.js`],
+  ['joybuy', `node ${P}/joybuy.js`],
   ['node gog', `node ${P}/gog.js`],
+  ['node joybuy', `node ${P}/joybuy.js`],
   // current spelling stays put
   [`node ${P}/gog.js`, `node ${P}/gog.js`],
+  [`node ${P}/joybuy.js`, `node ${P}/joybuy.js`],
   // separators, inline env and args survive
   ['node gog.js && node steam.js', `node ${P}/gog.js && node ${P}/steam.js`],
   ['node gog.js & node steam.js', `node ${P}/gog.js & node ${P}/steam.js`],
