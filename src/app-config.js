@@ -458,6 +458,9 @@ export const ENV_DISPLAY = [
   { env: 'AE_EMAIL',       category: 'credentials', group: 'AliExpress',       label: 'Email',
     note: 'Only used when AliExpress is enabled. Only needed for automated re-login — you can also log in manually via the Sessions card and cookies persist.' },
   { env: 'AE_PASSWORD',    category: 'credentials', group: 'AliExpress',       label: 'Password' },
+  { env: 'JOYBUY_EMAIL',   category: 'credentials', group: 'Joybuy',           label: 'Email',
+    note: 'Only used when Joybuy is enabled. Only needed for automated re-login — you can also log in manually via the Sessions card and cookies persist.' },
+  { env: 'JOYBUY_PASSWORD',category: 'credentials', group: 'Joybuy',           label: 'Password' },
   // locale / timezone (env-only — read at Node process start)
   { env: 'TZ',            category: 'runtime', label: 'Timezone (IANA)',
     note: 'When set (e.g. `TZ=Europe/Warsaw`), Node reads it at process start and it drives: log-line timestamps, scheduler input times (`START_TIME` / dailyStartTime / digest hour), the "next run in" wall-time labels. Unset → the container defaults to UTC. Change requires a panel restart. See eapzzz\'s #106.' },
@@ -483,6 +486,8 @@ export const ENV_DISPLAY = [
     note: 'Override the URL the Ubisoft watcher visits. Default: https://store.ubisoft.com/us/free-games' },
   { env: 'AE_PAGE_URL',       category: 'overrides', label: 'AliExpress — coin-index page URL',
     note: 'Override the URL the AliExpress claim script visits. Default: https://m.aliexpress.com/p/coin-index/index.html' },
+  { env: 'JOYBUY_PAGE_URL',   category: 'overrides', label: 'Joybuy — joypoints-h5 page URL',
+    note: 'Override the URL the Joybuy claim script visits. Default: https://m.joybuy.fr/joypoints-h5?hideTitle=true&compatInput=true' },
   // scheduler — anchored-mode extension. Days-of-week mask (#108).
   { env: 'START_DAYS',    category: 'scheduler', label: 'Anchored-mode days-of-week filter',
     note: 'Comma-separated list of days on which the anchored scheduler fires: 0 = Sunday … 6 = Saturday. Only consulted when `START_TIME` (or dailyStartTime in Settings) is set. Default = all seven days (backward-compatible). Example: `START_DAYS=4` for weekly Thursdays; `START_DAYS=1,3,5` for Mon/Wed/Fri. Missed days do not queue backfills.' },

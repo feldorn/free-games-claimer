@@ -20,6 +20,7 @@ const gog   = svc['gog']          || {};
 const steam = svc['steam']        || {};
 const ae    = svc['aliexpress']   || {};
 const ms    = svc['microsoft']    || {};
+const joybuy = svc['joybuy']       || {};
 const lenovo = svc['lenovo-gaming'] || {};
 
 // LANG is POSIX (e.g. de_DE.UTF-8); Playwright wants a BCP-47 tag (de-DE).
@@ -166,6 +167,9 @@ export const cfg = {
   // to invoke any claim script, so no script-internal guard is needed.
   ae_email:    process.env.AE_EMAIL    || process.env.EMAIL,
   ae_password: process.env.AE_PASSWORD || process.env.PASSWORD,
+  joybuy_email:    process.env.JOYBUY_EMAIL    || process.env.EMAIL,
+  joybuy_password: process.env.JOYBUY_PASSWORD || process.env.PASSWORD,
+  joybuy_page_url: process.env.JOYBUY_PAGE_URL || joybuy.pageUrl,
   // experimental
   pg_redeem: pg.redeem ?? false, // prime-gaming: redeem keys on external stores
   // Prime→Steam auto-redeem (v2.11.0). When true, Prime captures every Steam

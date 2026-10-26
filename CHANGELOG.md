@@ -4,6 +4,19 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.12.22
+
+**Joybuy: daily JoyPoints check-in.**
+
+Joybuy (JD.com's European portal) offers daily loyalty JoyPoints redeemable for discounts on orders. This adds daily check-in support for JoyPoints on the mobile web portal (`m.joybuy.fr/joypoints-h5`).
+
+- Daily check-in collects points, tracks streaks (7-day and 3-day series), and logs estimated euro value in the panel Stats tab.
+- Anti-detection mobile emulation using `fingerprint-generator` and `fingerprint-injector` persists to `data/browser-joybuy/.fgc-fingerprint.json`.
+- Session verification in the Sessions card, login auto-detection, and slider captcha handoff via noVNC.
+- Opt-in: enable in Settings → Per-service → Joybuy, or set `JOYBUY_ACTIVE=true`.
+
+---
+
 ## What's new in 2.12.21
 
 **Epic: a rejected account session now says why Epic rejected it (#163).**
