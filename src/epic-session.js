@@ -35,7 +35,8 @@
 //
 // Zero local imports — sites.js and the runner both pull this in.
 
-const ACCOUNT_URL = 'https://www.epicgames.com/';
+// /id/ rather than / so the path-scoped EPIC_SESSION_AP comes back too.
+const ACCOUNT_URL = 'https://www.epicgames.com/id/';
 
 // `cookies` is Playwright's context.cookies() shape: `expires` in epoch
 // seconds, -1 for a session cookie (still live while it's in the jar).
@@ -46,8 +47,12 @@ export function epicAccountSession(cookies, nowMs = Date.now()) {
     && (c.expires == null || c.expires < 0 || c.expires * 1000 > nowMs));
   const sso = live('EPIC_SSO');
   const rm = live('EPIC_SSO_RM');
+  // EPIC_SESSION_AP alone authenticates (see above). Only matters when the
+  // probe can't answer; Epic leaves it behind after clearing SSO/RM on a 401,
+  // but a 401 already settles the verdict as dead (#163).
+  const ap = live('EPIC_SESSION_AP');
   return {
-    ok: !!(sso || rm),
+    ok: !!(sso || rm || ap),
     remembered: !!rm,
     // When the session will die without RM to renew it (null = n/a).
     expiresAt: !rm && sso && sso.expires > 0 ? new Date(sso.expires * 1000) : null,
@@ -110,13 +115,40 @@ export function epicRejectedReason(status, errorCode) {
   return `store shows logged in, but Epic rejected the account session (account check returned HTTP ${status}${errorCode ? `, ${errorCode}` : ''}) — claims would redirect to the login page. Log out and back in, or import a fresh cookie export that includes the .epicgames.com cookies.`;
 }
 
-export const EPIC_NO_ACCOUNT_SESSION = 'store shows logged in, but the Epic account session is gone (no EPIC_SSO / EPIC_SSO_RM cookie) — claims would redirect to the login page. Log out and back in, or import a fresh cookie export that includes the .epicgames.com cookies.';
+export const EPIC_NO_ACCOUNT_SESSION = 'store shows logged in, but the Epic account session is gone (no EPIC_SSO / EPIC_SSO_RM / EPIC_SESSION_AP cookie) — claims would redirect to the login page. Log out and back in, or import a fresh cookie export that includes the .epicgames.com cookies.';
 
 // Reason for a failed cookie import whose upload lacks EPIC_SESSION_AP;
 // null when it was there (the failure is something else).
 export function epicImportMissingSessionReason(cookies) {
   if ((cookies || []).some(c => c && c.name === 'EPIC_SESSION_AP')) return null;
   return 'the export has no EPIC_SESSION_AP cookie, which is Epic\'s account login. It only shows on www.epicgames.com/id pages, so an export from a store tab leaves it out. In the same logged-in browser, open https://www.epicgames.com/id/api/account, export the cookies from that tab and import that file too (the cookies already imported are kept).';
+}
+
+// Once the account session lapses on a device Epic still knows, /id/login
+// shows an account switcher instead of the email form, and clicking the
+// account signs back in without a password (CharlieRiesner, #163). Tile
+// markup seen 2026-10-27: <div role="button" id="account-<id>"
+// data-account-id="<id>" aria-label="<display name>">, email in its text.
+export const EPIC_SWITCHER_TILE = '[role="button"][data-account-id]';
+
+// Call on /id/login. Clicks the remembered account if the switcher shows
+// and returns true; false when the email form (or nothing) shows instead.
+// With several accounts listed, only clicks the one matching `email`.
+export async function resumeEpicAccountSwitcher(page, email, timeout = 10000) {
+  const tiles = page.locator(EPIC_SWITCHER_TILE);
+  const shown = await Promise.race([
+    tiles.first().waitFor({ timeout }).then(() => 'switcher'),
+    page.locator('#email').waitFor({ timeout }).then(() => 'form'),
+  ]).catch(() => null);
+  if (shown !== 'switcher') return false;
+  let tile = tiles.first();
+  if (await tiles.count() > 1) {
+    if (!email) return false;
+    tile = tiles.filter({ hasText: email });
+    if (await tile.count() !== 1) return false;
+  }
+  await tile.click({ delay: 111 });
+  return true;
 }
 
 export function epicNotRememberedWarning(expiresAt) {

@@ -8,7 +8,7 @@ import { checkQualityGate, newQualityTally, recordQualityResult, formatQualityTa
 import { cfg } from '#src/config.js';
 import { siteVersion } from '#src/sites.js';
 import { getMobileGames } from '#src/epic-games-mobile.js';
-import { checkEpicAccountSession } from '#src/epic-session.js';
+import { checkEpicAccountSession, resumeEpicAccountSwitcher } from '#src/epic-session.js';
 import { fetchGamerPowerGiveaways, filterFor as filterGpFor, resolveGamerPowerHref, unhandledPlatforms as gpUnhandled } from '#src/gamerpower.js';
 import { fetchFGFPosts, filterFor as filterFgfFor, unhandledPlatforms as fgfUnhandled, cleanTitle as fgfClean } from '#src/freegamefindings.js';
 
@@ -240,7 +240,21 @@ try {
     if (acct.warning) log.warn(acct.warning);
     return true;
   };
+  // A lapsed session on a known device lands on Epic's account switcher;
+  // one click on the account signs back in, no credentials needed (#163).
+  // Tried once before the NOWAIT exit so scheduled runs can recover too.
+  let triedSwitcher = false;
   while (!await signedIn()) {
+    if (!triedSwitcher) {
+      triedSwitcher = true;
+      await gotoWithRetry(page, URL_LOGIN, EPIC_NAV);
+      if (await resumeEpicAccountSwitcher(page, cfg.eg_email)) {
+        log.info('Epic showed the account switcher — clicked the remembered account');
+        await page.waitForURL(URL_CLAIM, { timeout: 30000 }).catch(_ => { });
+      }
+      await gotoWithRetry(page, URL_CLAIM, EPIC_NAV);
+      continue;
+    }
     if (cfg.nowait) process.exit(1);
     if (cfg.novnc_port) log.info(`Open http://localhost:${cfg.novnc_port} to login inside the docker container`);
     if (!cfg.debug) context.setDefaultTimeout(cfg.login_timeout); // give user some extra time to log in

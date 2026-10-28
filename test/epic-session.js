@@ -71,8 +71,11 @@ const verdictCases = [
   // Live EPIC_SESSION_AP with no SSO cookie authenticates → not signed out.
   ['no SSO cookies, Epic accepts', acct(store), { state: 'live', status: 200 }, { ok: true, reason: null, warning: /isn't remembered/ }],
   ['SSO + RM, Epic accepts', acct([...store, sso, rm]), { state: 'live', status: 200 }, { ok: true, reason: null, warning: null }],
-  ['probe unknown, cookies missing → cookie verdict', acct(store), { state: 'unknown', status: 403 }, { ok: false, reason: /no EPIC_SSO/, warning: null }],
+  ['probe unknown, cookies missing → cookie verdict', acct(store), { state: 'unknown', status: 403 }, { ok: false, reason: /no EPIC_SSO.*EPIC_SESSION_AP/, warning: null }],
   ['probe unknown, RM present → ok', acct([...store, rm]), { state: 'unknown', status: null }, { ok: true, reason: null, warning: null }],
+  // davidcoulson (#163): EPIC_SESSION_AP survives Epic clearing SSO/RM.
+  ['probe unknown, SESSION_AP only → ok', acct([...store, c('EPIC_SESSION_AP', '.epicgames.com', null)]), { state: 'unknown', status: null }, { ok: true, reason: null, warning: /isn't remembered/ }],
+  ['SESSION_AP left after a 401 → dead', acct([...store, c('EPIC_SESSION_AP', '.epicgames.com', null)]), { state: 'dead', status: 401 }, { ok: false, reason: /HTTP 401/, warning: null }],
   ['probe unknown, SSO only → ok + warning', acct([...store, sso]), { state: 'unknown', status: 503 }, { ok: true, reason: null, warning: /isn't remembered/ }],
 ];
 const matches = (v, want) => want === null ? v == null : want.test(String(v));

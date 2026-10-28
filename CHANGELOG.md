@@ -4,6 +4,19 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.12.23
+
+**Epic: sign back in from the account switcher automatically (#163).**
+
+When Epic's account session runs out on a device it still knows, its login page shows an account switcher (your account as a single button) instead of the email form. Clicking your account signs you back in without a password, but the claimer didn't know that page: a scheduled run gave up as "not signed in", and the after-run session check sent a "session expired" notification.
+
+- The Epic run now clicks your account on the switcher before giving up, so scheduled runs recover by themselves.
+- The session check (Sessions tab Check, and the check after each scheduled run) does the same click before reporting Epic as expired.
+- If the switcher lists several accounts, it only clicks the one matching `EG_EMAIL` and otherwise leaves it to you.
+- When Epic's own account check can't be reached (timeout, Cloudflare page), the fallback cookie check now also counts `EPIC_SESSION_AP`, which signs you in on its own. Before, a profile with only that cookie left could be reported as expired.
+
+---
+
 ## What's new in 2.12.22
 
 **Joybuy: daily JoyPoints check-in.**

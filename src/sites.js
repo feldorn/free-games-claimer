@@ -55,7 +55,7 @@ import path from 'node:path';
 import { devices } from 'patchright';
 import { cfg } from './config.js';
 import { ROOT_DIR, RUNNER_NAME_RE, platformFile } from './paths.js';
-import { checkEpicAccountSession } from './epic-session.js';
+import { checkEpicAccountSession, resumeEpicAccountSwitcher } from './epic-session.js';
 
 // Resolves a runner through the '#platforms/*' alias in package.json, so the
 // directory is declared once and serves both `import` and the spawned
@@ -212,19 +212,29 @@ export const SITES = [
     ],
     async checkLogin(page) {
       try {
-        await page.goto('https://store.epicgames.com/en-US/free-games', { waitUntil: 'domcontentloaded', timeout: 20000 });
-        await page.waitForTimeout(3000);
-        const nav = page.locator('egs-navigation');
-        const isLoggedIn = await nav.getAttribute('isloggedin');
-        if (isLoggedIn === 'true') {
-          const user = await nav.getAttribute('displayname');
-          // The header only reflects the store's refresh token, which
-          // outlives the account session claims need — ask Epic (#163).
-          const acct = await checkEpicAccountSession(page.context());
-          if (!acct.ok) return { loggedIn: false, user: user || null, reason: acct.reason };
-          return { loggedIn: true, user: user || 'unknown', ...(acct.warning && { warning: acct.warning }) };
-        }
-        return { loggedIn: false };
+        const check = async () => {
+          await page.goto('https://store.epicgames.com/en-US/free-games', { waitUntil: 'domcontentloaded', timeout: 20000 });
+          await page.waitForTimeout(3000);
+          const nav = page.locator('egs-navigation');
+          const isLoggedIn = await nav.getAttribute('isloggedin');
+          if (isLoggedIn === 'true') {
+            const user = await nav.getAttribute('displayname');
+            // The header only reflects the store's refresh token, which
+            // outlives the account session claims need — ask Epic (#163).
+            const acct = await checkEpicAccountSession(page.context());
+            if (!acct.ok) return { loggedIn: false, user: user || null, reason: acct.reason };
+            return { loggedIn: true, user: user || 'unknown', ...(acct.warning && { warning: acct.warning }) };
+          }
+          return { loggedIn: false };
+        };
+        const r = await check();
+        if (r.loggedIn) return r;
+        // Same account-switcher recovery as the runner (#163): a lapsed
+        // session on a known device is one click from signed in again.
+        await page.goto(this.loginUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
+        if (!await resumeEpicAccountSwitcher(page, cfg.eg_email)) return r;
+        await page.waitForURL('https://store.epicgames.com/**', { timeout: 30000 }).catch(() => {});
+        return await check();
       } catch (e) {
         // Surface the error so postRunSessionCheck can distinguish "page
         // rendered, said not logged in" from "couldn't check at all"
