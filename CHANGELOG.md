@@ -4,6 +4,23 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.12.24
+
+**Microsoft Rewards: one slow page load no longer costs the day's searches (#175).**
+
+When the Rewards dashboard took more than 60 seconds to reload after the activity cards, the timeout ended the whole desktop session. No searches ran, but the run still finished as a success with "+0".
+
+- A page timeout in the activity-card, bonus-points or ready-to-claim step now skips that step instead of ending the session, the same way network errors already did.
+- Those dashboard reloads now wait for the page itself, not every image and script on it, so they time out less often.
+- If any of those optional steps fails for another reason, the searches still run.
+- If the desktop session does stop early, the end-of-run notification says so and suggests re-running from the panel.
+
+**Prime Gaming: a missing key no longer stops the rest of the Prime run (#174).**
+
+If an external game (for example a GOG key) was claimed but its code never appeared on the claim page, the run stopped with "All promises were rejected" and skipped every game after it. That game is now marked `claimed, code not found`, the notification links to its claim page so you can copy the key, and the run carries on.
+
+---
+
 ## What's new in 2.12.23
 
 **Epic: sign back in from the account switcher automatically (#163).**

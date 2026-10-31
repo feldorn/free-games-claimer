@@ -611,7 +611,20 @@ try {
         // fall through if code extraction failed → generic 'not implemented' path
       }
       if (store in redeem) {
-        const code = await Promise.any([page.inputValue('input[type="text"]'), page.textContent('[data-a-target="ClaimStateClaimCodeContent"]').then(stripCodeLabel)]); // input: Legacy Games; text: gog.com
+        // If neither code element shows up, Promise.any rejects with an
+        // AggregateError ("All promises were rejected"), which used to end
+        // the whole Prime run on that one game (#174). Record it, point the
+        // user at the claim page, and carry on with the rest of the list.
+        const code = await Promise.any([page.inputValue('input[type="text"]'), page.textContent('[data-a-target="ClaimStateClaimCodeContent"]').then(stripCodeLabel)]).catch(() => null); // input: Legacy Games; text: gog.com
+        if (!code) {
+          log.warn(`${title} — claimed on ${store}, but no code was found on the claim page; copy it from ${url}`);
+          db.data[user][title].status = 'claimed, code not found';
+          needsActionCount++;
+          notify_game.status = `code not found on ${store === 'gog.com' ? 'GOG' : store}, copy it from the claim page`;
+          notify_game.details = url;
+          await page.screenshot({ path: screenshot('external', `${filenamify(title)}.png`), fullPage: true });
+          continue;
+        }
         if (store == 'legacy games') { // may be different URL like https://legacygames.com/primeday/puzzleoftheyear/
           redeem[store] = await page.locator('li:has-text("Click here") a').getAttribute('href'); // full text: Click here to enter your redemption code.
         }

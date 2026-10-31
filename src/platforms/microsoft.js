@@ -805,11 +805,14 @@ async function dismissDashboardPopup(page) {
 // banner, ready-to-claim card) handles its own goto failures via this
 // helper so one step's transient doesn't kill the search loop or the
 // mobile session that follow. Reports that drove this list: #67 OFABLE,
-// #80 Rick45 (page closed), #100 TheDevRo (chrome-error interruption).
+// #80 Rick45 (page closed), #100 TheDevRo (chrome-error interruption),
+// #175 amphoterism (a slow dashboard reload hit Playwright's 60 s goto
+// timeout and took the whole desktop session, searches included, with it).
 function isRecoverableMsNavError(err) {
   const msg = String(err?.message || err);
   return /Target page, context or browser has been closed/i.test(msg)
       || /interrupted by another navigation/i.test(msg)
+      || err?.name === 'TimeoutError' || /Timeout \d+ms exceeded/i.test(msg)
       || isNetworkErrorMessage(msg);
 }
 
@@ -826,7 +829,7 @@ async function claimPendingBonusPoints(page) {
     return;
   }
   try {
-    await page.goto(BING_REWARDS_URL, { waitUntil: 'load' });
+    await page.goto(BING_REWARDS_URL, { waitUntil: 'domcontentloaded' });
   } catch (e) {
     if (isRecoverableMsNavError(e)) {
       log.info(`claimPendingBonusPoints: ${String(e.message || e).split('\n')[0]} — skipping bonus-points pass`);
@@ -1052,7 +1055,7 @@ async function clickEveryPendingActivityCard(page) {
     return;
   }
   try {
-    await page.goto(BING_REWARDS_URL, { waitUntil: 'load' });
+    await page.goto(BING_REWARDS_URL, { waitUntil: 'domcontentloaded' });
   } catch (e) {
     if (isRecoverableMsNavError(e)) {
       log.info(`clickEveryPendingActivityCard: ${String(e.message || e).split('\n')[0]} — skipping activity-card pass`);
@@ -1303,6 +1306,9 @@ async function recordMsRun(session, startedAt, before, after) {
 // nulls survive cleanly: a session that failed login leaves both before
 // and after as null and gets dropped from the message.
 let desktopBefore = null, desktopAfter = null;
+// First line of the error that ended the desktop session early, if any,
+// so the end-of-run notification says so instead of a quiet "+0" (#175).
+let desktopFailure = null;
 let mobileBefore = null, mobileAfter = null;
 // Shared new-UI signal captured during the desktop session so the mobile
 // session can skip pre-login (Dr4w's #114): on redesigned-dashboard
@@ -1336,9 +1342,16 @@ log.section('Desktop');
       // already does internally; failure defaults to old-UI behaviour
       // for both sessions (safest fallback under unexpected DOM).
       sessionSawNewUi = await isNewMsUi(page).catch(() => false);
-      await clickEveryPendingActivityCard(page);
-      await claimPendingBonusPoints(page);
-      await claimReadyToClaimCard(page);
+      // The card / bonus / ready-to-claim passes are optional extras; an
+      // error in any of them must not cost the day's searches (#175).
+      try {
+        await clickEveryPendingActivityCard(page);
+        await claimPendingBonusPoints(page);
+        await claimReadyToClaimCard(page);
+      } catch (e) {
+        if (page.isClosed()) throw e;
+        log.warn(`Activity/bonus pass failed: ${String(e.message || e).split('\n')[0]} — continuing to searches`);
+      }
       await executeBingSearchAsDefaultSearchEngine(page, searchTerms[0]);
       await executeBingSearches(page, searchTerms.slice(1, desktopSearchCount), { startingBalance: before });
       after = await readPointsBalance(page);
@@ -1359,7 +1372,8 @@ log.section('Desktop');
     // of whether individual steps failed"). Without this, a crash
     // during desktop propagates past the mobile block AND the
     // end-of-run summary.
-    log.warn(`Desktop session failed: ${String(e.message || e).split('\n')[0]} — continuing to mobile session + end-of-run summary`);
+    desktopFailure = String(e.message || e).split('\n')[0];
+    log.warn(`Desktop session failed: ${desktopFailure} — continuing to mobile session + end-of-run summary`);
   } finally {
     await context.close();
     activeContext = null;
@@ -1499,6 +1513,7 @@ log.section('Mobile');
   } else {
     summary = 'microsoft-rewards: completed desktop and mobile sessions (no points data captured).';
   }
+  if (desktopFailure) summary += `\nDesktop session stopped early (${desktopFailure}), so its searches may not have run. Re-run Microsoft Rewards from the panel.`;
   await notify(summary, { kind: 'summary' });
 }
 
