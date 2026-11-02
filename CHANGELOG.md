@@ -4,6 +4,22 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.12.30
+
+**AliExpress: optional missions on top of the daily check-in.**
+
+The coin page also pays coins for visiting pages, but the claimer only did the check-in. With **Also do the browse missions and the quiz** on (Settings → Per-service → AliExpress, or `AE_MISSIONS=1`), each run now does those missions after the check-in: it clicks the page's own button, stays on the opened page for the time the mission asks for, and reads what AliExpress paid. At about 15 seconds per mission, this adds a few minutes to a run. It then answers the daily coin quiz. AliExpress only reveals the right answer afterwards, so a new question is a best guess and the answer is saved in `data/aliexpress.json` for when that question comes back.
+
+Only visit-a-page missions that pay coins on an aliexpress.com page, the quiz, the "turn on notifications" reward and the "daily check-in" mission (which unlocks the quiz) are done. Missions that act on your account (cart, share), app-only missions (farm, shortcut, widget) and missions that ask for clicks on sponsored items are never touched. A mission problem can't cost the day's coins: the missions run after the check-in and stop on their own after repeated failures or a verification prompt.
+
+It's off by default because more automated activity may draw more attention from AliExpress's bot detection. The run notification and `data/aliexpress.json` now include the mission count.
+
+**AliExpress: runs no longer sit idle for 3 minutes after the check-in.** The streak, tomorrow's coins and € total are missing from the redesigned page, and each lookup waited out the full 60-second timeout. They now give up after 3 seconds.
+
+Thanks to @isthevao for this (#177).
+
+---
+
 ## What's new in 2.12.29
 
 **Run log: skipped games no longer look like failures.**
