@@ -4,6 +4,14 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.12.28
+
+**Microsoft Rewards: a failed activity-card click can no longer crash the run.**
+
+When a Daily Set card click failed because the dashboard had redrawn under it, the extra details the claimer saves for debugging made patchright, the browser-automation library the claimer uses, fail in a way the claimer couldn't catch. That crashed the whole Microsoft Rewards run before any searches, so it earned 0 points (seen on 27 October; a re-run 30 minutes later was fine). The claimer now finds the card on the page again before saving those details, so a stale card is logged and skipped and the searches still run.
+
+---
+
 ## What's new in 2.12.27
 
 **Epic Games: the false "No free games available in your region" message is gone, and the wait with it.**

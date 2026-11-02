@@ -1018,8 +1018,18 @@ async function clickNewUiActivityCards(page) {
               mkdirSync(diagDir, { recursive: true });
               await page.screenshot({ path: `${diagDir}/${base}.png`, fullPage: true }).catch(() => {});
               writeFileSync(`${diagDir}/${base}.html`, await page.content());
-              const cardHtml = await cards[i].evaluate(el => el.outerHTML).catch(() => null);
-              const box = await cards[i].boundingBox().catch(() => null);
+              // Re-query by selector instead of touching cards[i]: the click
+              // failed because that handle is usually detached, and
+              // evaluate() on a detached handle makes patchright's
+              // adoptElementHandle reject INSIDE the library (ProtocolError
+              // "DOM.describeNode: Cannot find context with specified id"),
+              // which our .catch never sees — it crashed the whole MS run as
+              // an unhandled rejection on 2026-10-27. The nth(i) match may be
+              // a neighbouring card if the list re-rendered; good enough for
+              // a diagnostic.
+              const fresh = page.locator(selector).nth(i);
+              const cardHtml = await fresh.evaluate(el => el.outerHTML, null, { timeout: 3000 }).catch(() => null);
+              const box = await fresh.boundingBox({ timeout: 3000 }).catch(() => null);
               const meta = [
                 `url: ${page.url()}`,
                 `label: ${label}`,
