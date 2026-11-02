@@ -4,6 +4,14 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.12.27
+
+**Epic Games: the false "No free games available in your region" message is gone, and the wait with it.**
+
+The "Free Now" tile on Epic's page was there all along, and the claimer was picking the game up from it. The step that waits for the tile to appear was what kept timing out, so every run paused (60 seconds before 2.12.26, 15 seconds after) and then wrongly reported that no free games were available. The claimer now waits only until the tile is on the page, which takes milliseconds. The "No free games" message is now shown only when the page and Epic's free-games list both come back empty.
+
+---
+
 ## What's new in 2.12.26
 
 **Epic Games: no more 60-second wait for "Free Now" tiles.**

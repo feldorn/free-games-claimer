@@ -366,10 +366,13 @@ try {
   // listed the week's game (Sorry We're Closed), costing 60s every run.
   // Full wait only when the API was unreachable and the page is all we have.
   const freeNowTimeout = apiFreeSlugs ? Math.min(15000, cfg.timeout) : cfg.timeout;
-  let freeNowFound = true;
-  await game_loc.last().waitFor({ timeout: freeNowTimeout }).catch(_ => {
-    freeNowFound = false;
-  });
+  // v2.12.27: wait for the tile to be ATTACHED, not visible. Since ~10-30
+  // `.last().waitFor()` (default state: visible) times out even though the
+  // single tile is present and isVisible() is true (probed 2026-11-02 in the
+  // live container: attached-wait 33ms, visible-wait timeout) — so every run
+  // logged "No free games available in your region" while `.all()` below
+  // still picked the game up.
+  await game_loc.first().waitFor({ state: 'attached', timeout: freeNowTimeout }).catch(_ => { });
   // clicking on `game_sel` sometimes led to a 404, see https://github.com/vogler/free-games-claimer/issues/25
   // debug showed that in those cases the href was still correct, so we `goto` the urls instead of clicking.
   // Alternative: parse the json loaded to build the page https://store-site-backend-static-ipv4.ak.epicgames.com/freeGamesPromotions
@@ -381,7 +384,9 @@ try {
   const pageSlugs = new Set(urls.map(u => u.split('/').pop().split('?')[0].toLowerCase()));
   const apiOnly = (apiFreeSlugs || []).filter(sl => !pageSlugs.has(sl.split('/').pop()));
   for (const sl of apiOnly) urls.push(`https://store.epicgames.com/en-US/p/${sl}`);
-  if (!freeNowFound) {
+  // Message from what was actually collected, not from whether the wait
+  // timed out (a timed-out wait doesn't mean the tiles are absent).
+  if (!urlSlugs.length) {
     if (apiOnly.length) log.info(`"Free Now" tiles not found on the page — using ${apiOnly.length} free game(s) from Epic's promotions API`);
     // rarely there are no free games available, see https://github.com/vogler/free-games-claimer/issues/210#issuecomment-1727420943
     else log.warn('No free games available in your region');
