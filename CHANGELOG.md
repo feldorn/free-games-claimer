@@ -4,6 +4,10 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.12.26
+
+**AliExpress: runs no longer sit idle for 3 minutes after the check-in.** The streak, tomorrow's coins and € total are missing from the redesigned page, and each lookup waited out the full 60-second timeout. They now give up after 3 seconds.
+
 ## What's new in 2.12.25
 
 **Epic Games: captchas that appear before checkout are now recognised and retried.**

@@ -302,16 +302,19 @@ const coins = async () => {
     collectBtn.click({ force: true }).then(_ => { collected = true; console.log('Collected coins for today!'); }),
     moreBtn.waitFor().then(_ => console.log('No more coins to collect today!')),
   ]);
+  // Optional extras the 2026-10 redesign may not show: look briefly, or these
+  // three add 3 minutes of the default timeout to every run.
+  const OPTIONAL_READ = { timeout: 3000 };
   try {
-    streakDays = Number(await page.locator('h3:text-is("day streak")').locator('xpath=..').locator('div span').innerText());
+    streakDays = Number(await page.locator('h3:text-is("day streak")').locator('xpath=..').locator('div span').innerText(OPTIONAL_READ));
     console.log('Streak (days):', streakDays);
   } catch {}
   try {
-    tomorrowCoins = Number((await page.locator(':text("coins tomorrow")').innerText()).replace(/Get (\d+) check-in coins tomorrow!/, '$1'));
+    tomorrowCoins = Number((await page.locator(':text("coins tomorrow")').innerText(OPTIONAL_READ)).replace(/Get (\d+) check-in coins tomorrow!/, '$1'));
     console.log('Tomorrow (coins):', tomorrowCoins);
   } catch {}
   try {
-    totalEuro = await page.locator(':text("€")').first().innerText();
+    totalEuro = await page.locator(':text("€")').first().innerText(OPTIONAL_READ);
     console.log('Total (€):', totalEuro);
   } catch {}
 };
