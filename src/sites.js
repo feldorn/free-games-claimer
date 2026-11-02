@@ -486,7 +486,7 @@ export const SITES = [
   {
     id: 'aliexpress',
     name: 'AliExpress',
-    version: '2.3',
+    version: '2.4',
     subtitle: 'Deprecated by AliExpress — web coin collection is being phased out in favor of the mobile app. Works for some accounts on a degradation curve. See README → Bot detection.',
     script: platformScript('aliexpress'),
     claimOrder: 5,
@@ -503,7 +503,11 @@ export const SITES = [
     claimDbFile: null,
     scheduleKind: 'daily-chain',
     features: [],
-    configFields: [],
+    configFields: [
+      { key: 'missions', env: 'AE_MISSIONS', type: 'boolean', default: false,
+        label: 'Also do the browse missions and the quiz',
+        hint: 'After the check-in, opens each coin-paying "visit this page" mission on the coin page and stays for the time it asks for (about 15 seconds each, so a few minutes per run), then answers the daily coin quiz. New quiz questions are a best guess; the right answer is saved for when a question comes back. Also takes the "turn on notifications" reward and the "daily check-in" mission that unlocks the quiz. Never touches missions that act on your account (cart, share), the app-only ones (farm, shortcut, widget), or the ones that ask you to click on sponsored items. Off by default — more automated activity may draw more attention from AliExpress\'s bot detection.' },
+    ],
     async checkLogin(page) {
       // Structural selectors (locale-blind) first, English-text fallback
       // second — same pattern as aliexpress.js auth() / coins() shipped in

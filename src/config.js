@@ -167,6 +167,7 @@ export const cfg = {
   // to invoke any claim script, so no script-internal guard is needed.
   ae_email:    process.env.AE_EMAIL    || process.env.EMAIL,
   ae_password: process.env.AE_PASSWORD || process.env.PASSWORD,
+  ae_missions: process.env.AE_MISSIONS === '1' || ae.missions === true,
   joybuy_email:    process.env.JOYBUY_EMAIL    || process.env.EMAIL,
   joybuy_password: process.env.JOYBUY_PASSWORD || process.env.PASSWORD,
   joybuy_page_url: process.env.JOYBUY_PAGE_URL || joybuy.pageUrl,

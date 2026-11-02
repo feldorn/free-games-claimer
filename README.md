@@ -29,7 +29,7 @@ Services are grouped by what they actually do.
 | Service | Notes |
 |---|---|
 | 🎯 [Microsoft Rewards](https://rewards.bing.com) | Daily Bing searches + activity cards for points, with before/after balance tracking |
-| 🛒 [AliExpress](https://m.aliexpress.com) | Daily check-in coins *(opt-in; disabled by default; **deprecated** — see [Bot detection](docs/REFERENCE.md#bot-detection--what-works-what-doesnt))* |
+| 🛒 [AliExpress](https://m.aliexpress.com) | Daily check-in coins, optional browse missions and quiz *(opt-in; disabled by default; **deprecated** — see [Bot detection](docs/REFERENCE.md#bot-detection--what-works-what-doesnt))* |
 
 **Watchers** — notify-only; surface new free items so you can grab them yourself:
 

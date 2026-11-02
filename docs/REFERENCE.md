@@ -71,7 +71,7 @@ All data lives in the `data/` directory (mounted as a Docker volume).
 | `data/gog-catalog-watch.json` | GOG catalog watch — slug-keyed state for the 100%-off-promo notification loop. Each entry stores `{title, url, firstSeen, lastSeenAt}`; re-notify fires when `lastSeenAt` ages past 30 days. Only relevant if you're seeing GOG-catalog notifications. |
 | `data/steam.json` | Claimed Steam titles |
 | `data/microsoft-rewards.json` | MS Rewards run history — `{at, session, before, after, earned}` per run (capped at 500 entries). Feeds the Stats tab's points KPIs. |
-| `data/aliexpress.json` | AliExpress daily coin-collect history — `{at, balance, streak, tomorrow, collected, earned}` per run (capped at 500). Drives the AliExpress row in the Stats tab. Only written when the service is enabled. |
+| `data/aliexpress.json` | AliExpress daily coin-collect history — `{at, balance, streak, tomorrow, collected, missions, missionCoins, earned}` per run (capped at 500). Drives the AliExpress row in the Stats tab. Only written when the service is enabled. |
 | `data/ubisoft-watch.json` · `data/humble-bundle-watch.json` · `data/fanatical-watch.json` · `data/lenovo-gaming-watch.json` | Watcher state — last-seen titles per site so re-notify only fires on genuinely new items. Lenovo's file additionally tracks per-drop scheduledAt, `userCollected` flags, and the next-wake offset for the panel scheduler. Only written when the corresponding watcher is enabled. |
 | `data/ms-used-terms.json` | Microsoft Rewards — search terms used in the last 30 days (dedup window) |
 | `data/config.json` | App-level config overrides written by the Settings tab. Missing = env/defaults in effect. Deleted = same as missing. |

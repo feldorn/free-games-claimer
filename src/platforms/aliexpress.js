@@ -6,6 +6,7 @@ import { datetime, prompt, jsonDb, awaitUserCaptchaSolve, getOrCreateFingerprint
 import { launchContext } from '#src/browser.js';
 import { cfg } from '#src/config.js';
 import { siteVersion } from '#src/sites.js';
+import { pickMissions, parseMissionCompletion, pickQuizUrl, pickQuizOption, parseQuizAnswer } from '#src/aliexpress-missions.js';
 import { FingerprintInjector } from 'fingerprint-injector';
 import { FingerprintGenerator } from 'fingerprint-generator';
 
@@ -19,6 +20,8 @@ let streakDays = null;
 let tomorrowCoins = null;
 let collected = false;
 let totalEuro = null;
+let missionsDone = 0;
+let missionCoins = 0;
 
 // Persist the generated fingerprint across runs. AliExpress's bot scoring
 // flags device-instability between launches; reusing the same UA + headers +
@@ -319,9 +322,136 @@ const coins = async () => {
   } catch {}
 };
 
+const MISSION_LIST_API = 'https://acs.aliexpress.com/h5/mtop.aliexpress.interactive.task.delivery.query/';
+const MISSION_COMPLETE_API = 'https://acs.aliexpress.com/h5/mtop.aliexpress.interactive.task.process.complete/';
+const QUIZ_QUESTION_API = 'https://acs.aliexpress.com/h5/mtop.aliexpress.coin.question.query.question/';
+const QUIZ_ANSWER_API = 'https://acs.aliexpress.com/h5/mtop.aliexpress.coin.question.submit.answer/';
+// A run normally ends when the list has nothing left; this is the backstop
+// against a list that keeps offering a mission after it paid.
+const MAX_MISSIONS_PER_RUN = 20;
+const MAX_CONSECUTIVE_MISSION_FAILURES = 2;
+const MISSION_COMPLETE_MARGIN_MS = 15000;
+
+// AE_MISSIONS (Settings → Per-service → AliExpress). Runs after the check-in
+// and catches its own errors, so a mission problem can't cost the day's coins.
+const missions = async () => {
+  console.log('Doing missions...');
+  const isPostTo = (r, api) => r.url().startsWith(api) && r.request().method() === 'POST';
+  const loadMissions = async () => {
+    const list = page.waitForResponse(async r => {
+      if (!isPostTo(r, MISSION_LIST_API)) return false;
+      return r.json().then(d => Array.isArray(d?.data?.result)).catch(_ => false);
+    }).then(async r => (await r.json()).data.result);
+    await Promise.all([list, page.goto(urls.coins, { waitUntil: 'domcontentloaded' })]);
+    return list;
+  };
+  const isChallengeUrl = url => (/punish|captcha/i).test(url);
+  const challenged = () => context.pages().some(p => [p, ...p.frames()].some(f => isChallengeUrl(f.url())));
+  let verificationShown = false;
+
+  // The page lists a few missions inline and the rest in the "earn more"
+  // panel, whose buttons have no id but carry the group id.
+  const missionButton = async mission => {
+    const inline = page.locator(`#task-receive-btn-${mission.instanceId}`);
+    if (await inline.waitFor({ timeout: 5000 }).then(_ => true).catch(_ => false)) return inline;
+    await page.locator('[class*="aecoin-helpContainer"]').first().click({ timeout: 15000 });
+    return page.locator(`.e2e_normal_task_right[data-groupid="${mission.groupId}"] .e2e_normal_task_right_btn`);
+  };
+
+  // The page does the work: its button opens the mission in a new tab and
+  // reports it to task.process.complete a second later, so we click, stay on
+  // the mission page for the time it asks for, and read the result.
+  const runMission = async mission => {
+    const completion = context.waitForEvent('response', {
+      predicate: r => isPostTo(r, MISSION_COMPLETE_API),
+      timeout: mission.dwellSeconds * 1000 + MISSION_COMPLETE_MARGIN_MS,
+    }).catch(_ => null);
+    const tab = context.waitForEvent('page', { timeout: 15000 }).catch(_ => null);
+    try {
+      await (await missionButton(mission)).click({ timeout: 15000 });
+      const [response] = await Promise.all([completion, page.waitForTimeout(mission.dwellSeconds * 1000)]);
+      return parseMissionCompletion(await response?.json().catch(_ => null));
+    } finally {
+      // Before closing the tab: that's where a verification prompt shows up.
+      verificationShown ||= challenged();
+      await (await tab)?.close().catch(_ => {});
+      await page.bringToFront().catch(_ => {});
+    }
+  };
+
+  const doQuiz = async url => {
+    const [questionResponse] = await Promise.all([
+      page.waitForResponse(r => isPostTo(r, QUIZ_QUESTION_API)).then(r => r.json()),
+      page.goto(url, { waitUntil: 'domcontentloaded' }),
+    ]);
+    const question = questionResponse?.data?.data;
+    // answerSuccess is already set when today's question was answered.
+    if (!question?.optionList?.length || question.answerSuccess !== undefined) return;
+    const option = pickQuizOption(question, db.data.quizAnswers);
+    const [answerResponse] = await Promise.all([
+      page.waitForResponse(r => isPostTo(r, QUIZ_ANSWER_API)).then(r => r.json()),
+      page.locator('[class*="aecoin-optionButton"]').nth(option).click({ timeout: 15000 }),
+    ]);
+    const answer = parseQuizAnswer(answerResponse);
+    if (!answer.answered) {
+      console.error('Quiz answer was not accepted');
+      return;
+    }
+    if (answer.correctOption) (db.data.quizAnswers ??= {})[question.questionId] = answer.correctOption;
+    missionsDone++;
+    missionCoins += answer.coins;
+    console.log(`Quiz: ${answer.correct ? `right answer, +${answer.coins} coins` : 'wrong answer'}`);
+  };
+
+  const failedTasks = new Set();
+  let consecutiveFailures = 0;
+  let groups;
+  try {
+    for (let i = 0; i < MAX_MISSIONS_PER_RUN; i++) {
+      groups = await loadMissions();
+      const [mission] = pickMissions(groups, failedTasks);
+      if (!mission) break;
+      const result = await runMission(mission).catch(e => {
+        console.error(`Mission "${mission.title}" failed:`, e.message.split('\n')[0]);
+        return { success: false, coins: 0 };
+      });
+      if (result.success) {
+        missionsDone++;
+        missionCoins += result.coins;
+        consecutiveFailures = 0;
+      } else {
+        console.error(`Mission "${mission.title}" was not completed; skipping it this run`);
+        failedTasks.add(mission.taskId);
+        consecutiveFailures++;
+      }
+      if (verificationShown) {
+        log.warn('AliExpress asked for verification during missions; stopping them for this run');
+        break;
+      }
+      if (consecutiveFailures >= MAX_CONSECUTIVE_MISSION_FAILURES) {
+        log.warn('AliExpress missions keep failing; stopping them for this run');
+        break;
+      }
+      await page.waitForTimeout(2000 + Math.random() * 3000);
+    }
+    const quizUrl = pickQuizUrl(groups);
+    if (quizUrl && !verificationShown && consecutiveFailures < MAX_CONSECUTIVE_MISSION_FAILURES) {
+      await doQuiz(quizUrl).catch(e => console.error('Quiz failed:', e.message.split('\n')[0]));
+    }
+    if (missionsDone) {
+      const balance = pre_auth.coins();
+      await page.goto(urls.coins, { waitUntil: 'domcontentloaded' });
+      await balance;
+    }
+  } catch (e) {
+    log.warn(`AliExpress missions stopped: ${e.message.split('\n')[0]}`);
+  }
+  console.log(`Missions: ${missionsDone} done, +${missionCoins} coins`);
+};
+
 async function recordRun() {
   if (userCoinsNum == null && streakDays == null) return; // nothing to record
-  const entry = { at: datetime(), balance: userCoinsNum, streak: streakDays, tomorrow: tomorrowCoins, collected, totalEuro };
+  const entry = { at: datetime(), balance: userCoinsNum, streak: streakDays, tomorrow: tomorrowCoins, collected, totalEuro, missions: missionsDone, missionCoins };
   // Compute earned-vs-previous-run for Stats tab convenience.
   const prev = (db.data.runs || []).filter(r => typeof r.balance === 'number').slice(-1)[0];
   if (prev && typeof entry.balance === 'number') entry.earned = Math.max(0, entry.balance - prev.balance);
@@ -339,6 +469,7 @@ try {
     await f();
     console.log();
   }), Promise.resolve());
+  if (cfg.ae_missions) await missions();
   // claimed=1 when today's daily reward was just collected, 0 if it was
   // already collected before this run (semantically: "did we do today's
   // job?"). coins shows the current balance as the third field.
@@ -371,6 +502,7 @@ await recordRun();
   if (earned != null && earned > 0) parts.push(`+${fmt(earned)} coins`);
   else if (collected) parts.push(`collected today's coins`);
   else if (typeof userCoinsNum === 'number') parts.push(`already collected today`);
+  if (missionsDone) parts.push(`${fmt(missionsDone)} missions`);
   if (typeof userCoinsNum === 'number') parts.push(`balance ${fmt(userCoinsNum)}`);
   if (typeof streakDays === 'number') parts.push(`${fmt(streakDays)}-day streak`);
   if (parts.length) {
