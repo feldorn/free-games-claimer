@@ -1020,7 +1020,7 @@ const DIAG_PATTERNS = [
   /^Exception:\s+(?<msg>.+)$/,
 ];
 const ANSI_RE = /\x1b\[[0-9;]*m/g;
-const LEADING_MARKERS_RE = /^\s*[✓✗!✅❌]\s+/;
+const LEADING_MARKERS_RE = /^\s*[✓✗!✅❌–•]\s+/;
 // Per-stream rolling tail of recent cleaned lines. Each invocation of
 // _scanForErrors prepends the tail of the matching stream to the new
 // chunk before scanning so the pre-error context window can reach

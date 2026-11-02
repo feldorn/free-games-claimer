@@ -727,8 +727,12 @@ export const log = {
   game: (name, status) => {
     console.log(`    ${chalk.blue(name)} ${chalk.dim('→')} ${status}`);
   },
+  // Deliberate skip (filter, price/rating floor, DLC without base game,
+  // quality gate, region). Neutral dim `–`, NOT a red ✗ — ✗ is reserved for
+  // real failures (log.fail / log.exception) so failures stand out in the
+  // run log. See feedback_aggregate_log_verbosity.
   skip: (name, reason) => {
-    console.log(`    ${chalk.red('✗')} ${chalk.dim(name)} — ${chalk.yellow(reason)}`);
+    console.log(`    ${chalk.dim('–')} ${chalk.dim(name)} — ${chalk.dim(reason)}`);
   },
   ok: (msg) => {
     console.log(`    ${chalk.green('✓')} ${msg}`);

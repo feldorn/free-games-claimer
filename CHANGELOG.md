@@ -4,6 +4,14 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.12.29
+
+**Run log: skipped games no longer look like failures.**
+
+A game the claimer skips on purpose used to get the same red ✗ as a real failure. That covers games below your minimum price or rating, DLC whose base game you don't own, games blocked by the quality filter, and games not available in your region. They now get a grey `–`, so a red ✗ in the log always means something actually went wrong. This applies to Steam, Epic, FAB, GOG and Prime Gaming. Skip counts and failure counts are unchanged.
+
+---
+
 ## What's new in 2.12.28
 
 **Microsoft Rewards: a failed activity-card click can no longer crash the run.**
