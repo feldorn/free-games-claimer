@@ -4,6 +4,19 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.12.25
+
+**Epic Games: captchas that appear before checkout are now recognised and retried.**
+
+Epic sometimes shows its "One more step / Please complete a security check" hCaptcha before the checkout window opens, instead of inside it. The claimer only looked for captchas inside the checkout window, so in that case it waited 60 seconds and logged a plain "failed to claim". It sent no solve-now notification and didn't retry in the same run.
+
+- Captcha detection now checks every frame on the page for a visible hCaptcha challenge or the "One more step" screen, so it catches both layouts.
+- The solve-now push is sent as soon as the captcha appears, wherever it shows up, giving you time to solve it through the panel's browser view.
+- A game blocked this way is now retried in the same run, like other captcha failures.
+- If the captcha comes back on that retry, you get another solve-now push, and the log says it will be tried again on the next run. It used to time out without saying why.
+
+---
+
 ## What's new in 2.12.24
 
 **Microsoft Rewards: one slow page load no longer costs the day's searches (#175).**

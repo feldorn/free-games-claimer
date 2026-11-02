@@ -72,7 +72,35 @@ const CHECKOUT_IFRAME = '#webPurchaseContainer iframe, iframe[src*="/checkout?pu
 // Zero cost when the modal isn't there (all locators short-circuit at
 // count() === 0). No error path — dismiss failure is silent by design;
 // the next goto's domcontentloaded wait will still succeed.
-const RX_LAUNCHER_MODAL_HEADING = /final\s*step|is\s*epic\s*games\s*launcher\s*installed|Letzter\s*Schritt|Ist\s*der\s*Epic\s*Games\s*Launcher/i;
+// Frame-agnostic hCaptcha probe. The legacy check only looked for
+// `#h_captcha_challenge_checkout_free_prod iframe` INSIDE the checkout
+// iframe, but Epic also serves a "One more step / Please complete a
+// security check" hCaptcha wall BEFORE the checkout iframe loads (seen
+// 2026-11-02 on Dark Mystery: no store page, no checkout iframe, just the
+// challenge). waitForSelector(CHECKOUT_IFRAME) then timed out with
+// `iframe` undefined, the captcha check was skipped, and the game logged a
+// plain failure — no solve-now push, no captcha retry. Walk every frame
+// instead: a visible, on-screen hCaptcha challenge frame or the wrapper's
+// "One more step" heading counts. Invisible pre-loaded hCaptcha frames are
+// parked off-screen/hidden, so the bounding-box check filters them out.
+const RX_CAPTCHA_WALL = /One more step|complete a security check/i;
+async function isCaptchaShowing(page, iframe) {
+  if (page.isClosed()) return false;
+  try {
+    if (iframe && await iframe.locator('#h_captcha_challenge_checkout_free_prod iframe').count().catch(() => 0) > 0) return true;
+    for (const f of page.frames()) {
+      if (/hcaptcha\.com/i.test(f.url()) && /frame=challenge/i.test(f.url())) {
+        const el = await f.frameElement().catch(() => null);
+        const box = el && await el.isVisible().catch(() => false) ? await el.boundingBox().catch(() => null) : null;
+        if (box && box.width > 50 && box.height > 50 && box.x > -1000 && box.y > -1000) return true;
+      }
+      if (await f.getByText(RX_CAPTCHA_WALL).first().isVisible().catch(() => false)) return true;
+    }
+  } catch { /* probe is best-effort */ }
+  return false;
+}
+
+const RX_LAUNCHER_MODAL_HEADING =/final\s*step|is\s*epic\s*games\s*launcher\s*installed|Letzter\s*Schritt|Ist\s*der\s*Epic\s*Games\s*Launcher/i;
 async function dismissLauncherModal(page) {
   if (page.isClosed()) return;
   try {
@@ -699,7 +727,34 @@ try {
       }
       log.game(title, `claiming (${btnText})`);
       let captchaDetected = false;
+      // One handler for every captcha signal (checkout-iframe watcher below
+      // + the frame-agnostic poll) so the warn/push fires once per game.
+      const onCaptcha = async () => {
+        if (captchaDetected) return;
+        captchaDetected = true;
+        log.warn('Got hCaptcha challenge — solve in browser or get a new IP address');
+        // Include the panel deep-link (?focus=captcha auto-opens the
+        // browser view on the active service) so tapping the push
+        // takes the user straight to where they need to be. Game link
+        // kept as a secondary line for context. Priority is configurable
+        // via Settings → Notifications → Captcha priority (default
+        // high so it punches through DnD — captchas have minutes
+        // before the iframe times out).
+        const panelLink = cfg.public_url ? `${cfg.public_url}/?focus=captcha` : '';
+        const body = `epic-games: got captcha challenge for ${title} — solve now${panelLink ? '<br>' + panelLink : ''}<br>Game: ${url}`;
+        await notify(body, { priority: cfg.captcha_notify_priority || 'high', kind: 'action' });
+      };
+      let claimSettled = false;
       await purchaseBtn.click({ delay: 11 }); // got stuck here without delay (or mouse move), see #75, 1ms was also enough
+      // Poll for the pre-checkout "One more step" wall, which never shows up
+      // inside the checkout iframe (see isCaptchaShowing). Stops once this
+      // game's claim attempt settles either way.
+      (async () => {
+        while (!claimSettled && !captchaDetected && !page.isClosed()) {
+          if (await isCaptchaShowing(page)) { await onCaptcha().catch(() => { }); break; }
+          await new Promise(r => setTimeout(r, 2000));
+        }
+      })().catch(() => { });
 
       // click Continue if 'Device not supported. This product is not compatible with your current device.' - avoided by Windows userAgent?
       page.locator('button').filter({ hasText: RX_CONTINUE }).first().click().catch(_ => { });
@@ -776,20 +831,7 @@ try {
         btnAgree.waitFor().then(() => btnAgree.first().click()).catch(_ => { }); // EU: wait for and click 'I Agree'
         // context.setDefaultTimeout(100 * 1000); // give time to solve captcha, iframe goes blank after 60s?
         const captcha = iframe.locator('#h_captcha_challenge_checkout_free_prod iframe');
-        captcha.waitFor().then(async () => { // don't await, since element may not be shown
-          captchaDetected = true;
-          log.warn('Got hCaptcha challenge — solve in browser or get a new IP address');
-          // Include the panel deep-link (?focus=captcha auto-opens the
-          // browser view on the active service) so tapping the push
-          // takes the user straight to where they need to be. Game link
-          // kept as a secondary line for context. Priority is configurable
-          // via Settings → Notifications → Captcha priority (default
-          // high so it punches through DnD — captchas have minutes
-          // before the iframe times out).
-          const panelLink = cfg.public_url ? `${cfg.public_url}/?focus=captcha` : '';
-          const body = `epic-games: got captcha challenge for ${title} — solve now${panelLink ? '<br>' + panelLink : ''}<br>Game: ${url}`;
-          await notify(body, { priority: cfg.captcha_notify_priority || 'high', kind: 'action' });
-        }).catch(_ => { }); // may time out if not shown
+        captcha.waitFor().then(onCaptcha).catch(_ => { }); // don't await, since element may not be shown; may time out if not shown
         iframe.locator('.payment__errors:has-text("Failed to challenge captcha, please try again later.")').waitFor().then(async () => {
           log.fail('Failed captcha challenge — try again later');
           const panelLink = cfg.public_url ? `${cfg.public_url}/?focus=captcha` : '';
@@ -901,11 +943,16 @@ try {
             sessionLost = true;
             log.warn('Epic session lost mid-run — the claim redirected to the login page');
           }
-          if (iframe && (captchaDetected || await iframe.locator('#h_captcha_challenge_checkout_free_prod iframe').count().catch(() => 0) > 0)) {
+          // No `iframe &&` guard: the pre-checkout captcha wall leaves
+          // iframe undefined (CHECKOUT_IFRAME never appeared), which is
+          // exactly the case that used to fall through as a plain failure.
+          if (captchaDetected || await isCaptchaShowing(page, iframe)) {
             captchaDetected = true;
             notify_game.captcha = true;
           }
         }
+      } finally {
+        claimSettled = true; // stop the captcha poll on every exit path (incl. region/dryrun `continue`s)
       }
       notify_game.status = db.data[user][game_id].status; // claimed or failed
       if (notify_game.status === 'failed') {
@@ -942,6 +989,7 @@ try {
     await page.waitForTimeout(60000);
     for (const retry of captchaRetries) {
       log.info(`Retrying ${retry.title}...`);
+      let retrySettled = true, retryCaptcha = false;
       try {
         await page.goto(retry.url, { waitUntil: 'domcontentloaded' });
         await page.waitForFunction(
@@ -970,6 +1018,22 @@ try {
         }
         log.game(retry.title, 'claiming (retry)');
         await purchaseBtn.click({ delay: 11 });
+        // Same frame-agnostic captcha poll as the main path, so a second
+        // captcha on the retry still pushes a solve-now (the retry used to
+        // just burn cfg.timeout silently). Stops when this retry settles.
+        retrySettled = false;
+        (async () => {
+          while (!retrySettled && !page.isClosed()) {
+            if (await isCaptchaShowing(page)) {
+              retryCaptcha = true;
+              log.warn(`Got hCaptcha challenge on retry of ${retry.title} — solve in browser`);
+              const panelLink = cfg.public_url ? `${cfg.public_url}/?focus=captcha` : '';
+              await notify(`epic-games: got captcha challenge on retry for ${retry.title} — solve now${panelLink ? '<br>' + panelLink : ''}<br>Game: ${retry.url}`, { priority: cfg.captcha_notify_priority || 'high', kind: 'action' }).catch(() => { });
+              break;
+            }
+            await new Promise(r => setTimeout(r, 2000));
+          }
+        })().catch(() => { });
         page.click('button:has-text("Continue")').catch(_ => { });
         page.click('button:has-text("Yes, buy now")').catch(_ => { });
         await page.waitForSelector(CHECKOUT_IFRAME);
@@ -1022,9 +1086,13 @@ try {
         // v2.11.15: same launcher-modal dismiss as the main success path.
         await dismissLauncherModal(page);
       } catch (e) {
-        log.fail(`${retry.title} — retry failed`);
+        log.fail(`${retry.title} — retry failed${retryCaptcha ? ' (captcha again — will retry next run)' : ''}`);
         if (cfg.debug) console.error(e);
-        retry.details = `Retry also failed. Game: ${retry.url}`;
+        retry.details = retryCaptcha
+          ? `Captcha blocked the retry too — will try again next run. Game: ${retry.url}`
+          : `Retry also failed. Game: ${retry.url}`;
+      } finally {
+        retrySettled = true;
       }
     }
   }
