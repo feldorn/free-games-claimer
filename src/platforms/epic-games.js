@@ -137,6 +137,9 @@ async function dismissLauncherModal(page) {
 log.section(`Epic Games (v${siteVersion('epic-games')})`);
 
 const offerIdMap = {};
+// null = promotions API unavailable (fall back to the full page wait below);
+// otherwise the page slugs of this week's 100%-off games per the API.
+let apiFreeSlugs = null;
 try {
   const res = await fetch(URL_PROMOTIONS);
   const data = await res.json();
@@ -147,6 +150,7 @@ try {
     const slug = el.catalogNs?.mappings?.[0]?.pageSlug || el.urlSlug;
     if (slug) offerIdMap[decodeURIComponent(slug).toLowerCase()] = el.id;
   }
+  apiFreeSlugs = Object.keys(offerIdMap);
   if (Object.keys(offerIdMap).length) {
     log.status('Offer IDs fetched', Object.keys(offerIdMap).length);
   }
@@ -355,12 +359,16 @@ try {
 
   // Detect free games
   const game_loc = page.locator('a:has(span:text-is("Free Now"))');
-  await game_loc.last().waitFor().catch(_ => {
-    // rarely there are no free games available -> catch Timeout
-    // TODO would be better to wait for alternative like 'coming soon' instead of waiting for timeout
-    // see https://github.com/vogler/free-games-claimer/issues/210#issuecomment-1727420943
-    log.warn('No free games available in your region');
-    // urls below should then be an empty list
+  // v2.12.26: the "Free Now" tiles normally render within a few seconds.
+  // When the promotions API answered we already know this week's free
+  // games, so cap the wait at 15s instead of the full cfg.timeout (60s) —
+  // since 2026-10-30 the tile selector stopped matching while the API still
+  // listed the week's game (Sorry We're Closed), costing 60s every run.
+  // Full wait only when the API was unreachable and the page is all we have.
+  const freeNowTimeout = apiFreeSlugs ? Math.min(15000, cfg.timeout) : cfg.timeout;
+  let freeNowFound = true;
+  await game_loc.last().waitFor({ timeout: freeNowTimeout }).catch(_ => {
+    freeNowFound = false;
   });
   // clicking on `game_sel` sometimes led to a 404, see https://github.com/vogler/free-games-claimer/issues/25
   // debug showed that in those cases the href was still correct, so we `goto` the urls instead of clicking.
@@ -368,6 +376,16 @@ try {
   // i.e. filter data.Catalog.searchStore.elements for .promotions.promotionalOffers being set and build URL with .catalogNs.mappings[0].pageSlug or .urlSlug if not set to some wrong id like it was the case for spirit-of-the-north-f58a66 - this is also what's done here: https://github.com/claabs/epicgames-freegames-node/blob/938a9653ffd08b8284ea32cf01ac8727d25c5d4c/src/puppet/free-games.ts#L138-L213
   const urlSlugs = await Promise.all((await game_loc.all()).map(a => a.getAttribute('href')));
   const urls = urlSlugs.map(s => 'https://store.epicgames.com' + s);
+  // Add the API's free games the page didn't show (tile selector drift).
+  // Compare on the last path segment, the same id the claim DB uses.
+  const pageSlugs = new Set(urls.map(u => u.split('/').pop().split('?')[0].toLowerCase()));
+  const apiOnly = (apiFreeSlugs || []).filter(sl => !pageSlugs.has(sl.split('/').pop()));
+  for (const sl of apiOnly) urls.push(`https://store.epicgames.com/en-US/p/${sl}`);
+  if (!freeNowFound) {
+    if (apiOnly.length) log.info(`"Free Now" tiles not found on the page — using ${apiOnly.length} free game(s) from Epic's promotions API`);
+    // rarely there are no free games available, see https://github.com/vogler/free-games-claimer/issues/210#issuecomment-1727420943
+    else log.warn('No free games available in your region');
+  }
 
   // Free mobile games - https://github.com/vogler/free-games-claimer/issues/474
   // https://egs-platform-service.store.epicgames.com/api/v2/public/discover/home?count=10&country=DE&locale=en&platform=android&start=0&store=EGS
@@ -400,7 +418,11 @@ try {
           // Some resolved hrefs land on a region-locale subpath
           // (e.g. /en-US/p/) — Epic redirects between locales freely, so
           // we don't normalise.
-          if (!urls.includes(resolved)) {
+          // Compare on slug, not full URL: GamerPower often appends
+          // ?lang=en-US or a locale path to the same game the page/API
+          // already listed, which cost a duplicate page visit.
+          const rSlug = resolved.split('/').pop().split('?')[0].toLowerCase();
+          if (!urls.some(u => u.split('/').pop().split('?')[0].toLowerCase() === rSlug)) {
             log.info(`GamerPower → ${entry.title}: ${resolved}`);
             urls.push(resolved);
           }

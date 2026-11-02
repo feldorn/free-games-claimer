@@ -4,6 +4,19 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.12.26
+
+**Epic Games: no more 60-second wait for "Free Now" tiles.**
+
+Each Epic run first waits for the "Free Now" tiles on Epic's free-games page. Since Epic's 30 October rotation the claimer has stopped finding them, so every run waited the full 60 seconds and then logged "No free games available in your region", even though that week's game (Sorry We're Closed) was free.
+
+- When Epic's free-games list (its promotions API) is reachable, which it normally is, the claimer waits at most 15 seconds for the tiles.
+- Free games in that list that the page didn't show are now added to the run directly, so a change to Epic's page layout can't hide the weekly game. The log says when this happens.
+- The 60-second wait is only used if the list can't be loaded.
+- A GamerPower link for a game that's already queued (often the same page with `?lang=en-US` on the end) no longer causes a second visit to that page.
+
+---
+
 ## What's new in 2.12.25
 
 **Epic Games: captchas that appear before checkout are now recognised and retried.**
