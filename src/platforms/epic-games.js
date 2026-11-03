@@ -59,7 +59,7 @@ const CTA_SELECTOR = 'button[data-testid="purchase-cta-button"], section[class*=
 // inside a section[role=dialog]; "Add to library" still lives in that iframe.
 const CHECKOUT_IFRAME = '#webPurchaseContainer iframe, iframe[src*="/checkout?purchaseToken="]';
 
-// v2.11.15 (2026-08-28 feldorn11906 run): Epic's post-successful-claim
+// v2.11.15 (2026-08-28 live run): Epic's post-successful-claim
 // modal "FINAL STEP — Is Epic Games Launcher installed?" (labels "No, get
 // launcher" / "Yes, it's installed") stays open when the next iteration's
 // page.goto fires, and its embedded assets keep the page's `load` event
@@ -404,7 +404,7 @@ try {
     urls.push(...mobileGames.map(x => x.url));
   }
 
-  // Supplementary discovery via gamerpower.com — see feldorn#33. Epic's
+  // Supplementary discovery via gamerpower.com — see feldorn/free-games-claimer#33. Epic's
   // freeGamesPromotions API + "Free Now" scrape miss third-party indie
   // launch promos (e.g. Devils Island, Lost in the Hole on 2026-05-14).
   // GamerPower aggregates those. We follow each /open/ redirect to capture

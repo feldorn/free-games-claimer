@@ -3040,7 +3040,7 @@ async function digestSchedulerLoop() {
   }
 }
 
-// GitHub-reply poll loop (feldorn 2026-07-16). Silent when
+// GitHub-reply poll loop (2026-07-16). Silent when
 // github.username is unset — the poller itself early-returns and this
 // loop just sleeps another day. When set, polls once at startup then
 // every 24h. No config-change wake needed: setting the username the
@@ -5456,7 +5456,7 @@ function renderDiagnosticContext(ctx) {
 // username is saved, subsequent shares open the URL directly. Skipping
 // leaves github.username empty and the in-panel reply-alert feature
 // stays silently disabled — no polling, no Alerts-tab section.
-// (feldorn 2026-07-16: opt-in at first submit, not upfront.)
+// (2026-07-16: opt-in at first submit, not upfront.)
 let _pendingShareUrl = null;
 function openShareUrlWithGithubPrompt(url) {
   const configuredUsername = String(
@@ -5690,7 +5690,7 @@ async function renderAlertsSections() {
           '</div>' +
         '</div>';
     }
-    // GitHub reply-alerts (feldorn 2026-07-16). Opt-in section — only
+    // GitHub reply-alerts (2026-07-16). Opt-in section — only
     // populated when github.username is set + at least one watched
     // issue has unreadCount > 0. Empty state hides itself, matching
     // the other sections above.
@@ -7063,7 +7063,7 @@ async function setActiveService(id, nextActive) {
   // destructive-action gate — but native confirm() is fragile across
   // browser contexts (silently auto-cancels under pop-up blocker
   // settings, prior "block dialogs" choices, or noVNC-iframe contexts),
-  // and a silent auto-cancel produced exactly the symptom feldorn
+  // and a silent auto-cancel produced exactly the symptom that was
   // reported on a service with history (Microsoft Rewards): toggle
   // visually shifts to off then reverts to on, Save button doesn't
   // activate. The Save button is already the explicit commit gate —
@@ -10820,7 +10820,7 @@ const server = http.createServer(async (req, res) => {
             }).length;
           }
         } catch {}
-        // GitHub reply-alerts (feldorn 2026-07-16): opt-in feature keyed
+        // GitHub reply-alerts (2026-07-16): opt-in feature keyed
         // on `github.username`. Watched-issue state is populated by
         // `pollGithubReplies()` on the daily scheduler wake; here we
         // just shape it for the client.
@@ -11266,7 +11266,7 @@ server.listen(PANEL_PORT, async () => {
   // is in use by another computer". Cleaning the lock files at panel
   // boot — before any script launches — guarantees a clean state. The
   // claim-script launch paths also call cleanProfileLocks defensively
-  // for mid-session crashes. (Fix per feldorn#37 — Lifeng77X's
+  // for mid-session crashes. (Fix per feldorn/free-games-claimer#37 — Lifeng77X's
   // AliExpress profile-lock report.)
   try {
     const sweepDirs = [

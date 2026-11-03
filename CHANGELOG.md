@@ -1,6 +1,6 @@
 # Changelog
 
-Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the top.
+Release notes for [Free Games Claimer](README.md). Most recent at the top.
 
 ---
 
@@ -318,7 +318,7 @@ Dismissing a pending Prime redemption from the Alerts tab writes `status: "dismi
 
 **Fix:** add `|dismissed` to the two `gog.js` regexes (`gog.js:574` library reconcile, `gog.js:629` probe filter) and the one `prime-gaming.js:290` pending-notify filter. User-intent dismiss is now terminal everywhere, matching the panel's shared superset. Updated the panel-side comment that incorrectly asserted `prime-gaming.js` filtered `dismissed` upstream (true for GOG via the auto-retry gate; false for MS Store / Xbox / Legacy).
 
-Hit live during @feldorn's DOOM/GOG dismiss — Alerts dropped the entry, but tomorrow's GOG run would have ignored the dismiss and probed anyway. One of the regex-drift traps the shared `PRIME_PENDING_TERMINAL_RX` constant was supposed to prevent (see `feedback_no_local_shadow_of_shared_helper`).
+Hit live during the maintainer's DOOM/GOG dismiss — Alerts dropped the entry, but tomorrow's GOG run would have ignored the dismiss and probed anyway. One of the regex-drift traps the shared `PRIME_PENDING_TERMINAL_RX` constant was supposed to prevent (see `feedback_no_local_shadow_of_shared_helper`).
 
 ---
 
@@ -347,7 +347,7 @@ Since v2.8.78 shipped the "transient-likely" diagnostic filter, the recorder has
 - `_recordDiagnosticError` then read `lastRunSuccess["epic games"]` (lowercased display name).
 - But `lastRunSuccess` and every `sites.js` registry entry are keyed by the kebab-case id `"epic-games"`.
 
-Result: every fresh single-occurrence error recorded since v2.8.78 got `transientLikely: false`, the banner-suppression + auto-dismiss on next-success path never fired, and every count-1 script blip has sat in the Diagnostics/Alerts list until the user manually shared or dismissed it. In @feldorn's DB an Epic Games `page.goto: Timeout 60000ms exceeded` from 2026-08-28 was still showing 30 days later despite ~30 clean Epic runs in the meantime.
+Result: every fresh single-occurrence error recorded since v2.8.78 got `transientLikely: false`, the banner-suppression + auto-dismiss on next-success path never fired, and every count-1 script blip has sat in the Diagnostics/Alerts list until the user manually shared or dismissed it. In the maintainer's DB an Epic Games `page.goto: Timeout 60000ms exceeded` from 2026-08-28 was still showing 30 days later despite ~30 clean Epic runs in the meantime.
 
 **Fix:**
 
@@ -364,7 +364,7 @@ Only sweeps count-1 undecided entries where a later success is on record for the
 
 **Fix: `PG_RETRY_PENDING` retries now heal codes MS rejects at client-side validation.**
 
-v2.12.3 shipped the `PG_RETRY_PENDING` self-heal loop for stuck MS Store codes. First live run against @feldorn's DOOM Eternal (already redeemed manually during the v2.12.3 investigator) reported `1 retried, 0 healed, 1 still pending` — helper returned `redeem (validation failed)` because Next never enabled (MS's client-side validation refused the already-consumed code), but that outcome had no `dbStatus` update, so the entry stayed at `claimed` and the daily nag continued. Regressed from the intended "retry-heals-terminal" behavior.
+v2.12.3 shipped the `PG_RETRY_PENDING` self-heal loop for stuck MS Store codes. First live run against the maintainer's DOOM Eternal (already redeemed manually during the v2.12.3 investigator) reported `1 retried, 0 healed, 1 still pending` — helper returned `redeem (validation failed)` because Next never enabled (MS's client-side validation refused the already-consumed code), but that outcome had no `dbStatus` update, so the entry stayed at `claimed` and the daily nag continued. Regressed from the intended "retry-heals-terminal" behavior.
 
 **Fix:**
 
@@ -374,7 +374,7 @@ v2.12.3 shipped the `PG_RETRY_PENDING` self-heal loop for stuck MS Store codes. 
    - "invalid" / "not recognized" / "check…code" → `claimed:token-invalid` (terminal)
 2. **Retry-path default.** When no hint text is present AND the helper was called from the `PG_RETRY_PENDING` loop (`isRetry: true`), assume the code was consumed since capture and mark `claimed and redeemed`. Reasoning: retry-pool codes were valid when Prime captured them; a later "no" from MS overwhelmingly means the code got consumed in the meantime (self, MS's own re-attempt, or user manual redemption). Fresh-code first-attempt path stays conservative (no dbStatus change) — a true invalid-code case there deserves the extra caution.
 
-**Result:** on the next Prime run with `PG_RETRY_PENDING=1`, @feldorn's DOOM Eternal flips to `claimed and redeemed` (terminal), drops out of the pending-notify list, disappears from the Alerts tab's Pending Redemptions section. Daily nag stops.
+**Result:** on the next Prime run with `PG_RETRY_PENDING=1`, the maintainer's DOOM Eternal flips to `claimed and redeemed` (terminal), drops out of the pending-notify list, disappears from the Alerts tab's Pending Redemptions section. Daily nag stops.
 
 Preserves the safer fresh-code behavior — a hypothetical first-time capture of a truly invalid code still surfaces as manual-verify, not silently marked terminal.
 
@@ -386,7 +386,7 @@ Preserves the safer fresh-code behavior — a hypothetical first-time capture of
 
 Long-standing pattern where fgc captured a Prime-provided MS Store code (e.g. DOOM Eternal) but then couldn't complete the external redemption is fixed. Root cause: Microsoft moved the redemption UI from a network-API-driven flow (`store-web.dynamics.com/v1.0/Redeem/PrepareRedeem` + `RedeemToken`) to a fully client-side React app served from `www.microsoft.com/store/purchase/buynowui/`. The old `waitForResponse` for those endpoints timed out at 60s because MS no longer fires network calls at those hosts — the whole state machine runs in-iframe, with the iframe's URL slug as the signal.
 
-**Investigation (2026-09-27):** drove the full flow with @feldorn's DOOM Eternal code via a scratch investigator (`data/mstore-investigate.mjs`), capturing every network request + iframe URL transition + button state. Full network + UI capture archived in the report. Redemption succeeded live, confirming the observed flow works end-to-end.
+**Investigation (2026-09-27):** drove the full flow with the maintainer's DOOM Eternal code via a scratch investigator (`data/mstore-investigate.mjs`), capturing every network request + iframe URL transition + button state. Full network + UI capture archived in the report. Redemption succeeded live, confirming the observed flow works end-to-end.
 
 **Current MS Store flow (as of 2026-09-27):**
 
@@ -496,7 +496,7 @@ Opt-in pre-claim gate that consults Steam as a single quality-signal source acro
 
 **Fix: MS Store Prime→Store redemption timeout no longer crashes the entire Prime run.**
 
-Live report from @feldorn 2026-09-18: DOOM Eternal Prime→MS Store handoff — `page.waitForResponse: Timeout 60000ms exceeded while waiting for event "response"` — bubbled up as an unhandled exception, killed the whole Prime run mid-way, and posted a diagnostic banner requiring manual dismissal. The prior game in the same batch (Wall World 2) had already claimed successfully, so Prime itself was fine — only the MS-Store handoff choked.
+Live report 2026-09-18: DOOM Eternal Prime→MS Store handoff — `page.waitForResponse: Timeout 60000ms exceeded while waiting for event "response"` — bubbled up as an unhandled exception, killed the whole Prime run mid-way, and posted a diagnostic banner requiring manual dismissal. The prior game in the same batch (Wall World 2) had already claimed successfully, so Prime itself was fine — only the MS-Store handoff choked.
 
 **Root cause:** the two `page.waitForResponse` calls in `prime-gaming.js` for `store-web.dynamics.com/v1.0/Redeem/PrepareRedeem` and `.../RedeemToken` had no try/catch. Any 60s timeout — whether from a transient MS backend hiccup, a Cloudflare / bot-check intercept, or MS quietly deprecating `store-web.dynamics.com` in favor of the newer `redeem.microsoft.com` / `xbox.com/redeem` hosts — threw straight up out of the Prime pass.
 
@@ -1592,7 +1592,7 @@ The Tailwind class chain is stable on MS's current redesign but could drift if M
 
 ## What's new in 2.8.49
 
-**Reddit-403 log wording is no longer misleading.** Reported in-chat by feldorn after seeing `! FreeGameFindings discovery skipped — Reddit API rate-limited (HTTP 403)` on a run that had only fired once that day — "rate-limited" implied their traffic volume had tripped a per-user quota, when in reality Reddit blanket-blocks the public JSON endpoint for unauthenticated clients on datacenter / container egress IPs by default. They started this in 2023 as a general anti-scraper measure; the 403 hits the first request regardless of volume.
+**Reddit-403 log wording is no longer misleading.** Reported in-chat after seeing `! FreeGameFindings discovery skipped — Reddit API rate-limited (HTTP 403)` on a run that had only fired once that day — "rate-limited" implied their traffic volume had tripped a per-user quota, when in reality Reddit blanket-blocks the public JSON endpoint for unauthenticated clients on datacenter / container egress IPs by default. They started this in 2023 as a general anti-scraper measure; the 403 hits the first request regardless of volume.
 
 Log line now reads:
 
@@ -1648,7 +1648,7 @@ Epic occasionally serves a broken / variant page layout for specific titles (bun
 
 ## What's new in 2.8.45
 
-**Removed a broken native-`confirm()` gate on service-deactivation that made the toggle look unresponsive.** Reported in-conversation by feldorn: toggling Microsoft Rewards off in Settings did nothing — the switch visually shifted to "off" then snapped back to "on", and the Save button never activated. Lenovo deactivation worked fine.
+**Removed a broken native-`confirm()` gate on service-deactivation that made the toggle look unresponsive.** Reported in-conversation: toggling Microsoft Rewards off in Settings did nothing — the switch visually shifted to "off" then snapped back to "on", and the Save button never activated. Lenovo deactivation worked fine.
 
 The bug: `setActiveService()` called native `window.confirm()` when the service had claim history (preservation-notice dialog). Native `confirm()` is fragile across browser contexts — silently auto-cancels under pop-up blocker settings, prior site-level "block dialogs" choices, certain noVNC-iframe contexts, etc. A silent auto-cancel hit the `if (!ok) { paintSettings(); return; }` branch, which visually reverted the toggle and dropped the staged dirty patches before they reached `settingsDirty`. Save button stayed disabled because no patches were queued. Microsoft Rewards reproduced this 100% (has thousands of points of history); Lenovo didn't because the history check was false (it's a watch-only collector).
 
@@ -2699,7 +2699,7 @@ Run log readability pass.
 
 GOG username detection regression fix + DB cleanup ([#9](https://github.com/feldorn/free-games-claimer/issues/9)), plus a small Settings UX tweak.
 
-- **Cookie / profile-link fallback now actually fires when DOM returns a nav label**. The 2.3 (`0665aeb`) fix added "Reviews" to the nav-label guard so it stopped showing as the username, but a latent ordering bug meant the cookie/profile fallback was *before* the guard. So when DOM returned "Reviews", the fallback was skipped (`user` was truthy), the guard then discarded "Reviews", and the script fell straight to the email-prefix last-resort — surfacing as e.g. `User: 2chrisorr` instead of `User: feldorn`. Restructured detection: each source (DOM text, DOM title, cookie/profile-link, email-prefix) is independently run through `cleanCandidate`, cascading until one returns a valid name.
+- **Cookie / profile-link fallback now actually fires when DOM returns a nav label**. The 2.3 (`0665aeb`) fix added "Reviews" to the nav-label guard so it stopped showing as the username, but a latent ordering bug meant the cookie/profile fallback was *before* the guard. So when DOM returned "Reviews", the fallback was skipped (`user` was truthy), the guard then discarded "Reviews", and the script fell straight to the email-prefix last-resort — surfacing as e.g. `User: 2chrisorr` instead of `User: <username>`. Restructured detection: each source (DOM text, DOM title, cookie/profile-link, email-prefix) is independently run through `cleanCandidate`, cascading until one returns a valid name.
 - **One-time DB cleanup**: prior versions of the detection bug fragmented one user's claim history across multiple buckets (`Reviews`, `Games 0`, `Games\n                0`, `unknown`). On next run, gog.js merges any unambiguously-bad legacy username keys into the canonical bucket and deletes the source keys. Idempotent — once merged, subsequent runs find nothing to migrate. Email-prefix-shaped legacy keys are *not* auto-merged (could be a real second account); manual cleanup if needed.
 - GOG collector bumped to v2.2.
 - **Settings save/discard footer pinned to viewport bottom**. Previously, when the panel grew taller than viewport (iPad / narrow windows), the save bar scrolled off-screen and users had to scroll to find it. `position: sticky; bottom: 0` + a subtle drop shadow makes it always reachable; no-op on desktop where the layout already fits.
@@ -2826,7 +2826,7 @@ self-host ergonomics.
   records the current free-games list (~60 entries, including long-time
   permafree titles like Witcher 3 REDkit and GWENT), subsequent runs
   notify only on **new** additions to GOG's free-games tag. State lives
-  in `data/gog-catalog-watch.json`. Closes feldorn-fork issue
+  in `data/gog-catalog-watch.json`. Closes fork issue
   [#9](https://github.com/feldorn/free-games-claimer/issues/9) (the GOG
   half).
 

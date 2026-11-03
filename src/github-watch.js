@@ -3,7 +3,7 @@
 // rarely return to GitHub to check for replies, so questions I post
 // asking for clarifying info sit unread and issues stall.
 //
-// Design (per feldorn 2026-07-16):
+// Design (2026-07-16):
 //   - Opt-in at first Share-to-GitHub click. If `github.username` is
 //     empty, this whole module no-ops.
 //   - Anonymous polling against a public repo — no token, no security

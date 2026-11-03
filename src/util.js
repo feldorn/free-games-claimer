@@ -208,7 +208,7 @@ export const getOrCreateFingerprint = (profileDir, generate) => {
 // (browserBusy in src/panel/panel.js) prevents two Chromium processes
 // from racing on the same profile dir. Called from launchPersistentContext
 // sites before launch, and from the panel's startup as a clean-room
-// sweep across all known profile dirs. (Fix per feldorn#37, 2026-05-15
+// sweep across all known profile dirs. (Fix per feldorn/free-games-claimer#37, 2026-05-15
 // — Lifeng77X's AliExpress profile-lock report.)
 export const cleanProfileLocks = (profileDir) => {
   if (!profileDir || !existsSync(profileDir)) return [];
@@ -443,13 +443,13 @@ export const notify = (html, opts = {}) => {
     // collapse into a single argv with embedded newlines. Older apprise
     // tolerated this; apprise ≥ 1.10 parses the concatenated string as
     // one URL and rejects the second protocol (Telegram URLs are
-    // colon-heavy so they fail visibly first). Fix per feldorn#35
+    // colon-heavy so they fail visibly first). Fix per feldorn/free-games-claimer#35
     // (KairuByte, 2026-05-14). Apprise URLs don't contain whitespace,
     // so the split is safe.
     // Split on newlines and commas only — NOT bare whitespace. Whitespace
     // appears inside legitimate URLs (passwords with spaces in
     // mailto://user:pass with spaces@host, for example — caught
-    // 2026-05-17 in feldorn#44). Newlines and commas are the conventional
+    // 2026-05-17 in feldorn/free-games-claimer#44). Newlines and commas are the conventional
     // separators in apprise config (YAML `|` blocks produce newlines,
     // comma-separated lists are an apprise CLI idiom), and neither is a
     // valid URL character, so splitting on them is unambiguous. Trim
@@ -458,7 +458,7 @@ export const notify = (html, opts = {}) => {
     // Per-call priority. Apprise expresses priority as a per-notifier
     // URL query parameter (`?priority=high`), NOT a CLI flag — apprise
     // v1.10.0 has no `--priority` option at all (caught 2026-05-16 in
-    // feldorn#42 when JxPv2's ntfys captcha alert printed
+    // feldorn/free-games-claimer#42 when JxPv2's ntfys captcha alert printed
     // "Error: No such option: --priority"). Apprise translates the
     // generic-named level to whatever the configured notifier expects
     // (Pushover honors high/emergency literally, ntfy maps to 1-5,

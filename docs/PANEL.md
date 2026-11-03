@@ -17,12 +17,6 @@ sources or share tips with other users.
 
 ### Sessions tab (default)
 
-<p align="center">
-<a href="../assets/panel-show-browser.png" target="_blank"><img alt="Show browser — embedded noVNC view of an active claim run" src="../assets/panel-show-browser.png" width="800"/></a>
-<br/>
-<em>Show browser — embedded noVNC view with all session cards collapsed to mini-tiles. Click for full size.</em>
-</p>
-
 Responsive grid of cards — one per site (Prime, Epic, GOG, Steam, MS Rewards,
 MS Mobile, AliExpress, plus active watchers: Ubisoft, Humble, Fanatical,
 Lenovo). Grid layout auto-adapts between 1/2/3/4 columns depending on
@@ -77,12 +71,6 @@ and wait for you.
 
 ### Stats tab
 
-<p align="center">
-<a href="../assets/panel-stats.png" target="_blank"><img alt="Stats tab — KPI tiles, per-service table, 30-day chart, recent claims" src="../assets/panel-stats.png" width="800"/></a>
-<br/>
-<em>Stats tab — KPI tiles, per-service table, 30-day chart, recent claims. Click for full size.</em>
-</p>
-
 Derived entirely from the existing per-service JSON DBs plus
 `data/microsoft-rewards.json` (see [Data Storage](REFERENCE.md#data-storage)). No new
 instrumentation was added to the claim scripts beyond the MS balance
@@ -102,12 +90,6 @@ snapshot.
   service, and the game title linking to its store URL.
 
 ### Schedule tab
-
-<p align="center">
-<a href="../assets/panel-schedule.png" target="_blank"><img alt="Schedule tab — next-run wall times, intervals, last-run status" src="../assets/panel-schedule.png" width="800"/></a>
-<br/>
-<em>Schedule tab — next-run wall times, intervals, services list, last-run status. Click for full size.</em>
-</p>
 
 - **Next run:** wall time (`2026-04-20 07:30`) with a live countdown
   (`in 22h 8m`) updated every 30s.
@@ -143,12 +125,6 @@ when a run completes so the just-finished entry appears without a
 manual reload.
 
 ### Discoveries tab
-
-<p align="center">
-<a href="../assets/panel-discoveries.png" target="_blank"><img alt="Discoveries tab — community aggregator listings with coverage badges" src="../assets/panel-discoveries.png" width="800"/></a>
-<br/>
-<em>Discoveries tab — community aggregator listings with coverage badges. Click for full size.</em>
-</p>
 
 Live view of community aggregators
 ([gamerpower.com](https://www.gamerpower.com/) +
@@ -187,12 +163,6 @@ launch promo for example — and want a direct link to the store to claim
 it manually (open the link, claim through the storefront, done).
 
 ### Settings tab
-
-<p align="center">
-<a href="../assets/panel-settings.png" target="_blank"><img alt="Settings tab — Services accordion with per-service flags" src="../assets/panel-settings.png" width="800"/></a>
-<br/>
-<em>Settings tab — Services accordion. Every runtime flag <code>src/config.js</code> reads is editable in-app. Click for full size.</em>
-</p>
 
 Full in-app configuration. Four sections (Scheduler, Notifications, Services,
 Advanced) accessible via a left rail so changing a single field takes one

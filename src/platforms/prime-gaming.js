@@ -158,7 +158,7 @@ try {
   // visible is to re-include them in every run's notification until status flips to
   // "redeemed" / "expired" / "invalid". Reconciliation against the actual GOG library
   // happens in gog.js (it has the authenticated session).
-  // v2.12.3 (feldorn 2026-09-27, #155 followup): MS Store redemption
+  // v2.12.3 (2026-09-27, #155 followup): MS Store redemption
   // helper. Extracted so both the main "Prime just got a new code" flow
   // AND the PG_RETRY_PENDING retry loop can share one implementation.
   //
@@ -173,7 +173,7 @@ try {
   //     redeem-error/    → error state (label unobserved, defensive)
   //     redeem-fail/     → ditto
   //
-  // Investigated 2026-09-27 by driving the full flow with feldorn's
+  // Investigated 2026-09-27 by driving the full flow with a real
   // DOOM Eternal code — full network + UI capture in
   // data/mstore-investigate-report.txt. Success confirmed live.
   //
@@ -200,7 +200,7 @@ try {
       try {
         await nextBtn.waitFor({ timeout: 10000 });
       } catch {
-        // v2.12.4 (feldorn 2026-09-27 DOOM Eternal retry outcome):
+        // v2.12.4 (2026-09-27 DOOM Eternal retry outcome):
         // Scan the iframe body for text hints. MS's client-side
         // validation sometimes surfaces an error message ("already used
         // by another account", "expired", "invalid or already redeemed"
@@ -339,7 +339,7 @@ try {
     if (isAutoRetryingGogCode(entry)) { hiddenByRetry++; continue; }
     pending.push({ dbTitle, entry });
   }
-  // v2.12.3 (feldorn 2026-09-27): PG_RETRY_PENDING self-heal. When set,
+  // v2.12.3 (2026-09-27): PG_RETRY_PENDING self-heal. When set,
   // MS Store / Xbox pending entries in the DB — codes fgc captured from
   // Prime but never confirmed redeemed externally — get re-attempted via
   // the new attemptMsStoreRedeem helper on THIS run. Successful retries

@@ -430,7 +430,7 @@ try {
 
   const freeGames = await discoverFreeGames(page);
 
-  // Supplementary discovery via gamerpower.com — see feldorn#33. The
+  // Supplementary discovery via gamerpower.com — see feldorn/free-games-claimer#33. The
   // Steam search endpoint is reliable for `specials=1&maxprice=free` but
   // misses some launch-week free-to-keep promos that go directly to
   // store pages without being flagged as discounted-to-zero. GamerPower

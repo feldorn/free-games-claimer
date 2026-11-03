@@ -2,7 +2,7 @@
 //
 // Surfaces giveaways that aren't in our stores' first-party feeds:
 // indie launch promos, mega-sale-style limited drops, mobile launches,
-// etc. (See feldorn#33 for the trigger — Devils Island and Lost in
+// etc. (See feldorn/free-games-claimer#33 for the trigger — Devils Island and Lost in
 // the Hole were free on Epic 2026-05-14 but absent from Epic's own
 // freeGamesPromotions API and the /free-games page "Free Now" section.)
 //

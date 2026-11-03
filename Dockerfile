@@ -33,7 +33,7 @@ RUN apt-get update \
       # to fall back to socket-file polling, which can return ready
       # before X is actually answering connections (TurboVNC writes
       # the socket early in init). xdpyinfo connecting cleanly is the
-      # canonical "X is up" signal — see issue feldorn#41.
+      # canonical "X is up" signal — see issue feldorn/free-games-claimer#41.
       x11-utils \
       # gosu enables clean privilege-drop in docker-entrypoint.sh when
       # PUID/PGID are set (opt-in non-root mode). When those are unset, gosu
@@ -96,7 +96,7 @@ RUN apt-get update \
     # every connect — harmless but noisy in the browser console. Real
     # version comes from `dpkg -l novnc`; the JSON below just satisfies
     # the fetch with a recognizable string.
-    && printf '%s\n' '{"name":"novnc","version":"1.3.0-feldorn-shim","description":"Minimal package.json shim — silences a 404 in noVNC ui.js. Real version: dpkg -l novnc."}' > /usr/share/novnc/package.json \
+    && printf '%s\n' '{"name":"novnc","version":"1.3.0-fgc-shim","description":"Minimal package.json shim — silences a 404 in noVNC ui.js. Real version: dpkg -l novnc."}' > /usr/share/novnc/package.json \
     && pip install apprise --break-system-packages --no-cache-dir
 
 WORKDIR /fgc

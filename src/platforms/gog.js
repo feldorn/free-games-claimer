@@ -481,7 +481,7 @@ try {
     if (cfg.debug) console.error(e);
   }
 
-  // Supplementary discovery via gamerpower.com — see feldorn#33. Notify-only
+  // Supplementary discovery via gamerpower.com — see feldorn/free-games-claimer#33. Notify-only
   // (same juice/squeeze framing as the catalog watch): GOG claim UIs are too
   // varied to auto-claim safely without a live promo to test against. We
   // resolve each /open/ redirect to capture the canonical gog.com URL when

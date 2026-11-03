@@ -1,7 +1,7 @@
 # Free Games Claimer
 
 <p align="center">
-<img alt="Free Games Claimer" src="assets/logo.png" width="280" />
+<img alt="Free Games Claimer" src="assets/icon-128.png" width="128" />
 </p>
 
 A self-hosted scheduler that claims free games and rewards across multiple storefronts on its own. Logs in once via your browser session, then keeps watch — daily checks, captcha-aware pause-and-notify when a human is needed, in-app stats showing what got claimed, what's pending, and how your Microsoft Rewards points are trending.
@@ -47,12 +47,6 @@ Services are grouped by what they actually do.
 
 Uses [patchright](https://github.com/nicbarker/patchright) (Chromium with built-in anti-detection). Runs in Docker with a virtual display and VNC access — solve captchas, MFA, and one-time logins through the embedded noVNC viewer in the panel.
 
-<p align="center">
-<a href="assets/panel-sessions.png" target="_blank"><img alt="Control panel — Sessions tab" src="assets/panel-sessions.png" width="800"/></a>
-<br/>
-<em>Control panel — Sessions tab. Click for full size.</em>
-</p>
-
 ---
 
 ## Features at a glance
@@ -85,21 +79,6 @@ Uses [patchright](https://github.com/nicbarker/patchright) (Chromium with built-
 - **Home Assistant integration** — `/api/hass/sensors` endpoint returns a flat JSON snapshot (MS balance, claim counts, pending redeems, stale sessions, captcha state, last-run status) that HA's stock REST integration consumes with a single config block. Example template sensors, binary sensors, and automations in [`docs/HOMEASSISTANT.md`](docs/HOMEASSISTANT.md).
 - **Cron / Sablier ready** — `RUN_ON_STARTUP=2` one-shot mode for scale-to-zero deployments.
 - **Reverse-proxy aware** — subdomain, split-subdomain, and subfolder shapes via `BASE_PATH` / `NOVNC_URL`. Multi-arch Docker images (`linux/amd64` + `linux/arm64`) published to ghcr.io with both semver (`:v2.8.55`) and date (`:20260701`) tags for watchtower / diun-style auto-update workflows.
-
----
-
-## Screenshots tour
-
-| | |
-|---|---|
-| [Sessions tab](assets/panel-sessions.png) | Per-site login cards with status dots, Run buttons, and Cookie-upload fallback. |
-| [Show browser](assets/panel-show-browser.png) | Embedded noVNC view of an active claim run with cards collapsed to mini-tiles. |
-| [Stats tab](assets/panel-stats.png) | KPI tiles, per-service table, 30-day chart, recent claims list. |
-| [Schedule tab](assets/panel-schedule.png) | Next-run wall times, intervals, last-run status — separate rows for Claimers and MS Rewards. |
-| [Logs tab](assets/panel-logs.png) | Live scheduler + per-service run streams, with a past-runs picker for completed run buffers. |
-| [Discoveries tab](assets/panel-discoveries.png) | Community aggregator listings with coverage badges (AUTO / CLAIMED / NOTIFY / SKIP / MANUAL). |
-| [Alerts tab](assets/panel-alerts.png) | Pending redeems, stale sessions, unread Discoveries, and Share-to-GitHub error reports. |
-| [Settings tab](assets/panel-settings.png) | Services accordion with per-service flags and a sticky save footer. |
 
 ---
 
@@ -136,3 +115,5 @@ Per-release changes are in **[CHANGELOG.md](CHANGELOG.md)** — what landed in e
 ## Credits
 
 Based on [vogler/free-games-claimer](https://github.com/vogler/free-games-claimer) by [@vogler](https://github.com/vogler). See the upstream repository for the original project history and contributors.
+
+This repository is a fork of [feldorn/free-games-claimer](https://github.com/feldorn/free-games-claimer), which added the control panel, scheduler and most of the services listed above.

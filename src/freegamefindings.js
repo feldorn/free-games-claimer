@@ -1,6 +1,6 @@
 // src/freegamefindings.js — supplementary discovery via r/FreeGameFindings.
 //
-// DoSpamu pointed at three aggregator sources on feldorn#33; this is the
+// DoSpamu pointed at three aggregator sources on feldorn/free-games-claimer#33; this is the
 // second after gamerpower.com. Different shape, different tradeoffs:
 //
 //   gamerpower.com:  structured API, but /open/ pages are Cloudflare-gated
