@@ -1,7 +1,7 @@
-# Feldorn's Free Games Claimer
+# Free Games Claimer
 
 <p align="center">
-<img alt="Feldorn's Free Games Claimer" src="assets/logo.png" width="280" />
+<img alt="Free Games Claimer" src="assets/logo.png" width="280" />
 </p>
 
 A self-hosted scheduler that claims free games and rewards across multiple storefronts on its own. Logs in once via your browser session, then keeps watch — daily checks, captcha-aware pause-and-notify when a human is needed, in-app stats showing what got claimed, what's pending, and how your Microsoft Rewards points are trending.

@@ -228,7 +228,7 @@ function isAuthenticated(req) {
 
 const LOGIN_HTML = `<!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Sign in — Feldorn's Free Games Claimer</title>
+<title>Sign in — Free Games Claimer</title>
 <link rel="icon" type="image/x-icon" href="${BASE_PATH}/favicon.ico">
 <link rel="icon" type="image/png" sizes="32x32" href="${BASE_PATH}/assets/icon-32.png">
 <style>
@@ -3694,7 +3694,7 @@ const PANEL_HTML = `<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Feldorn's Free Games Claimer</title>
+<title>Free Games Claimer</title>
 <link rel="icon" type="image/x-icon" href="${BASE_PATH}/favicon.ico">
 <link rel="icon" type="image/png" sizes="16x16" href="${BASE_PATH}/assets/icon-16.png">
 <link rel="icon" type="image/png" sizes="32x32" href="${BASE_PATH}/assets/icon-32.png">
@@ -4505,7 +4505,7 @@ const PANEL_HTML = `<!DOCTYPE html>
 <body data-tab="sessions">
 <div class="header">
   <div class="header-top">
-    <h1><img src="${BASE_PATH}/assets/icon-64.png" alt=""><span>Feldorn's Free Games Claimer</span></h1>
+    <h1><img src="${BASE_PATH}/assets/icon-64.png" alt=""><span>Free Games Claimer</span></h1>
     <nav class="tab-nav">
       <button class="tab active" data-tab="sessions" onclick="switchTab('sessions')">Sessions</button>
       <button class="tab" data-tab="stats" onclick="switchTab('stats')">Stats</button>
