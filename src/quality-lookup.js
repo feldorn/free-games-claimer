@@ -69,7 +69,7 @@ function cacheKeyForTitle(title) { return matchKey(String(title || '')); }
 async function steamSearchAppId(title) {
   const url = S_SEARCH + encodeURIComponent(String(title || '').trim()) + '&l=en&cc=US';
   try {
-    const r = await fetch(url, { headers: { 'User-Agent': UA } });
+    const r = await fetch(url, { headers: { 'User-Agent': UA }, signal: AbortSignal.timeout(10000) });
     if (!r.ok) return null;
     const j = await r.json();
     const items = Array.isArray(j.items) ? j.items : [];
@@ -91,7 +91,7 @@ async function steamSearchAppId(title) {
 
 async function steamAppDetails(appId) {
   try {
-    const r = await fetch(S_DETAILS + appId, { headers: { 'User-Agent': UA } });
+    const r = await fetch(S_DETAILS + appId, { headers: { 'User-Agent': UA }, signal: AbortSignal.timeout(10000) });
     if (!r.ok) return null;
     const j = await r.json();
     // Response shape: {"{appId}": {"success": true, "data": {...}}}
@@ -104,7 +104,7 @@ async function steamAppDetails(appId) {
 async function steamAppReviews(appId) {
   try {
     const url = S_REVIEWS + appId + '?json=1&language=all&purchase_type=all&num_per_page=0';
-    const r = await fetch(url, { headers: { 'User-Agent': UA } });
+    const r = await fetch(url, { headers: { 'User-Agent': UA }, signal: AbortSignal.timeout(10000) });
     if (!r.ok) return null;
     const j = await r.json();
     if (!j?.success || !j.query_summary) return null;
