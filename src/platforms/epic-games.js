@@ -141,7 +141,7 @@ const offerIdMap = {};
 // otherwise the page slugs of this week's 100%-off games per the API.
 let apiFreeSlugs = null;
 try {
-  const res = await fetch(URL_PROMOTIONS);
+  const res = await fetch(URL_PROMOTIONS, { signal: AbortSignal.timeout(15000) }); // never let a hung API stall startup
   const data = await res.json();
   for (const el of data?.data?.Catalog?.searchStore?.elements || []) {
     const promos = el.promotions?.promotionalOffers?.[0]?.promotionalOffers || [];
@@ -237,6 +237,10 @@ const isRecoverableEpicPageError = (err) => {
 // flow): one 30s-delayed retry on the transient family above, everything else
 // throws at once so real bugs aren't masked. Per-game gotos in the claim loop
 // stay retry-free — one bad game shouldn't cost 30s of the batch. (#104, #105)
+// Side watchers (EULA, parental PIN, 'I Agree', captcha) are started per game
+// without awaiting. With the default 60s timeout they outlived their game and
+// could fire on the NEXT game's page; bound them to roughly one claim attempt.
+const SIDE_WAIT = { timeout: 30000 };
 const EPIC_NAV = { attempts: 2, backoffMs: 30000, isRecoverable: isRecoverableEpicPageError, siteId: 'epic-games' };
 
 try {
@@ -612,14 +616,25 @@ try {
     // timeout on game #4 of 4 broke the whole Epic pass. URL is
     // logged on failure so the next diagnostics submission identifies
     // which page caused it without needing a debug rerun.
+    const ctaReady = () => page.waitForFunction(
+      (sel) => {
+        const btn = document.querySelector(sel);
+        return btn && /[ei]/i.test(btn.textContent) && btn.textContent != 'Loading';
+      },
+      CTA_SELECTOR,
+      { timeout: 30000 },
+    );
     try {
-      await page.waitForFunction(
-        (sel) => {
-          const btn = document.querySelector(sel);
-          return btn && /[ei]/i.test(btn.textContent) && btn.textContent != 'Loading';
-        },
-        CTA_SELECTOR
-      );
+      try {
+        await ctaReady();
+      } catch {
+        // A product page that didn't hydrate in 30s rarely does at 60s, but
+        // a fresh load usually renders within a few seconds.
+        log.info(`CTA not ready after 30s for ${url} — reloading once`);
+        await dismissLauncherModal(page);
+        await page.reload({ waitUntil: 'commit' });
+        await ctaReady();
+      }
     } catch (e) {
       log.fail(`CTA button never loaded for ${url} (${e.message?.split('\n')[0] || e}) — skipping this game`);
       notify_games.push({ title: skipId, url, status: 'failed: CTA never loaded' });
@@ -784,15 +799,15 @@ try {
       })().catch(() => { });
 
       // click Continue if 'Device not supported. This product is not compatible with your current device.' - avoided by Windows userAgent?
-      page.locator('button').filter({ hasText: RX_CONTINUE }).first().click().catch(_ => { });
+      page.locator('button').filter({ hasText: RX_CONTINUE }).first().click({ timeout: 10000 }).catch(_ => { });
 
       // click 'Yes, buy now' if 'This edition contains something you already have. Still interested?'
-      page.locator('button').filter({ hasText: RX_YES_BUY_NOW }).first().click().catch(_ => { });
+      page.locator('button').filter({ hasText: RX_YES_BUY_NOW }).first().click({ timeout: 10000 }).catch(_ => { });
 
       // Accept End User License Agreement (only needed once). EULA phrasing
       // varies per locale, so match on the regex above rather than a
       // literal English string.
-      page.getByText(RX_EULA).first().waitFor().then(async () => {
+      page.getByText(RX_EULA).first().waitFor(SIDE_WAIT).then(async () => {
         log.info('Accepting End User License Agreement');
         if (cfg.debug) console.log(page.innerHTML);
         if (cfg.debug) console.log('Please report the HTML above here: https://github.com/vogler/free-games-claimer/issues/371');
@@ -821,7 +836,7 @@ try {
           continue;
         }
 
-        iframe.locator('.payment-pin-code').waitFor().then(async () => {
+        iframe.locator('.payment-pin-code').waitFor(SIDE_WAIT).then(async () => {
           if (!cfg.eg_parentalpin) {
             log.warn('EG_PARENTALPIN not set — enter Parental Control PIN manually');
             notify('epic-games: EG_PARENTALPIN not set. Need to enter Parental Control PIN manually.');
@@ -855,11 +870,11 @@ try {
 
         // I Agree button is only shown for EU accounts! https://github.com/vogler/free-games-claimer/pull/7#issuecomment-1038964872
         const btnAgree = iframe.locator('button').filter({ hasText: RX_ACCEPT });
-        btnAgree.waitFor().then(() => btnAgree.first().click()).catch(_ => { }); // EU: wait for and click 'I Agree'
+        btnAgree.waitFor(SIDE_WAIT).then(() => btnAgree.first().click({ timeout: 5000 })).catch(_ => { }); // EU: wait for and click 'I Agree'
         // context.setDefaultTimeout(100 * 1000); // give time to solve captcha, iframe goes blank after 60s?
         const captcha = iframe.locator('#h_captcha_challenge_checkout_free_prod iframe');
-        captcha.waitFor().then(onCaptcha).catch(_ => { }); // don't await, since element may not be shown; may time out if not shown
-        iframe.locator('.payment__errors:has-text("Failed to challenge captcha, please try again later.")').waitFor().then(async () => {
+        captcha.waitFor(SIDE_WAIT).then(onCaptcha).catch(_ => { }); // don't await, since element may not be shown; may time out if not shown
+        iframe.locator('.payment__errors:has-text("Failed to challenge captcha, please try again later.")').waitFor(SIDE_WAIT).then(async () => {
           log.fail('Failed captcha challenge — try again later');
           const panelLink = cfg.public_url ? `${cfg.public_url}/?focus=captcha` : '';
           const body = `epic-games: failed captcha challenge for ${title}${panelLink ? '<br>' + panelLink : ''}<br>Game: ${url}`;
@@ -1018,27 +1033,33 @@ try {
       log.info(`Retrying ${retry.title}...`);
       let retrySettled = true, retryCaptcha = false;
       try {
-        await page.goto(retry.url, { waitUntil: 'domcontentloaded' });
+        await page.goto(retry.url, { waitUntil: 'commit' }); // same reasoning as the main loop (#151)
         await page.waitForFunction(
           (sel) => {
             const btn = document.querySelector(sel);
             return btn && /[ei]/i.test(btn.textContent) && btn.textContent != 'Loading';
           },
-          CTA_SELECTOR
+          CTA_SELECTOR,
+          { timeout: 30000 },
         );
+        await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => { }); // ownership settle, as in the main loop
         const purchaseBtn = page.locator(CTA_SELECTOR).first();
         const btnText = (await purchaseBtn.innerText()).toLowerCase();
-        if (btnText === 'in library') {
+        // Locale-portable (was English-only 'in library' / 'get', so every
+        // retry on a German UI ended as "unexpected button").
+        const retryOwned = isOwnedText(btnText) || await purchaseBtn.isDisabled().catch(() => false);
+        if (retryOwned) {
           log.ok(`${retry.title} — claimed (already in library after retry)`);
           retry.status = 'claimed';
           retry.details = '';
           retry.captcha = false;
           const game_id = page.url().split('/').pop();
+          db.data[user][game_id] ||= { title: retry.title, time: datetime(), url: retry.url };
           db.data[user][game_id].status = 'claimed';
           continue;
         }
-        if (btnText !== 'get') {
-          log.fail(`${retry.title} — unexpected button: ${btnText}`);
+        if (btnText === 'requires base game') {
+          log.fail(`${retry.title} — requires base game — not retried`);
           retry.status = 'failed';
           retry.details = `Retry also failed. Game: ${retry.url}`;
           continue;
@@ -1061,18 +1082,19 @@ try {
             await new Promise(r => setTimeout(r, 2000));
           }
         })().catch(() => { });
-        page.click('button:has-text("Continue")').catch(_ => { });
-        page.click('button:has-text("Yes, buy now")').catch(_ => { });
+        page.locator('button').filter({ hasText: RX_CONTINUE }).first().click({ timeout: 10000 }).catch(_ => { });
+        page.locator('button').filter({ hasText: RX_YES_BUY_NOW }).first().click({ timeout: 10000 }).catch(_ => { });
         await page.waitForSelector(CHECKOUT_IFRAME);
         const iframe = page.frameLocator(CHECKOUT_IFRAME).first();
-        const btnAgree = iframe.locator('button:has-text("I Accept")');
-        btnAgree.waitFor().then(() => btnAgree.click()).catch(_ => { });
+        const btnAgree = iframe.locator('button').filter({ hasText: RX_ACCEPT });
+        btnAgree.waitFor(SIDE_WAIT).then(() => btnAgree.first().click({ timeout: 5000 })).catch(_ => { });
         // Epic relabeled the confirm button from "Place Order" → "Add to
         // library" around 2026-05-28 (reported by @amphoterism on #59) —
         // every claim silently timed out because the old selector no
         // longer matched. Accept either text so we stay resilient if Epic
         // flips back or surfaces "Place Order" in some regions/flows.
-        await iframe.locator('button:has-text("Add to library"):not(:has(.payment-loading--loading)), button:has-text("Place Order"):not(:has(.payment-loading--loading))').first().click({ delay: 11 });
+        // Same locale-portable matcher as the main path (#141).
+        await iframe.locator('button').filter({ hasText: RX_ADD_LIBRARY }).filter({ hasNot: iframe.locator('.payment-loading--loading') }).first().click({ delay: 11 });
         // Same three-signal race as the main claim path above — see the
         // fuller comment there. Modal-text + popup-buttons + CTA-flip,
         // whichever fires first wins.
@@ -1104,6 +1126,7 @@ try {
           }, { sel: CTA_SELECTOR, ownedList: OWNED_TEXTS_GLOBAL }, { timeout: cfg.timeout }),
         ]);
         const game_id = page.url().split('/').pop();
+        db.data[user][game_id] ||= { title: retry.title, url: retry.url };
         db.data[user][game_id].status = 'claimed';
         db.data[user][game_id].time = datetime();
         log.ok(`${retry.title} — claimed on retry!`);
