@@ -680,12 +680,20 @@ try {
             await page.screenshot({ path: screenshot('external', `${filenamify(title)}.png`), fullPage: true });
             continue;
           }
+          // Persist the code FIRST: the game is already collected on Amazon and
+          // won't be offered again, so anything that throws below must not
+          // lose it.
+          db.data[user][title].code = code;
           if (store == 'legacy games') { // may be different URL like https://legacygames.com/primeday/puzzleoftheyear/
-            redeem[store] = await page.locator('li:has-text("Click here") a').getAttribute('href'); // full text: Click here to enter your redemption code.
+            // Was li:has-text("Click here") — English only, so on luna.amazon.de
+            // ("Hier klicken …") it waited 60s and threw. Match the link by its
+            // target instead; keep the generic primedeal URL as fallback.
+            const lgHref = await page.locator('a[href*="legacygames.com"]').first().getAttribute('href', { timeout: 5000 }).catch(() => null);
+            if (lgHref) redeem[store] = lgHref;
+            else log.info(`${title} — no Legacy Games link on the claim page, using ${redeem[store]}`);
           }
           let redeem_url = redeem[store];
           if (store == 'gog.com') redeem_url += '/' + code; // to log and notify, but can't use for goto below (captcha)
-          db.data[user][title].code = code;
           let redeem_action = 'redeem';
           if (cfg.pg_redeem) { // try to redeem keys on external stores
             const page2 = await context.newPage();
@@ -817,10 +825,24 @@ try {
       // One stuck game page (tarpitted nav, changed buy-box, unexpected modal)
       // used to throw out of the whole Prime run and lose every game after it.
       const msg = e instanceof AggregateError ? e.errors.map(x => String(x?.message || x).split('\n')[0]).join(' | ') : String(e.message || e).split('\n')[0];
-      log.fail(`${title} — ${msg} — skipping, will retry next run`);
       if (cfg.debug) console.error(e);
-      failedCount++;
-      notify_games.push({ title, url, status: 'failed', details: `<a href="${url}">Claim manually</a>` });
+      const row = db.data[user]?.[title];
+      if (row && String(row.status || '').startsWith('claimed')) {
+        // Claim went through on Amazon; only the follow-up (code/redeem)
+        // broke. Amazon won't list the game again, so "retry next run"
+        // would be a lie — surface it as a manual action instead.
+        log.warn(`${title} — claimed, but follow-up failed (${msg})${row.code ? ` — code: ${row.code}` : ` — copy the code from ${url}`}`);
+        needsActionCount++;
+        const existing = notify_games.find(g => g.title === title);
+        const entry = existing || { title, url };
+        entry.status = 'claimed, redeem manually';
+        entry.details = row.code ? `code: ${row.code} — ${url}` : url;
+        if (!existing) notify_games.push(entry);
+      } else {
+        log.fail(`${title} — ${msg} — skipping, will retry next run`);
+        failedCount++;
+        notify_games.push({ title, url, status: 'failed', details: `<a href="${url}">Claim manually</a>` });
+      }
       await page.screenshot({ path: screenshot('failed', `${filenamify(title)}_${filenamify(datetime())}.png`), fullPage: true, timeout: 10000 }).catch(() => { });
     }
   }
