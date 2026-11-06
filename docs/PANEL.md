@@ -474,7 +474,7 @@ the file directly.
   shows the service name, a summary like `Redeem on · DLC off · Timeleft
   none`, and an Active checkbox. Click the row to expand and edit
   per-service flags (Prime's `PG_REDEEM` / `PG_CLAIMDLC` / `PG_TIMELEFT`,
-  Epic's `EG_MOBILE`, GOG's `GOG_NEWSLETTER`, Steam's `STEAM_MIN_RATING` /
+  Epic's `EG_MOBILE` / `EG_CAPTCHA_WAIT_MIN`, GOG's `GOG_NEWSLETTER`, Steam's `STEAM_MIN_RATING` /
   `STEAM_MIN_PRICE`). Deactivating hides the service from the Sessions grid
   and skips it in claim runs; reactivating requires one click.
 - **Advanced** — `DRYRUN`, `RECORD`, `TIMEOUT`, `LOGIN_TIMEOUT`, `WIDTH`,

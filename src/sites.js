@@ -209,6 +209,10 @@ export const SITES = [
       { key: 'claimMobile', env: 'EG_MOBILE', type: 'boolean', default: true,
         label: 'Claim mobile games',
         coerce: { kind: 'boolDefaultTrue' } },
+      { key: 'captchaWaitMin', env: 'EG_CAPTCHA_WAIT_MIN', type: 'number', default: 3,
+        label: 'Captcha solve time (minutes)',
+        hint: 'When Epic shows a captcha, the claim waits this long for you to solve it in the browser view (noVNC) before giving up on that game. Runs without a captcha are not affected.',
+        coerce: { kind: 'numberBounded', min: 1, fallback: 3 } },
     ],
     async checkLogin(page) {
       try {

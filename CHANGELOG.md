@@ -4,6 +4,16 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.12.33
+
+**Epic: you now have 3 minutes to solve a captcha, not under one.**
+
+When Epic showed a captcha, the claim still gave up after the normal 60-second page timeout, counted from the click. That left under a minute to see the notification, open the browser view and solve the hCaptcha, so a captcha you did solve often still ended as "failed to claim". The in-run retry had the same limit.
+
+Once a captcha is detected, the claim now keeps waiting for up to 3 minutes for it to be solved, on the first attempt and on the retry. The log and the notification say how long you have ("solve within 3 min"). You can change this under Settings → Services → Epic Games → **Captcha solve time (minutes)**, or with `EG_CAPTCHA_WAIT_MIN`. Runs without a captcha aren't affected. If nobody solves it, the game fails as before, just later.
+
+---
+
 ## What's new in 2.12.32
 
 **Prime Gaming: a Legacy Games code is no longer lost on non-English Luna.**

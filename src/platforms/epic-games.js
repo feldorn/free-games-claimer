@@ -100,6 +100,51 @@ async function isCaptchaShowing(page, iframe) {
   return false;
 }
 
+// Once a captcha is on screen, a person has to see the push, open noVNC and
+// solve it — the 60s step timeout ran out before that was realistic, so a
+// solved captcha still ended as "failed to claim". `step(timeout)` is one
+// idempotent checkout step (wait for the iframe, click Add to library, the
+// success race). If it times out while a captcha was seen, it's re-run until
+// cfg.eg_captcha_wait has passed since the captcha appeared.
+const CAPTCHA_WAIT_MIN = Math.round(cfg.eg_captcha_wait / 60000);
+const isTimeoutError = e => e?.name === 'TimeoutError' || /Timeout \d+ms exceeded/i.test(String(e?.message || e));
+async function withCaptchaGrace(page, captchaAt, step) {
+  let t = cfg.timeout, announced = false;
+  for (;;) {
+    try {
+      return await step(t);
+    } catch (e) {
+      const since = captchaAt();
+      const left = since ? since + cfg.eg_captcha_wait - Date.now() : 0;
+      if (left < 1000 || page.isClosed() || !isTimeoutError(e)) throw e;
+      if (!announced) {
+        log.info(`Waiting up to ${Math.ceil(left / 1000)}s more for the captcha to be solved`);
+        announced = true;
+      }
+      t = Math.min(cfg.timeout, left);
+    }
+  }
+}
+
+// Three success signals, whichever fires first (see the comment at the main
+// claim's call site for why each exists). Shared by the main and retry path.
+function claimSuccessRace(page, timeout) {
+  return Promise.race([
+    page.getByText(RX_ORDER_SUCCESS).first().waitFor({ state: 'attached', timeout }),
+    page.locator('button').filter({ hasText: new RegExp(RX_CONTINUE_BROWSING.source + '|' + RX_DOWNLOAD_LAUNCHER.source, 'i') }).first().waitFor({ state: 'visible', timeout }),
+    // Same owned-text semantics as the shared isOwnedText predicate,
+    // inlined here because waitForFunction runs in the browser context
+    // where the helper isn't reachable. Kept in sync via OWNED_TEXTS_GLOBAL.
+    page.waitForFunction(({ sel, ownedList }) => {
+      const btn = document.querySelector(sel);
+      if (!btn) return false;
+      const txt = (btn.innerText || '').trim().toLowerCase();
+      if (!txt || txt === 'loading') return false;
+      return ownedList.some(t => txt === t || txt.startsWith(t));
+    }, { sel: CTA_SELECTOR, ownedList: OWNED_TEXTS_GLOBAL }, { timeout }),
+  ]);
+}
+
 const RX_LAUNCHER_MODAL_HEADING =/final\s*step|is\s*epic\s*games\s*launcher\s*installed|Letzter\s*Schritt|Ist\s*der\s*Epic\s*Games\s*Launcher/i;
 async function dismissLauncherModal(page) {
   if (page.isClosed()) return;
@@ -786,13 +831,14 @@ try {
         }
       }
       log.game(title, `claiming (${btnText})`);
-      let captchaDetected = false;
+      let captchaDetected = false, captchaAt = null;
       // One handler for every captcha signal (checkout-iframe watcher below
       // + the frame-agnostic poll) so the warn/push fires once per game.
       const onCaptcha = async () => {
         if (captchaDetected) return;
         captchaDetected = true;
-        log.warn('Got hCaptcha challenge — solve in browser or get a new IP address');
+        captchaAt = Date.now();
+        log.warn(`Got hCaptcha challenge — solve it in the browser within ${CAPTCHA_WAIT_MIN} min, or get a new IP address`);
         // Include the panel deep-link (?focus=captcha auto-opens the
         // browser view on the active service) so tapping the push
         // takes the user straight to where they need to be. Game link
@@ -801,7 +847,7 @@ try {
         // high so it punches through DnD — captchas have minutes
         // before the iframe times out).
         const panelLink = cfg.public_url ? `${cfg.public_url}/?focus=captcha` : '';
-        const body = `epic-games: got captcha challenge for ${title} — solve now${panelLink ? '<br>' + panelLink : ''}<br>Game: ${url}`;
+        const body = `epic-games: got captcha challenge for ${title} — solve within ${CAPTCHA_WAIT_MIN} min${panelLink ? '<br>' + panelLink : ''}<br>Game: ${url}`;
         await notify(body, { priority: cfg.captcha_notify_priority || 'high', kind: 'action' });
       };
       let claimSettled = false;
@@ -843,7 +889,9 @@ try {
       let iframe;
       try {
         // it then creates an iframe for the purchase
-        await page.waitForSelector(CHECKOUT_IFRAME); // TODO needed?
+        // Captcha grace (withCaptchaGrace): the pre-checkout "One more step"
+        // wall holds this wait until it's solved.
+        await withCaptchaGrace(page, () => captchaAt, t => page.waitForSelector(CHECKOUT_IFRAME, { timeout: t }));
         iframe = page.frameLocator(CHECKOUT_IFRAME).first();
         // skip game if unavailable in region, https://github.com/vogler/free-games-claimer/issues/46 TODO check games for account's region
         if (await iframe.locator(':has-text("unavailable in your region")').count() > 0) {
@@ -884,7 +932,7 @@ try {
         // Locale variants added for Steggl's #141 followup — German
         // (Zur Bibliothek hinzufügen / Bestellung abschließen / Jetzt kaufen).
         // Extend RX_ADD_LIBRARY at the top of this block for other locales.
-        await iframe.locator('button').filter({ hasText: RX_ADD_LIBRARY }).filter({ hasNot: iframe.locator('.payment-loading--loading') }).first().click({ delay: 11 });
+        await withCaptchaGrace(page, () => captchaAt, t => iframe.locator('button').filter({ hasText: RX_ADD_LIBRARY }).filter({ hasNot: iframe.locator('.payment-loading--loading') }).first().click({ delay: 11, timeout: t }));
 
         // I Agree button is only shown for EU accounts! https://github.com/vogler/free-games-claimer/pull/7#issuecomment-1038964872
         const btnAgree = iframe.locator('button').filter({ hasText: RX_ACCEPT });
@@ -921,20 +969,7 @@ try {
         // Success signal is now text-only via the locale-portable regexes:
         // modal-copy match OR CTA text transitioning to a known "owned"
         // string. Both are only true AFTER Epic confirms the purchase.
-        await Promise.race([
-          page.getByText(RX_ORDER_SUCCESS).first().waitFor({ state: 'attached' }),
-          page.locator('button').filter({ hasText: new RegExp(RX_CONTINUE_BROWSING.source + '|' + RX_DOWNLOAD_LAUNCHER.source, 'i') }).first().waitFor({ state: 'visible' }),
-          // Same owned-text semantics as the shared isOwnedText predicate,
-          // inlined here because waitForFunction runs in the browser context
-          // where the helper isn't reachable. Kept in sync via OWNED_TEXTS_GLOBAL.
-          page.waitForFunction(({ sel, ownedList }) => {
-            const btn = document.querySelector(sel);
-            if (!btn) return false;
-            const txt = (btn.innerText || '').trim().toLowerCase();
-            if (!txt || txt === 'loading') return false;
-            return ownedList.some(t => txt === t || txt.startsWith(t));
-          }, { sel: CTA_SELECTOR, ownedList: OWNED_TEXTS_GLOBAL }, { timeout: cfg.timeout }),
-        ]);
+        await withCaptchaGrace(page, () => captchaAt, t => claimSuccessRace(page, t));
         db.data[user][game_id].status = 'claimed';
         db.data[user][game_id].time = datetime(); // claimed time overwrites failed/dryrun time
         log.ok(`${title} — claimed!`);
@@ -1049,7 +1084,7 @@ try {
     await page.waitForTimeout(60000);
     for (const retry of captchaRetries) {
       log.info(`Retrying ${retry.title}...`);
-      let retrySettled = true, retryCaptcha = false;
+      let retrySettled = true, retryCaptcha = false, retryCaptchaAt = null;
       try {
         await page.goto(retry.url, { waitUntil: 'commit' }); // same reasoning as the main loop (#151)
         await page.waitForFunction(
@@ -1092,9 +1127,10 @@ try {
           while (!retrySettled && !page.isClosed()) {
             if (await isCaptchaShowing(page)) {
               retryCaptcha = true;
-              log.warn(`Got hCaptcha challenge on retry of ${retry.title} — solve in browser`);
+              retryCaptchaAt = Date.now();
+              log.warn(`Got hCaptcha challenge on retry of ${retry.title} — solve it in the browser within ${CAPTCHA_WAIT_MIN} min`);
               const panelLink = cfg.public_url ? `${cfg.public_url}/?focus=captcha` : '';
-              await notify(`epic-games: got captcha challenge on retry for ${retry.title} — solve now${panelLink ? '<br>' + panelLink : ''}<br>Game: ${retry.url}`, { priority: cfg.captcha_notify_priority || 'high', kind: 'action' }).catch(() => { });
+              await notify(`epic-games: got captcha challenge on retry for ${retry.title} — solve within ${CAPTCHA_WAIT_MIN} min${panelLink ? '<br>' + panelLink : ''}<br>Game: ${retry.url}`, { priority: cfg.captcha_notify_priority || 'high', kind: 'action' }).catch(() => { });
               break;
             }
             await new Promise(r => setTimeout(r, 2000));
@@ -1102,7 +1138,7 @@ try {
         })().catch(() => { });
         page.locator('button').filter({ hasText: RX_CONTINUE }).first().click({ timeout: 10000 }).catch(_ => { });
         page.locator('button').filter({ hasText: RX_YES_BUY_NOW }).first().click({ timeout: 10000 }).catch(_ => { });
-        await page.waitForSelector(CHECKOUT_IFRAME);
+        await withCaptchaGrace(page, () => retryCaptchaAt, t => page.waitForSelector(CHECKOUT_IFRAME, { timeout: t }));
         const iframe = page.frameLocator(CHECKOUT_IFRAME).first();
         const btnAgree = iframe.locator('button').filter({ hasText: RX_ACCEPT });
         btnAgree.waitFor(SIDE_WAIT).then(() => btnAgree.first().click({ timeout: 5000 })).catch(_ => { });
@@ -1112,7 +1148,7 @@ try {
         // longer matched. Accept either text so we stay resilient if Epic
         // flips back or surfaces "Place Order" in some regions/flows.
         // Same locale-portable matcher as the main path (#141).
-        await iframe.locator('button').filter({ hasText: RX_ADD_LIBRARY }).filter({ hasNot: iframe.locator('.payment-loading--loading') }).first().click({ delay: 11 });
+        await withCaptchaGrace(page, () => retryCaptchaAt, t => iframe.locator('button').filter({ hasText: RX_ADD_LIBRARY }).filter({ hasNot: iframe.locator('.payment-loading--loading') }).first().click({ delay: 11, timeout: t }));
         // Same three-signal race as the main claim path above — see the
         // fuller comment there. Modal-text + popup-buttons + CTA-flip,
         // whichever fires first wins.
@@ -1129,20 +1165,7 @@ try {
         // Success signal is now text-only via the locale-portable regexes:
         // modal-copy match OR CTA text transitioning to a known "owned"
         // string. Both are only true AFTER Epic confirms the purchase.
-        await Promise.race([
-          page.getByText(RX_ORDER_SUCCESS).first().waitFor({ state: 'attached' }),
-          page.locator('button').filter({ hasText: new RegExp(RX_CONTINUE_BROWSING.source + '|' + RX_DOWNLOAD_LAUNCHER.source, 'i') }).first().waitFor({ state: 'visible' }),
-          // Same owned-text semantics as the shared isOwnedText predicate,
-          // inlined here because waitForFunction runs in the browser context
-          // where the helper isn't reachable. Kept in sync via OWNED_TEXTS_GLOBAL.
-          page.waitForFunction(({ sel, ownedList }) => {
-            const btn = document.querySelector(sel);
-            if (!btn) return false;
-            const txt = (btn.innerText || '').trim().toLowerCase();
-            if (!txt || txt === 'loading') return false;
-            return ownedList.some(t => txt === t || txt.startsWith(t));
-          }, { sel: CTA_SELECTOR, ownedList: OWNED_TEXTS_GLOBAL }, { timeout: cfg.timeout }),
-        ]);
+        await withCaptchaGrace(page, () => retryCaptchaAt, t => claimSuccessRace(page, t));
         const game_id = page.url().split('/').pop();
         db.data[user][game_id] ||= { title: retry.title, url: retry.url };
         db.data[user][game_id].status = 'claimed';
