@@ -4,6 +4,33 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.12.32
+
+**Prime Gaming: a Legacy Games code is no longer lost on non-English Luna.**
+
+After claiming a Legacy Games game, the claimer looked for a "Click here" link to find the redeem page. On luna.amazon.de and other non-English sites that text doesn't exist, so it waited 60 seconds and gave up. The code was only saved after that step, so it was lost, and Amazon doesn't show a collected game again. The code is now saved first, and the link is found by its legacygames.com address in any language.
+
+**Prime Gaming: one stuck game no longer stops the rest of the run.**
+
+- The claim button is now found with a single 30-second check. Before, an unrecognised page meant six 60-second waits and then an error that ended the whole Prime run. Leftover clicks could also land on the next game's page.
+- If a game fails, it's logged and the run continues with the next one. If Amazon already counted it as claimed and only the redeem step failed, it's reported as needing manual redeem, with the code.
+- Game pages get the same retry as the main claims page, and scrolling the claims list can no longer hang.
+- The overview screenshot and the DLC check can no longer mark an otherwise successful run as failed.
+
+**Epic: the captcha retry now works on non-English accounts.**
+
+When a game hit a captcha, the retry later in the run only recognised English button labels. On a German account every retry ended with "unexpected button". It now uses the same multi-language matching as the main claim.
+
+**Epic: fewer 60-second stalls.**
+
+- A store page that hasn't shown its button after 30 seconds is reloaded once.
+- The background helpers for the license agreement, parental PIN, "I Agree" and captcha now stop after 30 seconds, so they can't act on the next game's page.
+- The free-games API call and the Steam rating lookups (quality filter) now time out instead of hanging.
+
+Thanks to @sellwanger, whose PR (#178) found and fixed all of the above. It's ported here with two small changes.
+
+---
+
 ## What's new in 2.12.31
 
 **Epic: one gated game no longer stops the whole Epic run.**
