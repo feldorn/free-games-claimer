@@ -654,7 +654,8 @@ try {
     const isOwnedByButton = btnTextIndicatesOwned || btnDisabled;
 
     // click Continue if 'This game contains mature content recommended only for ages 18+'
-    if (await page.locator('button:has-text("Continue")').count() > 0) {
+    const continueBtn = page.locator('button:has-text("Continue")').first();
+    if (await continueBtn.count() > 0) {
       if (cfg.debug) console.log('  This game contains mature content recommended only for ages 18+');
       if (await page.locator('[data-testid="AgeSelect"]').count()) {
         log.warn('Got unexpected age gate — please report to https://github.com/vogler/free-games-claimer/issues/275');
@@ -665,8 +666,25 @@ try {
         await page.locator('#year_toggle').click();
         await page.locator('#year_menu li:has-text("1987")').click();
       }
-      await page.click('button:has-text("Continue")', { delay: 111 });
-      await page.waitForTimeout(2000);
+      // #180: Epic can show a gate whose Continue button stays disabled
+      // (likely a redesigned date-of-birth prompt we don't fill). The old
+      // unbounded click waited 60s and threw out of the loop, killing the
+      // whole Epic run on the same game every day. Bounded click; on
+      // failure, screenshot + mark this game failed and move on.
+      try {
+        await continueBtn.click({ delay: 111, timeout: 15000 });
+        await page.waitForTimeout(2000);
+      } catch (e) {
+        if (page.isClosed()) throw e;
+        const gateTitle = await page.locator('h1').first().innerText({ timeout: 3000 }).catch(() => skipId);
+        const p = screenshot('failed', `${skipId}_gate_${filenamify(datetime())}.png`);
+        await page.screenshot({ path: p, fullPage: false }).catch(() => { });
+        const disabled = await continueBtn.isDisabled().catch(() => false);
+        log.fail(`${gateTitle} — Epic's "Continue" gate ${disabled ? 'stayed disabled' : 'could not be clicked'} — skipping this game (screenshot: ${p})`);
+        notify_games.push({ title: gateTitle, url, status: 'failed: blocked by Epic age/content gate' });
+        if (cfg.time) console.timeEnd('claim game');
+        continue;
+      }
     }
 
     let title;

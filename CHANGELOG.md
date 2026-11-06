@@ -4,6 +4,14 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.12.31
+
+**Epic: one gated game no longer stops the whole Epic run.**
+
+Some Epic store pages show a gate with a **Continue** button that stays disabled. Most likely it's a redesigned date-of-birth prompt that the claimer doesn't fill in yet. The claimer clicked it and waited 60 seconds, and the timeout ended the entire Epic run. Because that game was never recorded, the next run stopped at the same game again, so no Epic games were claimed at all. The click now gives up after 15 seconds: that game is marked failed (with a screenshot in `data/screenshots/epic-games/failed/`) and the run moves on to the other games. Thanks to @TheDevRo for the report (#180).
+
+---
+
 ## What's new in 2.12.30
 
 **AliExpress: optional missions on top of the daily check-in.**
