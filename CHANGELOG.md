@@ -4,6 +4,16 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.12.34
+
+**Microsoft Rewards: a hung browser can no longer freeze the run (#181).**
+
+Sometimes the browser page stops responding in the middle of the Bing searches. Playwright's own timeouts never fire when that happens, so the run sat on one search indefinitely: hours or days, until someone stopped it by hand.
+
+Each search now has its own time limit (4 minutes, or longer if you raised the page timeout in Advanced settings). If a search hits the limit, the page is treated as dead: the remaining searches are skipped, the browser is closed (and force-killed if it won't close within 30 seconds), and the end-of-run summary goes out, flagging that the desktop session stopped early so you can re-run Microsoft Rewards from the panel. A crashed browser tab ("Target crashed") now ends the searches straight away too, instead of being retried on the dead page.
+
+---
+
 ## What's new in 2.12.33
 
 **Epic: you now have 3 minutes to solve a captcha, not under one.**

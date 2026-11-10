@@ -1190,8 +1190,42 @@ async function executeBingSearchAsDefaultSearchEngine(page, searchTerm) {
 // and the run summary still emits, instead of spamming 30+ identical
 // retry lines for every remaining search. #32.
 function isFatalBrowserError(e) {
+  if (e instanceof SearchWatchdogError) return true;
   const msg = String((e && e.message) || e || '');
-  return /target page, context or browser has been closed|browser has been closed|target closed/i.test(msg);
+  return /target page, context or browser has been closed|browser has been closed|target closed|target crashed/i.test(msg);
+}
+
+// #181: a wedged Chromium renderer can stall a Playwright call forever.
+// The call's own timeout never fires (DoSpamu's run sat in a 60s
+// `#b_results` wait for 12 hours, until the panel stopped it), so each
+// search gets a wall-clock watchdog of our own. A hung page stays hung,
+// so the watchdog is fatal: abort the remaining searches and let the
+// session end and the summary go out. The budget sits well above the
+// worst legitimate search (goto + typing + results wait + result dwell).
+const SEARCH_WATCHDOG_MS = Math.max(4 * 60_000, 2 * cfg.timeout + 60_000);
+class SearchWatchdogError extends Error {}
+function withWatchdog(promise, ms, what) {
+  // The raced promise is abandoned on timeout; swallow its eventual
+  // rejection so it can't surface as an unhandled rejection later.
+  promise.catch(() => {});
+  let t;
+  const timer = new Promise((_, reject) => {
+    t = setTimeout(() => reject(new SearchWatchdogError(`${what} unresponsive for ${Math.round(ms / 1000)}s — browser page appears hung`)), ms);
+  });
+  return Promise.race([promise, timer]).finally(() => clearTimeout(t));
+}
+
+// context.close() on a hung browser can hang too, which would cost the
+// mobile session and the end-of-run summary. Bound it; if it doesn't
+// finish, remember that so the script exits explicitly at the end
+// (Playwright kills its browser processes on process exit).
+let browserCloseHung = false;
+async function closeContextBounded(context) {
+  const closed = await withWatchdog(context.close().then(() => true), 30_000, 'Browser close').catch(() => false);
+  if (!closed) {
+    browserCloseHung = true;
+    log.warn('Browser did not close within 30s — continuing; it will be killed when the script exits');
+  }
 }
 
 // Fast in-context balance read via the same RSC path readPointsBalance
@@ -1201,10 +1235,10 @@ function isFatalBrowserError(e) {
 // for the mid-loop zero-credit check.
 async function readBalanceQuick(page) {
   try {
-    const rscText = await page.evaluate(async (url) => {
+    const rscText = await withWatchdog(page.evaluate(async (url) => {
       const r = await fetch(url, { headers: { rsc: '1' }, credentials: 'include' });
       return await r.text();
-    }, BING_REWARDS_URL + '/dashboard');
+    }, BING_REWARDS_URL + '/dashboard'), 60_000, 'Balance check');
     const m = String(rscText || '').match(/"balance"\s*:\s*(\d+)/);
     if (m) {
       const n = parseInt(m[1], 10);
@@ -1235,13 +1269,14 @@ async function executeBingSearches(page, searchTerms, opts = {}) {
     let ok = false;
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
-        await executeBingSearch(page, term, preEnterMs);
+        await withWatchdog(executeBingSearch(page, term, preEnterMs), SEARCH_WATCHDOG_MS, `Search #${i + 1}`);
         ok = true;
         break;
       } catch (e) {
         const msg = e.message.split('\n')[0];
         if (isFatalBrowserError(e)) {
-          log.fail(`Browser closed mid-run — aborting remaining searches. ${msg}`);
+          const why = e instanceof SearchWatchdogError ? 'Browser page hung' : 'Browser closed';
+          log.fail(`${why} mid-run — aborting remaining searches. ${msg}`);
           throw e;
         }
         if (attempt < 3) {
@@ -1362,7 +1397,7 @@ log.section('Desktop');
         if (page.isClosed()) throw e;
         log.warn(`Activity/bonus pass failed: ${String(e.message || e).split('\n')[0]} — continuing to searches`);
       }
-      await executeBingSearchAsDefaultSearchEngine(page, searchTerms[0]);
+      await withWatchdog(executeBingSearchAsDefaultSearchEngine(page, searchTerms[0]), SEARCH_WATCHDOG_MS, 'Search #1');
       await executeBingSearches(page, searchTerms.slice(1, desktopSearchCount), { startingBalance: before });
       after = await readPointsBalance(page);
       if (after != null) log.status('Points after', after + (before != null ? ` (+${after - before})` : ''));
@@ -1385,7 +1420,7 @@ log.section('Desktop');
     desktopFailure = String(e.message || e).split('\n')[0];
     log.warn(`Desktop session failed: ${desktopFailure} — continuing to mobile session + end-of-run summary`);
   } finally {
-    await context.close();
+    await closeContextBounded(context);
     activeContext = null;
   }
   desktopBefore = before;
@@ -1492,7 +1527,7 @@ log.section('Mobile');
     // failure and continue so the summary block fires normally.
     log.warn(`Mobile session failed: ${String(e.message || e).split('\n')[0]} — continuing to end-of-run summary`);
   } finally {
-    await context.close();
+    await closeContextBounded(context);
     activeContext = null;
   }
   mobileBefore = before;
@@ -1550,3 +1585,6 @@ if (redeemThreshold > 0) {
 
 log.section('Done');
 log.status('Time', datetime());
+// A browser that wouldn't close keeps its pipes open and the process
+// alive; exit explicitly so the panel sees the run finish (#181).
+if (browserCloseHung) process.exit(process.exitCode ?? 0);
