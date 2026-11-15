@@ -2339,10 +2339,16 @@ function computeMainWakeMs() {
       const hh = Number(m[1]);
       const mm = Number(m[2]);
       const intervalMs = (c.loop > 0 ? c.loop : 86400) * 1000;
+      const daySet = new Set(c.dailyStartDays);
+      // With a day mask, step at most one day at a time and let the mask
+      // pick the day. Stepping the full interval first (e.g. 7d with a
+      // Thursday-only mask) skipped a week after any restart that came
+      // after the anchor time on a non-masked day: Wed + 7d = next Wed →
+      // mask → Thu +8d (#184).
+      const stepMs = daySet.size < 7 ? Math.min(intervalMs, 86400 * 1000) : intervalMs;
       const wake = new Date();
       wake.setHours(hh, mm, 0, 0);
-      while (wake.getTime() <= Date.now()) wake.setTime(wake.getTime() + intervalMs);
-      const daySet = new Set(c.dailyStartDays);
+      while (wake.getTime() <= Date.now()) wake.setTime(wake.getTime() + stepMs);
       if (daySet.size < 7) {
         for (let i = 0; i < 7 && !daySet.has(wake.getDay()); i++) {
           wake.setDate(wake.getDate() + 1);
@@ -2443,7 +2449,16 @@ function computeMsWakeMs() {
       || (st.date === today && (st.status === 'fired' || st.status === 'missed'))
       || outOfWindow;
     if (needsFresh) {
-      const day = (!st || st.date < today) ? today : nextDayKey(today);
+      let day = (!st || st.date < today) ? today : nextDayKey(today);
+      // A window change that moves the pick out of bounds should still use
+      // today's (new) window when it hasn't ended yet, instead of skipping to
+      // tomorrow (#184). pickMsTargetFor clamps to the remaining window when
+      // we're already inside it.
+      if (outOfWindow) {
+        const todayWindowEnd = new Date(); todayWindowEnd.setHours(c.msStart, 0, 0, 0);
+        todayWindowEnd.setTime(todayWindowEnd.getTime() + c.msHours * 3600 * 1000);
+        if (todayWindowEnd.getTime() - now >= 90 * 1000) day = today;
+      }
       st = pickMsTargetFor(day, c);
       writeMsScheduleToday(st);
     }
