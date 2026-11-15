@@ -520,7 +520,7 @@ export const SITES = [
       // the panel's session check still said "not logged in" — the
       // session check uses *this* function, not the daily-run auth(),
       // and this one was missed in the v2.8.35 sweep.
-      const STRUCT_LOGIN_LINK = 'a[href*="/login"], a[href*="/signin" i], button[data-spm*="login" i]';
+      const STRUCT_LOGIN_LINK = 'a[href*="/login"], a[href*="/signin" i], button[data-spm*="login" i], [class*="aecoin-loginButton"]';
       const STRUCT_CLAIMABLE  = '#signButton[class*="aecoin-checkInButton"], [id="signButton"][class*="checkInButton"]';
       // + 2026-10 redesign's today-checked classes (#170/#171), same as auth().
       const STRUCT_DONE       = '#signButton[class*="aecoin-taskButton"], [id="signButton"][class*="taskButton"], [class*="aecoin-today-checked"], [class*="aecoin-isTodayChecked"]';

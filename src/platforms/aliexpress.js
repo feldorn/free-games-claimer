@@ -70,7 +70,10 @@ const auth = async url => {
   // marks today's check-in with aecoin-today-checked-* /
   // aecoin-isTodayChecked-* classes.
   const STRUCT_LOGGED_IN_DONE      = '#signButton[class*="aecoin-taskButton"], [id="signButton"][class*="taskButton"], [class*="aecoin-today-checked"], [class*="aecoin-isTodayChecked"]';
-  const STRUCT_LOGIN_LINK          = 'a[href*="/login"], a[href*="/signin" i], button[data-spm*="login" i]';
+  // aecoin-loginButton: the redesigned coin page's logged-out state is a
+  // plain <div>/<button> with localized text ("Iniciar sesión", #185) and
+  // no login href, so only the class name is locale-portable.
+  const STRUCT_LOGIN_LINK          = 'a[href*="/login"], a[href*="/signin" i], button[data-spm*="login" i], [class*="aecoin-loginButton"]';
   const loginBtn = page.locator(STRUCT_LOGIN_LINK + ', button:has-text("Log in")').first();
   const loggedIn = page.locator(STRUCT_LOGGED_IN_CLAIMABLE + ', h3:text-is("day streak")').first();
   // Post-collect state: when the user has already collected today's coins
@@ -166,7 +169,7 @@ const auth = async url => {
     // user-actionable problem is missing creds, surface that directly. #73.
     const email = cfg.ae_email || await prompt({ message: 'Enter email' });
     if (!email) {
-      throw new Error('AliExpress login marker not detected and no AE_EMAIL configured. If you logged in via the panel (cookie import), the script should not have reached the credential flow — most likely the login-detector locators didn\'t match your locale. Either set AE_EMAIL+AE_PASSWORD in data/config.env for credential login, or re-import the cookies from a logged-in browser session and try again. (See aliexpress.js auth() for the detector logic.)');
+      throw new Error('AliExpress shows the logged-out coin page and no AE_EMAIL is configured. Log in once via the panel (Sessions tab → Login, noVNC), or set AE_EMAIL+AE_PASSWORD for credential login. If you ARE logged in in that browser, the login-detector locators did not match your locale — please report it.');
     }
     const emailInput = login.locator('input[label="Email or phone number"]');
     await emailInput.fill(email);
