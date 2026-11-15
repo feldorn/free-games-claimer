@@ -1023,15 +1023,12 @@ try {
           log.fail(`${title} — failed to claim`);
           const p = screenshot('failed', `${game_id}_${filenamify(datetime())}.png`);
           // Diagnostic screenshot is best-effort — a crashed renderer
-          // (common on arm64, per marlonqpa's #107) shouldn't cascade a
-          // claim failure into a whole-run failure. Recoverable-family
-          // errors log a warn and move on; other errors still rethrow.
-          try {
-            await page.screenshot({ path: p, fullPage: true });
-          } catch (e) {
-            if (!isRecoverableEpicPageError(e)) throw e;
+          // (arm64, #107) or a capture that times out behind an unsolved
+          // captcha (#183, which then ended the whole Epic run) must not
+          // turn one failed claim into a failed run. Bounded to 15s.
+          await page.screenshot({ path: p, fullPage: true, timeout: 15000 }).catch(e => {
             log.warn(`page.screenshot failed for ${title} (${String(e.message || e).split('\n')[0]}) — skipping capture`);
-          }
+          });
           db.data[user][game_id].status = 'failed';
           if (/epicgames\.com\/id\/login/.test(page.url())
             || await page.locator('egs-navigation').getAttribute('isloggedin', { timeout: 3000 }).catch(() => null) === 'false') {
@@ -1062,14 +1059,10 @@ try {
 
       const p = screenshot(`${game_id}.png`);
       if (!existsSync(p)) {
-        // Same defensive shape as the failure-screenshot above — a
-        // recoverable renderer crash here shouldn't fail the run.
-        try {
-          await page.screenshot({ path: p, fullPage: false }); // fullPage is quite long...
-        } catch (e) {
-          if (!isRecoverableEpicPageError(e)) throw e;
+        // Same best-effort shape as the failure-screenshot above.
+        await page.screenshot({ path: p, fullPage: false, timeout: 15000 }).catch(e => { // fullPage is quite long...
           log.warn(`page.screenshot failed for ${game_id} (${String(e.message || e).split('\n')[0]}) — skipping capture`);
-        }
+        });
       }
     }
     if (cfg.time) console.timeEnd('claim game');
