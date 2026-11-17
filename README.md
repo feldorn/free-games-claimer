@@ -113,6 +113,39 @@ Open the control panel at **http://localhost:7080**. On first run, click **Login
 
 Full details — Docker Compose, bare-metal Node, non-root mode — in [docs/INSTALL.md](docs/INSTALL.md).
 
+### Multiple accounts
+
+One container handles one account per service. To claim for more accounts (an alt, a family member), run one container per account, each with its own data volume and its own ports:
+
+```yaml
+services:
+  fgc-main:
+    image: ghcr.io/feldorn/free-games-claimer
+    container_name: fgc-main
+    ports:
+      - "6080:6080"   # noVNC
+      - "7080:7080"   # panel
+    volumes:
+      - fgc-main:/fgc/data
+
+  fgc-alt:
+    image: ghcr.io/feldorn/free-games-claimer
+    container_name: fgc-alt
+    ports:
+      - "6081:6080"
+      - "7081:7080"
+    volumes:
+      - fgc-alt:/fgc/data
+
+volumes:
+  fgc-main:
+  fgc-alt:
+```
+
+Each container has its own panel (`:7080`, `:7081`), browser profile, schedule, claim history, and notification settings. In the extra containers, open **Settings** and untick **Active** on every service you don't need for that account, then log in through that panel's **Sessions** tab. Give the containers different `START_TIME` values so the accounts don't claim back-to-back from the same IP. Behind a reverse proxy, give each one its own `BASE_PATH` and `PUBLIC_URL` (see [docs/CONFIGURATION.md](docs/CONFIGURATION.md)).
+
+Multiple accounts inside a single container is not planned (see #4 and #186).
+
 ---
 
 ## Documentation
