@@ -4,6 +4,14 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.12.36
+
+**Epic: new "Notify only" option (#187).** Settings → Epic Games → *Notify only (don't claim)*, or `EG_NOTIFY_ONLY=1`. The Epic run still finds the current free games, but it never clicks Get. Instead it sends one notification listing them with their store links, so you can claim them yourself. With no checkout there is no captcha and no captcha alert. This is meant for setups where every claim from a cloud or VPS IP hits a captcha anyway. Games you have claimed are recognised as "In Library" on the next run and drop off the list. Other services keep auto-claiming as usual. Off by default. Thanks @TwoPlayer for the request.
+
+**Alerts tab: GOG codes whose automatic redeem gave up now show up (#188, #155).** When the GOG redeem retries for a Prime code run out, the entry is marked "redeem retries exhausted" and the daily Prime run keeps reminding you about it. The Alerts tab treated that same status as finished and hid the entry, so you got the reminder every day with no **Mark redeemed** / **Dismiss** button to stop it. These codes are now listed under Pending redeems like the Microsoft Store ones. The digest's outstanding count and Home Assistant's pending-redeem sensor count them too.
+
+---
+
 ## What's new in 2.12.35
 
 **Epic: staying signed in between runs (#183).** On some accounts Epic stores its "remember me" login as a *session cookie*, one with no expiry date. Chromium deletes those every time it starts, so you could log in through the panel, see "Login verified", and still have the next run rejected by Epic (HTTP 401). The shared browser profile (the one Epic, Prime, GOG, Steam and the watchers use) is now set to "continue where you left off", which keeps session cookies across launches. Chromium is also stopped from saving open tabs in that profile, so old tabs don't come back and pile up run after run. This is set up automatically on the first launch after updating, and the log says "Browser profile: session cookies now kept across launches" once. If you were hit by the 401, log in to Epic once more from the Sessions tab. Thanks @miguelchico for the diagnosis and the tested workaround.

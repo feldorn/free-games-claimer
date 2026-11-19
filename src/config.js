@@ -107,6 +107,7 @@ export const cfg = {
   eg_otpkey: process.env.EG_OTPKEY,
   eg_parentalpin: process.env.EG_PARENTALPIN,
   eg_mobile: eg.claimMobile ?? true, // claim mobile games
+  eg_notify_only: eg.notifyOnly ?? false, // find free games and notify, never click Get (#187)
   eg_captcha_wait: (eg.captchaWaitMin ?? 3) * 60 * 1000, // how long a claim waits for a manual captcha solve
   // auth prime-gaming
   pg_email: process.env.PG_EMAIL || process.env.EMAIL,

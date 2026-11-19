@@ -578,6 +578,8 @@ try {
   // the session died between the startup login check and the product
   // page. Remaining games would each burn a 60s timeout the same way.
   let sessionLost = false;
+  const notifyOnlyTitles = new Set(); // EG_NOTIFY_ONLY (#187)
+  if (cfg.eg_notify_only) log.info('Notify-only mode — free games are listed, not claimed');
 
   for (const url of urls) {
     if (cfg.time) console.time('claim game');
@@ -829,6 +831,24 @@ try {
           if (cfg.time) console.timeEnd('claim game');
           continue;
         }
+      }
+      // v2.12.36 (#187): notify-only mode. Stops before the Get click, so
+      // no checkout iframe and no captcha. DB status is left unset so the
+      // next run re-checks the page: once the user claims it by hand the
+      // button reads "In Library" and the game drops to 'existed'.
+      if (cfg.eg_notify_only) {
+        if (!loggedTitles.has(title)) {
+          log.game(title, 'free now (notify only, not claimed)');
+          loggedTitles.add(title);
+          notifyOnlyTitles.add(title);
+          notify_game.status = 'action';
+          notify_game.title = `Free now: ${title}`;
+        } else {
+          notify_games.splice(notify_games.indexOf(notify_game), 1);
+          dedupedVariants++;
+        }
+        if (cfg.time) console.timeEnd('claim game');
+        continue;
       }
       log.game(title, `claiming (${btnText})`);
       let captchaDetected = false, captchaAt = null;
@@ -1222,7 +1242,7 @@ try {
   log.summary({
     siteId: 'epic-games',
     claimed: uniqueByTitle('claimed'),
-    skipped: uniqueByTitle('skipped'),
+    skipped: uniqueByTitle('skipped') + notifyOnlyTitles.size,
     display: 'alreadyOwned',
     alreadyOwned: uniqueByTitle('existed'),
     failed: uniqueByTitle('failed'),
