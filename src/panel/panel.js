@@ -29,13 +29,15 @@ const NOVNC_URL = (process.env.NOVNC_URL || '').replace(/\/+$/, '');
 // stops happening (v2.12.2 fixed a bug where all three copies included
 // `claimed`, hiding DOOM Eternal + similar from the Alerts tab / HA
 // sensors while the daily Prime run kept notifying about them). Must stay
-// in sync with prime-gaming.js + gog.js `/redeemed|expired|invalid|dismissed/i`
-// — this superset adds `retries exhausted` (GOG retry-loop end state),
-// which prime-gaming.js intentionally surfaces as a pending notification.
+// in sync with prime-gaming.js + gog.js `/redeemed|expired|invalid|dismissed/i`.
+// v2.12.36 (#188/#155): this used to also match `retries exhausted`, but
+// prime-gaming.js keeps notifying about those GOG codes every day, so the
+// Alerts tab hid exactly the entries the user had no other way to silence.
+// `claimed, redeem retries exhausted` is NOT terminal here.
 //
 // Filed under feedback_no_local_shadow_of_shared_helper — regex drift
 // across duplicated logic. Also see feedback_check_both_code_paths.
-const PRIME_PENDING_TERMINAL_RX = /redeemed|expired|invalid|dismissed|retries exhausted/i;
+const PRIME_PENDING_TERMINAL_RX = /redeemed|expired|invalid|dismissed/i;
 // v2.11.12: legacy env-plaintext still supported. The panel bcrypt-hashes
 // it at boot into a memory-only variable; Settings-configured hash in
 // config.json takes precedence when both are set. `VNC_PASSWORD` fallback
