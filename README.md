@@ -109,9 +109,24 @@ Uses [patchright](https://github.com/nicbarker/patchright) (Chromium with built-
 docker run --rm -it -p 6080:6080 -p 7080:7080 -v fgc:/fgc/data --pull=always ghcr.io/feldorn/free-games-claimer
 ```
 
-Open the control panel at **http://localhost:7080**. On first run, click **Login** for each site to log in via the embedded noVNC browser, then either click **Run Now** or set `LOOP` (and optionally `START_TIME`) so the built-in scheduler fires daily on its own. Sessions persist across container restarts in the `fgc` volume.
+Open the control panel at **http://localhost:7080**. On first run, click **Login** for each site to log in via the embedded noVNC browser, then either click **Run Now** or set a schedule (see [Scheduling](#scheduling) below) so the built-in scheduler runs on its own. Sessions persist across container restarts in the `fgc` volume.
 
 Full details — Docker Compose, bare-metal Node, non-root mode — in [docs/INSTALL.md](docs/INSTALL.md).
+
+### Scheduling
+
+The panel has its own scheduler, so no cron is needed. Set it in **Settings → Scheduler**; the **Schedule** tab shows the next run.
+
+| You want | Set |
+|---|---|
+| Once a day at a fixed time | `START_TIME=08:00` |
+| Several times a day on the clock | `START_TIME=08:00` + `LOOP=14400` (every 4h) |
+| Only on certain days | `START_TIME` + `START_DAYS=1,3,5` |
+| Every N hours after the last run finished | `LOOP=86400` without `START_TIME` |
+| A less predictable start time | add `START_JITTER=30` (random 0–30 min delay) |
+| Run once on container start, then exit (Sablier / cron) | `RUN_ON_STARTUP=2` |
+
+Microsoft Rewards runs separately at a random time inside its own daily window (`MS_SCHEDULE_START=8`, `MS_SCHEDULE_HOURS=4`), or turn on *Run with main chain* (`MS_RUN_WITH_MAIN_CHAIN=1`) to run it right after the claimers on the schedule above. Details, missed-run behavior and the legacy mode: [docs/CONFIGURATION.md → Scheduling](docs/CONFIGURATION.md#scheduling).
 
 ### Multiple accounts
 

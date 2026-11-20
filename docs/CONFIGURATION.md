@@ -34,7 +34,7 @@ example](INSTALL.md#docker-compose) above:
 | `EMAIL` | | Default email for all logins (per-store override available below) |
 | `PASSWORD` | | Default password for all logins (per-store override available below) |
 | `NOTIFY` | | Notification URL(s) for [apprise](https://github.com/caronc/apprise) (Pushover, Telegram, Slack, etc.) — used for claim summaries, login issues, and captcha pause |
-| `LOOP` | | Main-schedule interval in seconds (e.g. `86400` = 24h). Without `START_TIME`, sleeps N seconds after each run completes (drifts by run duration). Drives the non-MS chain only — Microsoft Rewards is on its own schedule. |
+| `LOOP` | | Main-schedule interval in seconds (e.g. `86400` = 24h). Without `START_TIME`, sleeps N seconds after each run completes (drifts by run duration). Drives the non-MS chain; Microsoft Rewards has its own window unless `MS_RUN_WITH_MAIN_CHAIN` is on. See [Scheduling](#scheduling). |
 | `START_TIME` | | Wall-clock anchor `HH:MM` (24h) for the main schedule. When set, the non-MS chain wakes at this time each day; with a sub-daily `LOOP` (e.g. `14400` = 4h) the anchor seeds the sequence and runs land at `08:00, 12:00, 16:00, 20:00, 00:00, 04:00`. Microsoft Rewards is independent — see [Microsoft Rewards Options](#microsoft-rewards-options). |
 | `START_DAYS` | `0,1,2,3,4,5,6` | Day-of-week mask on the anchored schedule (comma-separated, `0=Sun … 6=Sat`). Only consulted when `START_TIME` is set. Default = all seven days (backward-compatible). Examples: `START_DAYS=4` (Thursdays only), `START_DAYS=1,3,5` (Mon/Wed/Fri). See [Day-of-week filter](#day-of-week-filter). |
 | `START_JITTER` | `0` | Random start delay in minutes (0-720) for the main claim chain. Each scheduled start gets an extra random 0..N minutes, so runs don't begin at the same clock minute every day. Works with `START_TIME` and `LOOP`. Not applied in legacy combined mode (no `START_TIME`/`LOOP`, MS window set). Settings → Scheduler → *Random start delay*. |
@@ -103,7 +103,8 @@ Steam discovery uses [Steam's own search endpoint](https://store.steampowered.co
 | `MS_EMAIL` | | Microsoft account email (falls back to `EMAIL`) |
 | `MS_PASSWORD` | | Microsoft account password (falls back to `PASSWORD`) |
 | `MS_OTPKEY` | | TOTP secret for automatic 2FA (otplib). Only needed if the account uses app-based TOTP, not phone push approval. |
-| `MS_SCHEDULE_HOURS` | `0` | MS-schedule window width in hours. When set (and `START_TIME` or `LOOP` is also set), the scheduler picks a random clock time inside the window each day and fires `microsoft.js` independently of the main chain. `0` = MS rides the main chain (no separate window). |
+| `MS_SCHEDULE_HOURS` | `0` | MS-schedule window width in hours. When set, the scheduler picks a random clock time inside the window each day and fires `microsoft.js` on its own, independent of the main chain. `0` = no MS schedule: MS only runs from **Run** / **Run Now**, unless `MS_RUN_WITH_MAIN_CHAIN` is on. See [Scheduling](#scheduling). |
+| `MS_RUN_WITH_MAIN_CHAIN` | `false` | Run Microsoft Rewards inline at the end of every main-chain run instead of on its own window. With `START_TIME` or `LOOP` set, MS runs right after the claimers on that schedule and the window is ignored. Settings → Microsoft Rewards → *Run with main chain*. |
 | `MS_SCHEDULE_START` | `8` | Window start hour (0–23). With `MS_SCHEDULE_HOURS=4` and `MS_SCHEDULE_START=8`, MS runs land randomly between 8am and 12pm each day. Today's pick is persisted to `data/ms-schedule-today.json` so config saves don't reshuffle the displayed timestamp. |
 | `MS_SEARCH_DELAY_MAX_SEC` | `180` | Upper bound (seconds) for the random pause before each Bing search and between consecutive searches. With ~60 searches per run, this dominates total runtime: avg ≈ N × value/2 seconds. Default 180 paces searches like a human; lower values (e.g. `30`) shorten runs to a few minutes but increase the risk of MS flagging the account as a bot. Lower bound stays 1s. |
 
@@ -159,39 +160,68 @@ Configure the flush time via `NOTIFY_DIGEST_HOUR` (env) or **Settings → Notifi
 
 ## Scheduling
 
-The built-in scheduler runs **two independent schedules** so the long Microsoft
-Rewards window doesn't block the rest of the claim chain.
+The built-in scheduler has two parts: the **main schedule**, which runs every
+active claimer and watcher (Prime, GOG, Epic, FAB, Steam, AliExpress, the
+watchers), and **Microsoft Rewards**, which normally has its own daily window
+so its long search session doesn't hold up the claimers. Everything below can
+be set in **Settings → Scheduler** (and Settings → Microsoft Rewards) or with
+the env vars shown. The **Schedule** tab always shows what will actually happen
+next.
 
-```yaml
-environment:
-  - LOOP=86400          # main-chain interval in seconds
-  - START_TIME=08:00    # main-chain wall-clock anchor (HH:MM)
-  - MS_SCHEDULE_HOURS=4 # Microsoft Rewards window width (hours)
-  - MS_SCHEDULE_START=8 # Microsoft Rewards window start hour
-```
+### Main schedule: pick one
 
-- **Main schedule** (`START_TIME` + `LOOP`) fires the non-MS chain — every
-  active claimer and watcher in the registry's claim order (GOG, Prime, Epic,
-  Steam, AliExpress, Ubisoft, Humble, Fanatical, Lenovo). With `START_TIME`
-  set, runs land on the wall clock; without, `LOOP` sleeps N seconds after
-  each run completes. Lenovo additionally registers per-drop wakes (1h
-  before / 5min before / at drop time) on top of the daily chain pass.
-- **MS schedule** (`MS_SCHEDULE_HOURS` + `MS_SCHEDULE_START`) fires
-  `microsoft.js` alone at a random clock time inside the window. The picked
-  time is persisted to `data/ms-schedule-today.json` so config saves don't
-  reshuffle the displayed "Next MS run" timestamp.
+| You want | Settings → Scheduler | Env |
+|---|---|---|
+| Once a day at a fixed time | *Start time* `08:00`, interval empty or 1 day | `START_TIME=08:00` |
+| Several times a day on the clock | *Start time* `08:00`, interval `4h` → 08:00, 12:00, 16:00 … | `START_TIME=08:00` `LOOP=14400` |
+| Only on certain days | *Start time* + *Run on days* | `START_TIME=08:00` `START_DAYS=1,3,5` |
+| Every N hours after the last run finished | Tick *Run interval after each completion*, set the interval | `LOOP=82800` (no `START_TIME`) |
+| No schedule, run by hand or from cron | Leave both empty; optionally *Run on startup* | `RUN_ON_STARTUP=2` (see [Run on startup](#run-on-startup-sablier--cron)) |
 
-If a run is already in progress when the other schedule fires, the second
-one queues behind it (single shared browser profile). If the MS pick has
-already passed by the time the container restarts, today's MS run is marked
-**missed** rather than auto-firing late — trigger it manually from the MS
-card if needed. Tomorrow's pick is fresh.
+- **Start time** (`START_TIME`) lands runs on the wall clock in the container's
+  `TZ`. Missed slots (container off, run blocked) are not made up later; a
+  blocked start retries every 10 minutes for up to 2 hours, then waits for
+  the next slot.
+- **Interval after completion** (`LOOP` without `START_TIME`) counts from when
+  the previous run *finished*, so the start time drifts by the run's
+  duration (e.g. 24h + a 1h run = one hour later each day). The last
+  completion is saved, so a restart doesn't reset the clock.
+- **Random start delay** (`START_JITTER`, minutes, default 0) adds a random 0
+  to N minutes to every scheduled start in either mode, so runs don't begin at
+  the same minute every day. Example: `START_TIME=08:00` + `START_JITTER=45`
+  starts somewhere between 08:00 and 08:45.
 
-**Legacy combined mode (back-compat).** If you have neither `START_TIME` nor
-`LOOP` set but do have `MS_SCHEDULE_HOURS`, the scheduler keeps the pre-#10
-behavior: a single chain anchored 30 minutes before the MS window, with
-`microsoft.js` doing its own internal wait. Set `START_TIME` or `LOOP` to opt
-into the decoupled two-schedule mode.
+### Microsoft Rewards: pick one
+
+| You want | Setting | Env |
+|---|---|---|
+| A random time inside a daily window (recommended) | Microsoft Rewards → window start + hours | `MS_SCHEDULE_START=8` `MS_SCHEDULE_HOURS=4` |
+| Right after the claimers, on the main schedule | Microsoft Rewards → *Run with main chain* | `MS_RUN_WITH_MAIN_CHAIN=1` |
+| Not scheduled | Window hours `0`, *Run with main chain* off | `MS_SCHEDULE_HOURS=0` |
+
+- **Own window**: each day a random time inside the window is picked and saved
+  in `data/ms-schedule-today.json`. If the container comes back after that
+  time, today's MS run is marked **missed** instead of firing late; run it
+  from the MS card if you want it.
+- **Run with main chain**: MS goes last in each main-schedule run, so it
+  follows your start time or interval (and random delay). The window
+  settings are not used.
+- If one schedule fires while the other is running, it waits its turn (the
+  services share one browser profile).
+
+**Legacy combined mode (back-compat).** With *no* `START_TIME` and *no*
+`LOOP` but an MS window set, the scheduler keeps the original single-chain
+behavior: the full chain (MS included) starts 30 minutes before the MS window
+(07:30 for an 08:00 window) and `microsoft.js` waits inside the run for its
+random time. `START_JITTER` is not applied here. Set `START_TIME` or `LOOP`
+to get the separate schedules described above. Before v2.12.37, turning on
+*Run with main chain* also forced this mode and ignored `LOOP` (#189).
+
+**Pause.** The Schedule tab's *Pause* button skips scheduled runs without
+stopping the container; resuming does not make up the skipped ones.
+
+Lenovo Gaming key drops add their own reminder wakes (1h before / 5 min
+before / at drop time) on top of the main schedule.
 
 ### Day-of-week filter
 
