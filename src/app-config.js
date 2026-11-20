@@ -122,6 +122,14 @@ export const CONFIG_SCHEMA = [
       if (new Set(v).size !== v.length) return 'duplicate days not allowed';
       return null;
     } },
+  // Random start delay for the main claim chain (#189). Each scheduled
+  // main-chain wake gets 0..N extra minutes so runs don't start at the
+  // same clock minute every day. 0 = off (default, existing behavior).
+  // Not applied in legacy combined mode, where microsoft.js computes its
+  // own window target and a late start could push MS to tomorrow.
+  { path: 'scheduler.startJitterMinutes', env: 'START_JITTER', type: 'number', default: 0,
+    coerce: v => Math.max(0, Math.round(Number(v) || 0)),
+    validate: v => Number.isInteger(v) && v >= 0 && v <= 720 ? null : 'expected whole minutes 0-720' },
   // 0 = off, 1 = run claim chain after startup auto-check (panel keeps
   // running), 2 = run + exit (one-shot for Sablier / cron / `docker run --rm`).
   { path: 'scheduler.runOnStartup',    env: 'RUN_ON_STARTUP',    type: 'number',  default: 0, coerce: v => {
@@ -491,6 +499,8 @@ export const ENV_DISPLAY = [
   // scheduler — anchored-mode extension. Days-of-week mask (#108).
   { env: 'START_DAYS',    category: 'scheduler', label: 'Anchored-mode days-of-week filter',
     note: 'Comma-separated list of days on which the anchored scheduler fires: 0 = Sunday … 6 = Saturday. Only consulted when `START_TIME` (or dailyStartTime in Settings) is set. Default = all seven days (backward-compatible). Example: `START_DAYS=4` for weekly Thursdays; `START_DAYS=1,3,5` for Mon/Wed/Fri. Missed days do not queue backfills.' },
+  { env: 'START_JITTER',  category: 'scheduler', label: 'Main-chain random start delay (minutes)',
+    note: 'Adds a random 0..N minute delay to every scheduled claim-chain start so it does not begin at the same clock minute each day. Default 0 (off). Max 720. Not applied in legacy combined mode (no START_TIME / LOOP, MS window set).' },
   // GitHub integration — reply-alerts for issues you filed via Share-to-GitHub.
   { env: 'GH_USERNAME',   category: 'github', label: 'GitHub username (reply-alerts)',
     note: 'When set, the panel polls this user\'s issues in feldorn/free-games-claimer once a day (anonymous REST, no token) and surfaces new comment activity as an Alerts-tab section. Opt-in — you\'re prompted at first Share-to-GitHub click; skip to keep unset and the feature stays silently disabled. Change requires a panel restart. Max 39 chars, GitHub-username characters only.' },
@@ -529,6 +539,10 @@ export function getSchedulerConfig() {
     msHours:         s.msScheduleHours ?? 0,
     msStart:         s.msScheduleStart ?? 8,
     dailyStartDays:  days,
+    startJitterMin:  Number(s.startJitterMinutes) || 0,
+    // Live read — the panel's cfg.ms_run_with_main_chain is a module-load
+    // snapshot, so toggling it in Settings needed a restart (#189).
+    msRunWithMainChain: !!describeConfig().effective.services?.microsoft?.runWithMainChain,
   };
 }
 

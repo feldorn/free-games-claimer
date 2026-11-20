@@ -2316,8 +2316,34 @@ function legacyCombinedMode(sched = getSchedulerConfig(), active = activeService
   // toggled off. Reported live 2026-08-08.
   const msActive = active.has('microsoft');
   if (!msActive) return false;
-  if (cfg.ms_run_with_main_chain) return true;
+  if (sched.msRunWithMainChain) return true;
   return !sched.dailyStartTime && !sched.loop && sched.msHours > 0;
+}
+
+// MS_RUN_WITH_MAIN_CHAIN with the user's own START_TIME / LOOP: the chain
+// follows that schedule and microsoft.js runs inline without waiting for
+// its window. Before #189 the 30m-before-MS-window wake below took over
+// whenever MS_RUN_WITH_MAIN_CHAIN was on, so a LOOP interval was ignored
+// and the chain fired daily at 07:30 (default window 8:00).
+function msInlineWithOwnSchedule(sched = getSchedulerConfig(), active = activeServices()) {
+  return legacyCombinedMode(sched, active) && (!!sched.dailyStartTime || sched.loop > 0);
+}
+
+// Random start delay (START_JITTER, #189). One pick per (base wake, max)
+// so repeated computeMainWakeMs() calls (state polls, config reloads)
+// agree. Keyed map, not a single slot: the anchored path probes several
+// bases per call (today's past anchor, then tomorrow's).
+const _mainJitter = new Map();
+function mainJitterMs(baseMs, maxMin) {
+  if (!(maxMin > 0)) return 0;
+  const key = baseMs + ':' + maxMin;
+  let j = _mainJitter.get(key);
+  if (j === undefined) {
+    j = Math.floor(Math.random() * (maxMin * 60 + 1)) * 1000;
+    _mainJitter.set(key, j);
+    while (_mainJitter.size > 32) _mainJitter.delete(_mainJitter.keys().next().value);
+  }
+  return j;
 }
 
 function computeMainWakeMs() {
@@ -2350,18 +2376,27 @@ function computeMainWakeMs() {
       const stepMs = daySet.size < 7 ? Math.min(intervalMs, 86400 * 1000) : intervalMs;
       const wake = new Date();
       wake.setHours(hh, mm, 0, 0);
-      while (wake.getTime() <= Date.now()) wake.setTime(wake.getTime() + stepMs);
+      // With START_JITTER, a base anchor that's already past still counts
+      // while its picked delay hasn't elapsed (anchor 07:00 + 23m jitter,
+      // state poll at 07:10 → still today's 07:23).
+      const pastDue = () => wake.getTime() + mainJitterMs(wake.getTime(), c.startJitterMin) <= Date.now();
+      while (pastDue()) wake.setTime(wake.getTime() + stepMs);
       if (daySet.size < 7) {
         for (let i = 0; i < 7 && !daySet.has(wake.getDay()); i++) {
           wake.setDate(wake.getDate() + 1);
         }
       }
-      return Math.max(wake.getTime() - Date.now(), 60 * 1000);
+      const jitter = mainJitterMs(wake.getTime(), c.startJitterMin);
+      return Math.max(wake.getTime() + jitter - Date.now(), 60 * 1000);
     }
   }
 
   // Legacy combined: wake 30min before the MS window, fire full chain.
-  if (legacyCombinedMode(c, active)) {
+  // Only when the user has no LOOP of their own (START_TIME returned
+  // above) — with MS_RUN_WITH_MAIN_CHAIN + LOOP, LOOP wins (#189).
+  // No START_JITTER here: microsoft.js picks its own target inside the
+  // window and a start past it would push MS to tomorrow.
+  if (!c.loop && legacyCombinedMode(c, active)) {
     const wakeHour = c.msStart > 0 ? c.msStart - 1 : 23;
     const wake = new Date();
     wake.setHours(wakeHour, 30, 0, 0);
@@ -2383,12 +2418,14 @@ function computeMainWakeMs() {
         // Past-due → fire immediately (caller's sleepUntilWakeup floors
         // negative values). The +60s floor below avoids tight loops on
         // a clock-skew or last-completion-in-the-future edge case.
-        return Math.max(60 * 1000, last + intervalMs - Date.now());
+        const base = last + intervalMs;
+        return Math.max(60 * 1000, base + mainJitterMs(base, c.startJitterMin) - Date.now());
       }
     }
     // No persisted state — first boot after upgrade, or first run ever.
     // Sleep the full interval from now; once that fires and completes,
     // the state file is populated and future restarts honor the anchor.
+    // No jitter: the base moves with every call, so a pick couldn't stick.
     return intervalMs;
   }
 
@@ -2681,9 +2718,14 @@ async function mainSchedulerLoop() {
     // used). Decoupled mode: explicit non-MS list, which intentionally
     // bypasses CLAIM_CMD because the override would re-include microsoft.
     const sites = legacyCombinedMode(sched, active) ? null : nonMsActiveSiteIds();
+    // Inline MS on the user's own START_TIME / LOOP runs now, as the
+    // runWithMainChain hint promises, instead of sleeping in microsoft.js
+    // until its window opens (#189).
+    const inlineEnv = msInlineWithOwnSchedule(sched, active) ? { MS_SKIP_WINDOW: '1' } : undefined;
     let fired = await fireScheduledRun({
       label: 'main',
       sites,
+      extraEnv: inlineEnv,
       postRun: () => postRunSessionCheck(),
     });
     // Blocked-fire handling. Two modes:
@@ -2716,10 +2758,12 @@ async function mainSchedulerLoop() {
         // If the schedule was reconfigured mid-retry, drop out and let
         // the outer loop recompute fresh.
         if (c2.dailyStartTime !== sched.dailyStartTime) break;
-        const sites2 = legacyCombinedMode(c2, activeServices()) ? null : nonMsActiveSiteIds();
+        const active2 = activeServices();
+        const sites2 = legacyCombinedMode(c2, active2) ? null : nonMsActiveSiteIds();
         fired = await fireScheduledRun({
           label: 'main',
           sites: sites2,
+          extraEnv: msInlineWithOwnSchedule(c2, active2) ? { MS_SKIP_WINDOW: '1' } : undefined,
           postRun: () => postRunSessionCheck(),
         });
         if (fired) break;
@@ -3153,6 +3197,7 @@ async function getState() {
   // toggled off. Reported live 2026-08-08.
   const msActive = active.has('microsoft');
   const legacyMode = legacyCombinedMode(sched, active);
+  const msInline = legacyMode && (!!sched.dailyStartTime || sched.loop > 0);
   const dailyAnchored = !!sched.dailyStartTime;
   const mainEnabled = legacyMode || dailyAnchored || sched.loop > 0;
   const msScheduled = !legacyMode && msActive && sched.msHours > 0;
@@ -3223,7 +3268,12 @@ async function getState() {
     })(),
     serverTimeIso: new Date().toISOString(),
     msTodayStatus: msState ? msState.status : null,
-    legacyCombinedMode: legacyMode,
+    // msInline: MS rides the main chain on the user's own START_TIME/LOOP
+    // (#189) — the UI shows the decoupled-style claimer rows, not the
+    // "anchored 30m before MS window" legacy view.
+    legacyCombinedMode: legacyMode && !msInline,
+    msInline,
+    startJitterMin: sched.startJitterMin,
     mainEnabled,
     msScheduled,
     loopEnabled: schedEnabled,
@@ -6845,6 +6895,8 @@ function renderSchedulerSection() {
       '</div>' +
       loopRevert +
     '</div>' +
+    fieldRow('scheduler.startJitterMinutes', 'Random start delay (minutes)',
+      { hint: 'Adds a random 0 to N minute delay to every scheduled claim-chain start, so runs do not begin at the same clock minute each day. 0 = off. Microsoft Rewards already picks a random time inside its own window. Not applied in legacy combined mode (no start time or interval set, MS window set).' }) +
     fieldRow('scheduler.runOnStartup', 'Run on startup',
       { hint: 'Fire a claim run once when the panel finishes its boot session-check. "One-shot" terminates the container after the run completes — useful with Sablier scale-to-zero or cron-driven docker start/stop.',
         options: [
@@ -7502,6 +7554,7 @@ function renderScheduleTab() {
       } else {
         mainInterval = '';
       }
+      if (mainInterval && state.startJitterMin > 0) mainInterval += ' + random 0-' + state.startJitterMin + ' min delay';
       if (mainInterval) parts.push('<div class="sched-row"><div class="sched-label">Interval · Claimers</div><div class="sched-value muted">' + mainInterval + '</div></div>');
       // Days-of-week readout (#108): only render when the mask is not
       // all-days (visual noise suppression on the default). Applies to
@@ -7516,6 +7569,9 @@ function renderScheduleTab() {
       parts.push('<div class="sched-row"><div class="sched-label">Claimers</div><div class="sched-value muted">Not scheduled — set START_TIME or LOOP in Settings → Scheduler.</div></div>');
     }
 
+    if (state.msInline) {
+      parts.push('<div class="sched-row"><div class="sched-label">MS Rewards</div><div class="sched-value muted">Runs inline at the end of each claim run (Microsoft Rewards → Run with main chain is on). The MS window is not used.</div></div>');
+    }
     if (state.msScheduled) {
       const statusBadge = state.msTodayStatus === 'missed'
         ? ' <span class="muted">(missed today — Run manually from the MS card)</span>'
@@ -7576,7 +7632,9 @@ function renderScheduleTab() {
     svcLines.push('<b>Joybuy</b> — collect daily check-in JoyPoints <span class="muted">(no specific window; runs on each scheduled fire)</span>');
   }
   if (hasMS) {
-    if ((state.msScheduleHours || 0) > 0) {
+    if (state.msInline) {
+      svcLines.push('<b>Microsoft Rewards</b> — runs searches right after the claimers');
+    } else if ((state.msScheduleHours || 0) > 0) {
       // Window itself shown in dedicated MS-window row above; keep this
       // bullet behavioural only.
       svcLines.push('<b>Microsoft Rewards</b> — searches inside MS window');
@@ -11322,7 +11380,9 @@ server.listen(PANEL_PORT, async () => {
     } else {
       console.log(`[${datetime()}] Scheduler (main): disabled (set START_TIME or LOOP to enable)`);
     }
-    if (MS_SCHEDULE_HOURS > 0) {
+    if (msInlineWithOwnSchedule()) {
+      console.log(`[${datetime()}] Scheduler (MS): inline with the main chain (MS_RUN_WITH_MAIN_CHAIN), window not used`);
+    } else if (MS_SCHEDULE_HOURS > 0) {
       console.log(`[${datetime()}] Scheduler (MS): enabled (random within ${MS_SCHEDULE_START}:00 → ${(MS_SCHEDULE_START + MS_SCHEDULE_HOURS) % 24}:00)`);
     } else {
       console.log(`[${datetime()}] Scheduler (MS): disabled (set MS_SCHEDULE_HOURS to enable)`);

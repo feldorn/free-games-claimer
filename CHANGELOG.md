@@ -4,6 +4,14 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.12.37
+
+**Scheduler: the interval is no longer ignored when Microsoft Rewards runs with the main chain (#189).** With Microsoft Rewards → *Run with main chain* turned on, the scheduler switched to the old combined mode: one daily run 30 minutes before the MS window (07:30 with the default 08:00 window). Your interval from Settings → Scheduler was ignored, so "every 23 hours" still ran at 07:30 every day. Now, when you've set an interval or a start time, the claim chain follows it and Microsoft Rewards runs right after the claimers, without waiting for its window (which is what the setting's description always said). With no interval and no start time, the combined 07:30-style run is unchanged. Turning *Run with main chain* on or off in Settings now takes effect immediately instead of after a restart, and the Schedule tab shows "MS Rewards runs inline" instead of the misleading "Set START_TIME or LOOP" hint.
+
+**Scheduler: optional random start delay (#189).** Settings → Scheduler → *Random start delay (minutes)*, or `START_JITTER=30`. Every scheduled claim-chain start gets an extra random 0 to N minutes, so runs don't begin at the same minute every day. Works with both a start time and an interval. Off (0) by default. Microsoft Rewards already picks a random time inside its own window. Thanks @xh43k for the report and the idea.
+
+---
+
 ## What's new in 2.12.36
 
 **Epic: new "Notify only" option (#187).** Settings → Epic Games → *Notify only (don't claim)*, or `EG_NOTIFY_ONLY=1`. The Epic run still finds the current free games, but it never clicks Get. Instead it sends one notification listing them with their store links, so you can claim them yourself. With no checkout there is no captcha and no captcha alert. This is meant for setups where every claim from a cloud or VPS IP hits a captcha anyway. Games you have claimed are recognised as "In Library" on the next run and drop off the list. Other services keep auto-claiming as usual. Off by default. Thanks @TwoPlayer for the request.
