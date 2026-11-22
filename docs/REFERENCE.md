@@ -37,7 +37,7 @@ We've shipped what the JS layer can shim — viewport unification, persistent fi
 | **GOG** | Reliable | Soft captcha occasionally. |
 | **Steam** | Reliable | Free-to-keep flow has no fingerprint scoring. |
 | **Microsoft Rewards** | Reliable | Humanlike search timing required (built-in); runs take 30–45 min by design. |
-| **AliExpress** | **Deprecated channel — declining reliability** | Web coin collection is being phased out by AliExpress in favor of the mobile app (upstream confirms since Dec 2024). Works for some accounts, gates others with the AWSC slider, escalates long-running accounts to the "Network and device" prompt. **Manual cookie refresh every few weeks** is the realistic posture. We do not recommend depending on it. |
+| **AliExpress** | **Deprecated channel — declining reliability** | Web coin collection is being phased out by AliExpress in favor of the mobile app (upstream confirms since Dec 2024). Works for some accounts, gates others with the AWSC slider, escalates long-running accounts to the "Network and device" prompt. **Manual cookie refresh every few weeks** is the realistic posture. We do not recommend depending on it. If the slider fails with `error: AFEDn`, try `AE_REAL_CHROME=1` (Google Chrome set up as an Android phone, amd64 only). |
 | **Watchers** (Lenovo, Humble, Fanatical, Ubisoft) | Reliable | No login, no scoring, no detection issues. |
 
 ### What we won't build, and why

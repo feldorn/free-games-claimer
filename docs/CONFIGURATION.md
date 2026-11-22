@@ -81,7 +81,7 @@ Each store can use the default `EMAIL`/`PASSWORD` or be overridden individually:
 | GOG | `GOG_EMAIL` | `GOG_PASSWORD` | | `GOG_NEWSLETTER=1` |
 | Steam | `STEAM_EMAIL` | `STEAM_PASSWORD` | | `STEAM_MIN_RATING`, `STEAM_MIN_PRICE` |
 | Microsoft Rewards | `MS_EMAIL` | `MS_PASSWORD` | `MS_OTPKEY` | `MS_SCHEDULE_HOURS` |
-| AliExpress | `AE_EMAIL` | `AE_PASSWORD` | | `AE_ENABLED=1` (opt-in; disabled by default; `AE_MISSIONS=1` also does the browse missions and the quiz; **deprecated** — web channel being phased out by AliExpress, see [Bot detection](REFERENCE.md#bot-detection--what-works-what-doesnt)) |
+| AliExpress | `AE_EMAIL` | `AE_PASSWORD` | | `AE_ENABLED=1` (opt-in; disabled by default; `AE_MISSIONS=1` also does the browse missions and the quiz; `AE_REAL_CHROME=1` runs it in Google Chrome as an Android phone, for accounts whose login slider fails with `error: AFEDn` (amd64 only); **deprecated** — web channel being phased out by AliExpress, see [Bot detection](REFERENCE.md#bot-detection--what-works-what-doesnt)) |
 | Ubisoft Connect | — | — | — | `UBISOFT_ACTIVE=1` (opt-in; disabled by default). Watch-only — no login, no auto-claim. |
 | Humble Bundle | — | — | — | `HUMBLE_ACTIVE=1` (opt-in). Watch-only. |
 | Fanatical | — | — | — | `FANATICAL_ACTIVE=1` (opt-in). Watch-only. |
