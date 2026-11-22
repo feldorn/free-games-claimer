@@ -41,12 +41,18 @@ export function keepSessionCookies(profileDir) {
       changed = true;
     }
 
-    const sessions = path.join(def, 'Sessions');
-    const st = existsSync(sessions) ? statSync(sessions) : null;
-    if (!st || st.isDirectory()) {
-      if (st) rmSync(sessions, { recursive: true, force: true });
-      writeFileSync(sessions, '');
-      changed = true;
+    // Google Chrome 158 writes the session to Sessions_Encrypted instead, so
+    // that one gets the same empty file. Without it every launch restored all
+    // earlier tabs, and with REAL_CHROME their service workers starting while
+    // patchright attached made connectOverCDP time out.
+    for (const name of ['Sessions', 'Sessions_Encrypted']) {
+      const sessions = path.join(def, name);
+      const st = existsSync(sessions) ? statSync(sessions) : null;
+      if (!st || st.isDirectory()) {
+        if (st) rmSync(sessions, { recursive: true, force: true });
+        writeFileSync(sessions, '');
+        changed = true;
+      }
     }
     return { changed };
   } catch (e) {

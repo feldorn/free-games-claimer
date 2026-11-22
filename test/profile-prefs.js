@@ -44,6 +44,14 @@ test('existing prefs are preserved, Sessions dir replaced', dir => {
   assert.ok(sessionsIsFile(dir));
 });
 
+test('Chrome 158 Sessions_Encrypted dir replaced too', dir => {
+  mkdirSync(path.join(dir, 'Default', 'Sessions_Encrypted'), { recursive: true });
+  writeFileSync(path.join(dir, 'Default', 'Sessions_Encrypted', 'Tabs_1'), 'x');
+  assert.deepEqual(keepSessionCookies(dir), { changed: true });
+  assert.ok(sessionsIsFile(dir));
+  assert.ok(statSync(path.join(dir, 'Default', 'Sessions_Encrypted')).isFile());
+});
+
 test('second call is a no-op', dir => {
   keepSessionCookies(dir);
   assert.deepEqual(keepSessionCookies(dir), { changed: false });
