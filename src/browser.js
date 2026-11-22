@@ -7,7 +7,21 @@ import { cleanProfileLocks, localeArgs, siteLocale, handleSIGINT, datetime, file
 import { cfg } from './config.js';
 import { SITES_BY_ID } from './sites.js'; // after config.js — sites.js reads cfg
 import { keepSessionCookies } from './profile-prefs.js';
+import { androidReady, attachAndroidChrome, chromeInstalled } from './android-chrome.js';
 import path from 'node:path';
+
+// Device options the Android-Chrome path sets through CDP instead. Passing them
+// to Playwright as well would put a second, inconsistent phone on the page.
+const PLAYWRIGHT_DEVICE_KEYS = ['userAgent', 'viewport', 'screen', 'deviceScaleFactor', 'isMobile', 'hasTouch', 'defaultBrowserType', 'extraHTTPHeaders'];
+
+// A site opts in with `androidChrome: true` in the registry; the user turns it
+// on with the site's own flag (cfg.ae_real_chrome for AliExpress).
+function wantsAndroidChrome(siteId) {
+  if (!SITES_BY_ID[siteId]?.androidChrome || !cfg.ae_real_chrome) return false;
+  if (chromeInstalled()) return true;
+  log.warn('AE_REAL_CHROME is on but Google Chrome is not installed in this image (arm64?), using the bundled Chromium.');
+  return false;
+}
 
 // Shared browser-context factory. Every claim script used to repeat the same
 // preamble verbatim — cleanProfileLocks + launchPersistentContext with the same
@@ -51,6 +65,11 @@ export async function launchContext(siteId, {
     else if (r.changed) console.log('Browser profile: session cookies now kept across launches (#183)');
   }
   const locale = siteLocale(siteId);
+  const androidChrome = wantsAndroidChrome(siteId);
+  if (androidChrome) {
+    contextOptions = Object.fromEntries(Object.entries(contextOptions).filter(([k]) => !PLAYWRIGHT_DEVICE_KEYS.includes(k)));
+    contextOptions = { ...contextOptions, channel: 'chrome', viewport: null };
+  }
   const context = await chromium.launchPersistentContext(profileDir, {
     headless: cfg.headless,
     viewport: { width: cfg.width, height: cfg.height },
@@ -63,7 +82,12 @@ export async function launchContext(siteId, {
     ...contextOptions,
   });
   if (sigint) handleSIGINT(context);
+  if (androidChrome) {
+    const phone = await attachAndroidChrome(context, profileDir, { locale, maxHeight: cfg.height > 100 ? cfg.height - 40 : undefined });
+    log.status('Browser', `Google Chrome ${phone.chrome} as ${phone.model} (Android ${phone.androidVersion})`);
+  }
   const page = context.pages().length ? context.pages()[0] : await context.newPage(); // should always exist
+  if (androidChrome) await androidReady(page);
   return { context, page };
 }
 

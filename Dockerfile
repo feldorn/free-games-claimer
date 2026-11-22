@@ -115,6 +115,13 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/usr/local/share/ms-playwright
 RUN npm install --ignore-scripts && npx patchright install chromium --no-shell && du -h -d1 "$PLAYWRIGHT_BROWSERS_PATH" \
     && chmod -R a+rX "$PLAYWRIGHT_BROWSERS_PATH"
 
+# Google Chrome for AE_REAL_CHROME (src/android-chrome.js), installed by
+# patchright to /opt/google/chrome. Google ships no arm64 Linux build, so arm64
+# images skip it and AliExpress keeps patchright's Chromium there.
+RUN if [ "$(dpkg --print-architecture)" = "amd64" ]; then \
+      npx patchright install chrome && rm -rf /var/lib/apt/lists/*; \
+    else echo "Google Chrome: no $(dpkg --print-architecture) build, skipped"; fi
+
 COPY . .
 
 # Shell scripts need Linux line endings. On Windows, git might be configured to check out dos/CRLF line endings, so we convert them for those people in case they want to build the image. They could also use --config core.autocrlf=input

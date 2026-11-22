@@ -170,6 +170,9 @@ export const cfg = {
   ae_email:    process.env.AE_EMAIL    || process.env.EMAIL,
   ae_password: process.env.AE_PASSWORD || process.env.PASSWORD,
   ae_missions: process.env.AE_MISSIONS === '1' || ae.missions === true,
+  // Google Chrome as an Android phone set through CDP (src/android-chrome.js)
+  // instead of patchright Chromium + an injected fingerprint. Opt-in.
+  ae_real_chrome: process.env.AE_REAL_CHROME === '1' || ae.realChrome === true,
   joybuy_email:    process.env.JOYBUY_EMAIL    || process.env.EMAIL,
   joybuy_password: process.env.JOYBUY_PASSWORD || process.env.PASSWORD,
   joybuy_page_url: process.env.JOYBUY_PAGE_URL || joybuy.pageUrl,
