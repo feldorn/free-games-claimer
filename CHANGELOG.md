@@ -14,6 +14,12 @@ Turn on **Use Google Chrome as an Android phone** (Settings → Per-service → 
 
 The amd64 image now ships Google Chrome. Google has no arm64 Linux build, so on arm64 the setting logs a warning and AliExpress runs as before. Off by default.
 
+**Browser profile: no more piled-up tabs with Google Chrome 158.** The shared profile keeps session cookies by turning `Default/Sessions` into an empty file, so tabs are not restored. Google Chrome 158 saves the session to `Default/Sessions_Encrypted` instead, which now gets the same empty file. Before, every launch reopened all earlier tabs.
+
+**Optional Google Chrome for the shared profile, for Cloudflare checks that refuse the bundled browser.**
+
+The browser patchright ships is Google Chrome for Testing, and Cloudflare can refuse it: on GOG the login challenge never clears. Turn on **Use Google Chrome for the shared profile** (Settings → Advanced → Browser, or `REAL_CHROME=1`) and Epic, Prime, GOG, Steam, FAB, Ubisoft, the watchers and Microsoft Rewards run in the Google Chrome the image now includes. Chrome is started as a normal process and the claimer attaches to it afterwards, the way P-Adamiec's Remaster does, with no locale, timezone or viewport emulation, because a Chrome launched by Playwright was refused even with its extra switches removed. These services share one browser profile, so the setting switches all of them; AliExpress, Microsoft Rewards (Mobile) and Joybuy keep their own. Existing logins carry over. Once Google Chrome has opened the profile, keep the setting on, since turning it off would open the profile in an older browser. Runs are not recorded in this mode. Needs the amd64 image. Off by default. Known gap: a GOG login through this attached Chrome passed when started by hand, but through the panel's Login button the challenge still failed in testing.
+
 ---
 
 ## What's new in 2.12.37

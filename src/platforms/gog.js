@@ -1,4 +1,4 @@
-import { launchContext, gotoWithRetry } from '#src/browser.js';
+import { launchContext, gotoWithRetry, setDefaultViewport } from '#src/browser.js';
 import { checkQualityGate } from '#src/quality-lookup.js';
 import { existsSync, readFileSync, appendFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
@@ -61,7 +61,7 @@ const { context, page } = await launchContext('gog');
 
 if (!cfg.debug) context.setDefaultTimeout(cfg.timeout);
 
-await page.setViewportSize({ width: cfg.width, height: cfg.height }); // TODO workaround for https://github.com/vogler/free-games-claimer/issues/277 until Playwright fixes it
+await setDefaultViewport(page); // TODO workaround for https://github.com/vogler/free-games-claimer/issues/277 until Playwright fixes it
 // console.debug('userAgent:', await page.evaluate(() => navigator.userAgent));
 
 const notify_games = [];

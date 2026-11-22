@@ -1,4 +1,4 @@
-import { launchContext, gotoWithRetry } from '#src/browser.js';
+import { launchContext, gotoWithRetry, setDefaultViewport } from '#src/browser.js';
 import { writeFileSync } from 'node:fs';
 import { resolve, jsonDb, datetime, filenamify, prompt, notify, html_game_list, log, dataDir, matchKey, stripGpTail, getDiscoveryUserMarkedKeys } from '#src/util.js';
 import { cfg } from '#src/config.js';
@@ -81,7 +81,7 @@ const { context, page } = await launchContext('steam');
 
 if (!cfg.debug) context.setDefaultTimeout(cfg.timeout);
 
-await page.setViewportSize({ width: cfg.width, height: cfg.height });
+await setDefaultViewport(page);
 
 const notify_games = [];
 const qualityTally = newQualityTally(); // v2.12.0 (#148)

@@ -264,6 +264,7 @@ export const CONFIG_SCHEMA = [
   // advanced / debug
   { path: 'advanced.dryrun',          env: 'DRYRUN',        type: 'boolean', default: false, coerce: toBool },
   { path: 'advanced.record',          env: 'RECORD',        type: 'boolean', default: false, coerce: toBool },
+  { path: 'advanced.realChrome',      env: 'REAL_CHROME',   type: 'boolean', default: false, coerce: toBool },
   { path: 'advanced.timeoutSec',      env: 'TIMEOUT',       type: 'number',  default: 60,   coerce: v => Number(v) || 60 },
   { path: 'advanced.loginTimeoutSec', env: 'LOGIN_TIMEOUT', type: 'number',  default: 180,  coerce: v => Number(v) || 180 },
   { path: 'advanced.width',           env: 'WIDTH',         type: 'number',  default: 1920, coerce: v => Number(v) || 1920 },

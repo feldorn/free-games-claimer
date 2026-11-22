@@ -1,4 +1,4 @@
-import { launchContext, gotoWithRetry } from '#src/browser.js';
+import { launchContext, gotoWithRetry, setDefaultViewport } from '#src/browser.js';
 import { authenticator } from 'otplib';
 import { resolve, jsonDb, datetime, filenamify, prompt, confirm, notify, html_game_list, log } from '#src/util.js';
 import { cfg } from '#src/config.js';
@@ -47,7 +47,7 @@ const { context, page } = await launchContext('prime-gaming', { recordPrefix: 'p
 
 if (!cfg.debug) context.setDefaultTimeout(cfg.timeout);
 
-await page.setViewportSize({ width: cfg.width, height: cfg.height }); // TODO workaround for https://github.com/vogler/free-games-claimer/issues/277 until Playwright fixes it
+await setDefaultViewport(page); // TODO workaround for https://github.com/vogler/free-games-claimer/issues/277 until Playwright fixes it
 // console.debug('userAgent:', await page.evaluate(() => navigator.userAgent));
 
 // Amazon tarpits Luna navigations intermittently, holding the document past
@@ -863,7 +863,7 @@ try {
       // await page.screenshot({ path: p, fullPage: true }); // fullPage does not make a difference since scroll not on body but on some element
       await scrollUntilStable(() => games.locator('.item-card__action').count());
       const viewportSize = page.viewportSize(); // current viewport size
-      await page.setViewportSize({ ...viewportSize, height: 3000 }); // increase height, otherwise element screenshot is cut off at the top and bottom
+      if (viewportSize) await page.setViewportSize({ ...viewportSize, height: 3000 }); // increase height (no viewport to resize with REAL_CHROME), otherwise element screenshot is cut off at the top and bottom
       await games.screenshot({ path: p, timeout: 15000 }); // screenshot of all claimed games
     } catch (e) {
       log.warn(`Overview screenshot skipped — ${String(e.message || e).split('\n')[0]}`);

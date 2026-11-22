@@ -4,7 +4,7 @@ import { spawn, execFile } from 'node:child_process';
 import { watch, readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { datetime, notify, jsonDb, normalizeTitle, cleanProfileLocks, readDigestBuffer, markDigestFlushed, stripGpTail, dataDir, rootDir, isNetworkErrorMessage } from '#src/util.js';
-import { launchContext } from '#src/browser.js';
+import { launchContext, setDefaultViewport } from '#src/browser.js';
 import { epicImportMissingSessionReason } from '#src/epic-session.js';
 import { cfg } from '#src/config.js';
 import { describeConfig, patchConfig, describeEnv, getSchedulerConfig, CONFIG_FILE_PATH, readConfigFile, writeConfigFile, setByPath as cfgSetByPath, deleteByPath as cfgDeleteByPath } from '#src/app-config.js';
@@ -332,17 +332,21 @@ async function launchSite(siteId) {
 
   console.log(`[${datetime()}] Launching browser for ${site.name}...`);
 
-  const { context, page } = await launchContext(siteId, {
+  const { context, page, opened } = await launchContext(siteId, {
     profileDir: site.browserDir,
     record: false,
     sigint: false, // panel owns the browser lifecycle (activeBrowser / closeBrowser)
     contextOptions: { headless: false, ...(site.contextOptions || {}) },
+    startUrl: site.loginUrl,
   });
 
   context.setDefaultTimeout(0);
 
-  if (!site.contextOptions?.viewport) await page.setViewportSize({ width: cfg.width, height: cfg.height });
-  await page.goto(site.loginUrl, { waitUntil: 'domcontentloaded' });
+  if (!site.contextOptions?.viewport) await setDefaultViewport(page);
+  // With REAL_CHROME, Google Chrome opened the login page itself. A page that
+  // patchright navigates is what GOG's Cloudflare check refused; the same
+  // login opened by Chrome, or typed in by hand, went through.
+  if (!opened) await page.goto(site.loginUrl, { waitUntil: 'domcontentloaded' });
 
   activeBrowser = { siteId, context, page, openedAt: Date.now() };
   console.log(`[${datetime()}] Browser launched for ${site.name}. User can now log in via VNC.`);
@@ -1426,7 +1430,7 @@ async function startBatchRedeem() {
     sigint: false,
     contextOptions: { headless: false },
   });
-  try { await page.setViewportSize({ width: cfg.width, height: cfg.height }); } catch {}
+  try { await setDefaultViewport(page); } catch {}
   context.setDefaultTimeout(0); // batch-redeem drives its own timeouts
 
   batchRedeem = {
@@ -1745,7 +1749,7 @@ async function startSteamRedeem() {
     sigint: false,
     contextOptions: { headless: false },
   });
-  try { await page.setViewportSize({ width: cfg.width, height: cfg.height }); } catch {}
+  try { await setDefaultViewport(page); } catch {}
   context.setDefaultTimeout(0);
 
   steamRedeem = {
@@ -6999,6 +7003,9 @@ function paintSettings() {
       settingGroup('Debug',
         fieldRow('advanced.dryrun', 'Dry run — skip actual claiming',     { hint: 'Runs the claim pipeline without actually claiming anything. Useful for testing.' }) +
         fieldRow('advanced.record', 'Record HAR + video for debugging',   { hint: 'Writes per-run .webm + .har to data/record/. Heavier runs.' })
+      ) +
+      settingGroup('Browser',
+        fieldRow('advanced.realChrome', 'Use Google Chrome for the shared profile', { hint: 'Runs Epic, Prime, GOG, Steam, FAB, Ubisoft, the watchers and Microsoft Rewards in the Google Chrome bundled with the image, started as a normal browser with the claimer attached afterwards, instead of the Chrome for Testing build patchright ships, which Cloudflare checks (GOG login) can refuse. They share one profile, so it switches for all of them. Runs are not recorded in this mode. Needs the amd64 image. Once the profile has been opened by Google Chrome, keep the setting on: going back opens it in an older browser.' })
       ) +
       settingGroup('Viewport',
         fieldRow('advanced.width',  'Browser viewport width') +

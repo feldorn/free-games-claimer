@@ -61,6 +61,7 @@ for `BASE_PATH`, `PUBLIC_URL`, and `NOVNC_URL`.
 | `TZ` | | Container timezone (e.g. `America/Sao_Paulo`); also sets the browser `timezoneId` |
 | `<SVC>_PAGE_URL` | (per-service default) | Override a service's base URL (`EG_`, `GOG_`, `STEAM_`, `FAB_`, `HUMBLE_`, `FANATICAL_`, `LENOVO_`, `UBISOFT_`, `AE_PAGE_URL`; Prime uses `PG_BASE_URL`) |
 | `TIMEOUT` | `60` | Timeout in seconds for page actions |
+| `REAL_CHROME` | `0` | `1` runs the shared profile (Epic, Prime, GOG, Steam, FAB, Ubisoft, watchers, Microsoft Rewards) in Google Chrome started as a normal process, with the claimer attached afterwards, instead of patchright's Chrome for Testing, for Cloudflare checks that refuse it. No recording in this mode. amd64 only. Keep it on once the profile has been opened in Google Chrome |
 | `LOGIN_TIMEOUT` | `180` | Timeout in seconds for login |
 | `DEBUG` | `0` | Set to `1` for verbose debug output |
 | `PUID` | | **Opt-in non-root mode.** When set, the entrypoint reconciles a runtime user `fgc` with this UID, chowns `/fgc/data`, and drops privileges via `gosu`. Unset = container runs as root (default, unchanged). See [Running as a non-root user](INSTALL.md#running-as-a-non-root-user). |

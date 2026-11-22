@@ -36,6 +36,9 @@ export const cfg = {
   debug: process.env.DEBUG == '1' || process.env.PWDEBUG == '1', // runs non-headless and opens https://playwright.dev/docs/inspector
   debug_network: process.env.DEBUG_NETWORK == '1', // log network requests and responses
   record: adv.record ?? false, // `recordHar` (network) + `recordVideo`
+  // Google Chrome instead of patchright's Chrome for Testing for the shared
+  // desktop profile (cfg.dir.browser). Opt-in, see src/browser.js.
+  real_chrome: adv.realChrome ?? false,
   time: process.env.TIME == '1', // log duration of each step
   interactive: process.env.INTERACTIVE == '1', // confirm to claim, enter to skip
   dryrun: adv.dryrun ?? false, // don't claim anything
