@@ -4,6 +4,7 @@
 // gate lives in src/panel/panel.js.
 import { datetime, prompt, jsonDb, awaitUserCaptchaSolve, getOrCreateFingerprint, log, notify } from '#src/util.js';
 import { launchContext } from '#src/browser.js';
+import { chromeInstalled } from '#src/android-chrome.js';
 import { cfg } from '#src/config.js';
 import { siteVersion } from '#src/sites.js';
 import { pickMissions, parseMissionCompletion, pickQuizUrl, pickQuizOption, parseQuizAnswer } from '#src/aliexpress-missions.js';
@@ -28,29 +29,38 @@ let missionCoins = 0;
 // viewport keeps that signal stable. First run generates and saves; subsequent
 // runs reload from <profileDir>/.fgc-fingerprint.json.
 const profileDir = cfg.dir.browser + '-aliexpress';
-const { fingerprint, headers, _persisted } = getOrCreateFingerprint(profileDir, () =>
-  new FingerprintGenerator().getFingerprint({
-    devices: ['mobile'],
-    operatingSystems: ['android'],
-  })
-);
-log.status('Fingerprint', _persisted ? 'loaded from cache' : 'fresh (saved for next run)');
+// AE_REAL_CHROME: launchContext() sets the phone up in Google Chrome itself
+// (src/android-chrome.js), so the injected fingerprint below must stay off.
+const { context, page } = cfg.ae_real_chrome && chromeInstalled()
+  ? await launchContext('aliexpress', { profileDir })
+  : await launchWithInjectedFingerprint();
 
-const { context, page } = await launchContext('aliexpress', {
-  profileDir,
-  contextOptions: {
-    // mobile view is required — desktop URLs just show "install the app"
-    userAgent: fingerprint.navigator.userAgent,
-    viewport: {
-      width: fingerprint.screen.width,
-      height: fingerprint.screen.height,
+async function launchWithInjectedFingerprint() {
+  const { fingerprint, headers, _persisted } = getOrCreateFingerprint(profileDir, () =>
+    new FingerprintGenerator().getFingerprint({
+      devices: ['mobile'],
+      operatingSystems: ['android'],
+    })
+  );
+  log.status('Fingerprint', _persisted ? 'loaded from cache' : 'fresh (saved for next run)');
+
+  const launched = await launchContext('aliexpress', {
+    profileDir,
+    contextOptions: {
+      // mobile view is required — desktop URLs just show "install the app"
+      userAgent: fingerprint.navigator.userAgent,
+      viewport: {
+        width: fingerprint.screen.width,
+        height: fingerprint.screen.height,
+      },
+      extraHTTPHeaders: {
+        'accept-language': headers['accept-language'],
+      },
     },
-    extraHTTPHeaders: {
-      'accept-language': headers['accept-language'],
-    },
-  },
-});
-await new FingerprintInjector().attachFingerprintToPlaywright(context, { fingerprint, headers });
+  });
+  await new FingerprintInjector().attachFingerprintToPlaywright(launched.context, { fingerprint, headers });
+  return launched;
+}
 
 context.setDefaultTimeout(cfg.debug ? 0 : cfg.timeout);
 

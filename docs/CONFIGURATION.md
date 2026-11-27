@@ -61,6 +61,7 @@ for `BASE_PATH`, `PUBLIC_URL`, and `NOVNC_URL`.
 | `TZ` | | Container timezone (e.g. `America/Sao_Paulo`); also sets the browser `timezoneId` |
 | `<SVC>_PAGE_URL` | (per-service default) | Override a service's base URL (`EG_`, `GOG_`, `STEAM_`, `FAB_`, `HUMBLE_`, `FANATICAL_`, `LENOVO_`, `UBISOFT_`, `AE_PAGE_URL`; Prime uses `PG_BASE_URL`) |
 | `TIMEOUT` | `60` | Timeout in seconds for page actions |
+| `REAL_CHROME` | `0` | `1` runs the shared profile (Epic, Prime, GOG, Steam, FAB, Ubisoft, watchers, Microsoft Rewards) in Google Chrome started as a normal process, with the claimer attached afterwards, instead of patchright's Chrome for Testing, for Cloudflare checks that refuse it. No recording in this mode. amd64 only. Keep it on once the profile has been opened in Google Chrome |
 | `LOGIN_TIMEOUT` | `180` | Timeout in seconds for login |
 | `DEBUG` | `0` | Set to `1` for verbose debug output |
 | `PUID` | | **Opt-in non-root mode.** When set, the entrypoint reconciles a runtime user `fgc` with this UID, chowns `/fgc/data`, and drops privileges via `gosu`. Unset = container runs as root (default, unchanged). See [Running as a non-root user](INSTALL.md#running-as-a-non-root-user). |
@@ -81,7 +82,7 @@ Each store can use the default `EMAIL`/`PASSWORD` or be overridden individually:
 | GOG | `GOG_EMAIL` | `GOG_PASSWORD` | | `GOG_NEWSLETTER=1` |
 | Steam | `STEAM_EMAIL` | `STEAM_PASSWORD` | | `STEAM_MIN_RATING`, `STEAM_MIN_PRICE` |
 | Microsoft Rewards | `MS_EMAIL` | `MS_PASSWORD` | `MS_OTPKEY` | `MS_SCHEDULE_HOURS` |
-| AliExpress | `AE_EMAIL` | `AE_PASSWORD` | | `AE_ENABLED=1` (opt-in; disabled by default; `AE_MISSIONS=1` also does the browse missions and the quiz; **deprecated** — web channel being phased out by AliExpress, see [Bot detection](REFERENCE.md#bot-detection--what-works-what-doesnt)) |
+| AliExpress | `AE_EMAIL` | `AE_PASSWORD` | | `AE_ENABLED=1` (opt-in; disabled by default; `AE_MISSIONS=1` also does the browse missions and the quiz; `AE_REAL_CHROME=1` runs it in Google Chrome as an Android phone, for accounts whose login slider fails with `error: AFEDn` (amd64 only); **deprecated** — web channel being phased out by AliExpress, see [Bot detection](REFERENCE.md#bot-detection--what-works-what-doesnt)) |
 | Ubisoft Connect | — | — | — | `UBISOFT_ACTIVE=1` (opt-in; disabled by default). Watch-only — no login, no auto-claim. |
 | Humble Bundle | — | — | — | `HUMBLE_ACTIVE=1` (opt-in). Watch-only. |
 | Fanatical | — | — | — | `FANATICAL_ACTIVE=1` (opt-in). Watch-only. |

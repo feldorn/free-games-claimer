@@ -36,6 +36,9 @@ export const cfg = {
   debug: process.env.DEBUG == '1' || process.env.PWDEBUG == '1', // runs non-headless and opens https://playwright.dev/docs/inspector
   debug_network: process.env.DEBUG_NETWORK == '1', // log network requests and responses
   record: adv.record ?? false, // `recordHar` (network) + `recordVideo`
+  // Google Chrome instead of patchright's Chrome for Testing for the shared
+  // desktop profile (cfg.dir.browser). Opt-in, see src/browser.js.
+  real_chrome: adv.realChrome ?? false,
   time: process.env.TIME == '1', // log duration of each step
   interactive: process.env.INTERACTIVE == '1', // confirm to claim, enter to skip
   dryrun: adv.dryrun ?? false, // don't claim anything
@@ -170,6 +173,9 @@ export const cfg = {
   ae_email:    process.env.AE_EMAIL    || process.env.EMAIL,
   ae_password: process.env.AE_PASSWORD || process.env.PASSWORD,
   ae_missions: process.env.AE_MISSIONS === '1' || ae.missions === true,
+  // Google Chrome as an Android phone set through CDP (src/android-chrome.js)
+  // instead of patchright Chromium + an injected fingerprint. Opt-in.
+  ae_real_chrome: process.env.AE_REAL_CHROME === '1' || ae.realChrome === true,
   joybuy_email:    process.env.JOYBUY_EMAIL    || process.env.EMAIL,
   joybuy_password: process.env.JOYBUY_PASSWORD || process.env.PASSWORD,
   joybuy_page_url: process.env.JOYBUY_PAGE_URL || joybuy.pageUrl,

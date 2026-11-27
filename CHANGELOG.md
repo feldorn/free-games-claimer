@@ -4,6 +4,24 @@ Release notes for [Feldorn's Free Games Claimer](README.md). Most recent at the 
 
 ---
 
+## What's new in 2.12.38
+
+**AliExpress: optional Google Chrome as an Android phone, for accounts the login slider rejects.**
+
+On some accounts the AliExpress login page shows "Please drag the slider to verify" and then "Click to retry (error: AFEDn)", and the slider never appears. The panel login and the daily run both stop there, and an imported cookie only lasts until the session drops. The same accounts get through in P-Adamiec's [Free-Games-Claimer-Remaster](https://github.com/P-Adamiec/Free-Games-Claimer-Remaster), which runs AliExpress in Google Chrome and sets up the phone through Chrome itself.
+
+Turn on **Use Google Chrome as an Android phone** (Settings → Per-service → AliExpress, or `AE_REAL_CHROME=1`) to run AliExpress the same way. It uses Google Chrome instead of patchright's Chromium and sets one Android phone through Chrome's DevTools protocol, so the user agent, the `Sec-CH-UA-*` headers, `navigator.userAgentData`, the screen size and touch support all describe the same device and the Chrome version that is actually running. The Pixel 7 device profile used until now changed the user agent while the client hints still said Linux desktop. This mode injects no fingerprint script. Each profile gets one phone, saved in `.fgc-android-device.json`. The setting applies to the login browser, the session check and the daily run, missions included. Log in again after turning it on.
+
+The amd64 image now ships Google Chrome. Google has no arm64 Linux build, so on arm64 the setting logs a warning and AliExpress runs as before. Off by default.
+
+**Browser profile: no more piled-up tabs with Google Chrome 158.** The shared profile keeps session cookies by turning `Default/Sessions` into an empty file, so tabs are not restored. Google Chrome 158 saves the session to `Default/Sessions_Encrypted` instead, which now gets the same empty file. Before, every launch reopened all earlier tabs.
+
+**Optional Google Chrome for the shared profile, for Cloudflare checks that refuse the bundled browser.**
+
+The browser patchright ships is Google Chrome for Testing, and Cloudflare can refuse it: on GOG the login challenge never clears. Turn on **Use Google Chrome for the shared profile** (Settings → Advanced → Browser, or `REAL_CHROME=1`) and Epic, Prime, GOG, Steam, FAB, Ubisoft, the watchers and Microsoft Rewards run in the Google Chrome the image now includes. Chrome is started as a normal process and the claimer attaches to it afterwards, the way P-Adamiec's Remaster does, with no locale, timezone or viewport emulation, because a Chrome launched by Playwright was refused even with its extra switches removed. These services share one browser profile, so the setting switches all of them; AliExpress, Microsoft Rewards (Mobile) and Joybuy keep their own. Existing logins carry over. Once Google Chrome has opened the profile, keep the setting on, since turning it off would open the profile in an older browser. Runs are not recorded in this mode. Needs the amd64 image. Off by default. Known gap: a GOG login through this attached Chrome passed when started by hand, but through the panel's Login button the challenge still failed in testing.
+
+---
+
 ## What's new in 2.12.37
 
 **Scheduler: the interval is no longer ignored when Microsoft Rewards runs with the main chain (#189).** With Microsoft Rewards → *Run with main chain* turned on, the scheduler switched to the old combined mode: one daily run 30 minutes before the MS window (07:30 with the default 08:00 window). Your interval from Settings → Scheduler was ignored, so "every 23 hours" still ran at 07:30 every day. Now, when you've set an interval or a start time, the claim chain follows it and Microsoft Rewards runs right after the claimers, without waiting for its window (which is what the setting's description always said). With no interval and no start time, the combined 07:30-style run is unchanged. Turning *Run with main chain* on or off in Settings now takes effect immediately instead of after a restart, and the Schedule tab shows "MS Rewards runs inline" instead of the misleading "Set START_TIME or LOOP" hint.

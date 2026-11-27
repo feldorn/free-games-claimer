@@ -7,7 +7,49 @@ import { cleanProfileLocks, localeArgs, siteLocale, handleSIGINT, datetime, file
 import { cfg } from './config.js';
 import { SITES_BY_ID } from './sites.js'; // after config.js — sites.js reads cfg
 import { keepSessionCookies } from './profile-prefs.js';
+import { androidReady, attachAndroidChrome, chromeInstalled } from './android-chrome.js';
+import { launchAttachedChrome } from './attached-chrome.js';
+import { describeConfig } from './app-config.js';
 import path from 'node:path';
+
+// Device options the Android-Chrome path sets through CDP instead. Passing them
+// to Playwright as well would put a second, inconsistent phone on the page.
+const PLAYWRIGHT_DEVICE_KEYS = ['userAgent', 'viewport', 'screen', 'deviceScaleFactor', 'isMobile', 'hasTouch', 'defaultBrowserType', 'extraHTTPHeaders'];
+
+// A site opts in with `androidChrome: true` in the registry; the user turns it
+// on with the site's own flag (cfg.ae_real_chrome for AliExpress).
+function wantsAndroidChrome(siteId) {
+  if (!SITES_BY_ID[siteId]?.androidChrome || !cfg.ae_real_chrome) return false;
+  if (chromeInstalled()) return true;
+  log.warn('AE_REAL_CHROME is on but Google Chrome is not installed in this image (arm64?), using the bundled Chromium.');
+  return false;
+}
+
+const windowSized = new WeakSet(); // contexts whose pages keep the window's own size (REAL_CHROME)
+
+/**
+ * The fixed cfg.width x cfg.height viewport the claim scripts and the panel
+ * set after launch. Skipped for Google Chrome on the shared profile
+ * (REAL_CHROME), where the window owns the size.
+ */
+export async function setDefaultViewport(page) {
+  if (windowSized.has(page.context())) return;
+  await page.setViewportSize({ width: cfg.width, height: cfg.height });
+}
+
+// REAL_CHROME: the shared desktop profile opens in Google Chrome, started as a
+// plain process with patchright attached (src/attached-chrome.js). It is all or
+// nothing for that profile, since alternating two browsers on one profile
+// would open it in an older one. Other profiles (mobile, Joybuy) are untouched.
+// Read live, not from cfg: the panel's cfg is a snapshot from its start, and
+// the Settings toggle should apply to its next login or session check.
+function wantsDesktopChrome(profileDir) {
+  const on = describeConfig().effective?.advanced?.realChrome ?? cfg.real_chrome;
+  if (!on || path.resolve(profileDir) !== path.resolve(cfg.dir.browser)) return false;
+  if (chromeInstalled()) return true;
+  log.warn('REAL_CHROME is on but Google Chrome is not installed in this image (arm64?), using the bundled Chromium.');
+  return false;
+}
 
 // Shared browser-context factory. Every claim script used to repeat the same
 // preamble verbatim — cleanProfileLocks + launchPersistentContext with the same
@@ -30,7 +72,8 @@ import path from 'node:path';
  * @param {string[]} [opts.extraArgs]  extra Chromium args appended after the base set.
  * @param {object} [opts.contextOptions]  extra launchPersistentContext options, merged last (e.g. userAgent, extraHTTPHeaders, device settings). Do not pass `args` here — use extraArgs.
  * @param {boolean} [opts.sigint]  register handleSIGINT(context) so Ctrl-C closes cleanly (default: true).
- * @returns {Promise<{ context: import('patchright').BrowserContext, page: import('patchright').Page }>}
+ * @param {string} [opts.startUrl]  REAL_CHROME only: the page Google Chrome opens on its own at startup. Ignored otherwise.
+ * @returns {Promise<{ context: import('patchright').BrowserContext, page: import('patchright').Page, opened?: boolean }>} `opened` is true when Chrome itself already opened startUrl in `page`.
  */
 export async function launchContext(siteId, {
   profileDir = cfg.dir.browser,
@@ -39,6 +82,7 @@ export async function launchContext(siteId, {
   extraArgs = [],
   contextOptions = {},
   sigint = true,
+  startUrl,
 } = {}) {
   cleanProfileLocks(profileDir);
   // The shared default profile (Epic, Prime, GOG, Steam, …) must keep session
@@ -51,6 +95,28 @@ export async function launchContext(siteId, {
     else if (r.changed) console.log('Browser profile: session cookies now kept across launches (#183)');
   }
   const locale = siteLocale(siteId);
+  const androidChrome = wantsAndroidChrome(siteId);
+  if (androidChrome) {
+    contextOptions = Object.fromEntries(Object.entries(contextOptions).filter(([k]) => !PLAYWRIGHT_DEVICE_KEYS.includes(k)));
+    contextOptions = { ...contextOptions, channel: 'chrome', viewport: null };
+  }
+  if (!androidChrome && wantsDesktopChrome(profileDir)) {
+    if (record) log.warn('REAL_CHROME: recording is not available for an attached browser, this run is not recorded.');
+    const { context } = await launchAttachedChrome(profileDir, {
+      headless: contextOptions.headless ?? cfg.headless,
+      startUrl,
+      // Only what the runs that passed GOG's Turnstile used: language, and
+      // maximized (--window-size equal to the screen leaves no room for the
+      // window frame). Not localeArgs()' translate switches: the attached
+      // Chrome has no other --disable-features for theirs to merge with.
+      args: ['--hide-crash-restore-bubble', ...localeArgs(locale).filter(a => /^--(lang|accept-lang)=/.test(a)), '--start-maximized', ...extraArgs],
+    });
+    if (sigint) handleSIGINT(context);
+    windowSized.add(context);
+    log.status('Browser', `Google Chrome ${context.browser()?.version() || ''} (attached)`);
+    const page = context.pages()[0] || await context.newPage();
+    return { context, page, opened: Boolean(startUrl) };
+  }
   const context = await chromium.launchPersistentContext(profileDir, {
     headless: cfg.headless,
     viewport: { width: cfg.width, height: cfg.height },
@@ -63,7 +129,12 @@ export async function launchContext(siteId, {
     ...contextOptions,
   });
   if (sigint) handleSIGINT(context);
+  if (androidChrome) {
+    const phone = await attachAndroidChrome(context, profileDir, { locale, maxHeight: cfg.height > 100 ? cfg.height - 40 : undefined });
+    log.status('Browser', `Google Chrome ${phone.chrome} as ${phone.model} (Android ${phone.androidVersion})`);
+  }
   const page = context.pages().length ? context.pages()[0] : await context.newPage(); // should always exist
+  if (androidChrome) await androidReady(page);
   return { context, page };
 }
 
