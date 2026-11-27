@@ -504,6 +504,9 @@ export const SITES = [
     loginUrl: 'https://m.aliexpress.com/p/coin-index/index.html',
     get browserDir() { return cfg.dir.browser + '-aliexpress'; },
     contextOptions: devices['Pixel 7'],
+    // With AE_REAL_CHROME on, launchContext() swaps contextOptions' device
+    // emulation for Google Chrome set up as an Android phone over CDP.
+    androidChrome: true,
     defaultActive: false,
     activeEnv: 'AE_ACTIVE',
     linkedWith: null,
@@ -511,6 +514,9 @@ export const SITES = [
     scheduleKind: 'daily-chain',
     features: [],
     configFields: [
+      { key: 'realChrome', env: 'AE_REAL_CHROME', type: 'boolean', default: false,
+        label: 'Use Google Chrome as an Android phone',
+        hint: 'For accounts where the login slider fails with "error: AFEDn" or the session keeps dropping. Runs AliExpress in the Google Chrome bundled with the image instead of patchright\'s Chromium, presented as one Android phone through Chrome itself (user agent, client hints, screen and touch all agree), with no injected fingerprint script. Applies to the login browser, the session check and the daily run. Needs the amd64 image; arm64 has no Google Chrome and keeps the old setup. Log in again after turning it on.' },
       { key: 'missions', env: 'AE_MISSIONS', type: 'boolean', default: false,
         label: 'Also do the browse missions and the quiz',
         hint: 'After the check-in, opens each coin-paying "visit this page" mission on the coin page and stays for the time it asks for (about 15 seconds each, so a few minutes per run), then answers the daily coin quiz. New quiz questions are a best guess; the right answer is saved for when a question comes back. Also takes the "turn on notifications" reward and the "daily check-in" mission that unlocks the quiz. Never touches missions that act on your account (cart, share), the app-only ones (farm, shortcut, widget), or the ones that ask you to click on sponsored items. Off by default — more automated activity may draw more attention from AliExpress\'s bot detection.' },
